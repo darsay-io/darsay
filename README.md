@@ -211,3 +211,15 @@ Inference runtimes work the same way: `ENGINES` in `src/modelvault/hydrate.py`
 maps detection globs to pip requirements and a standalone runner script, so an
 MLX, vLLM, or ONNX engine is a registry entry plus a runner, with no special
 cases elsewhere.
+
+## Design notes
+
+modelvault is deliberately Python: the hydration runners live inside the
+torch/transformers ecosystem, `huggingface_hub` is the reference client for
+the snapshot semantics an archive must get exactly right, and the workload is
+IO-bound glue where a compiled rewrite would buy seconds on a
+tens-of-minutes job. Longevity is carried by the **formats**, not the tool —
+plain-JSON manifests and plain-tar exports, each documented for manual
+recovery without modelvault — so the bundles outlive whatever software reads
+them next. Full rationale, accepted costs, and the revisit criteria:
+[docs/DESIGN.md](docs/DESIGN.md).

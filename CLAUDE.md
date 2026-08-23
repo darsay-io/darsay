@@ -30,6 +30,8 @@ point `modelvault` (argparse, subcommands in `cli.py`).
   contract, hydration.json).
   `docs/QUANTIZATION.md` — fidelity policy: what gets archived vs derived
   when a model has quantized variants.
+  `docs/DESIGN.md` — implementation rationale: why Python, and why bundle
+  longevity rests on the formats, not the tool.
   **Update these whenever manifest fields or the export format change**, and
   bump `SCHEMA_VERSION` (`__init__.py`) / `MVB_FORMAT_VERSION` (`export.py`)
   appropriately (major = breaking).
