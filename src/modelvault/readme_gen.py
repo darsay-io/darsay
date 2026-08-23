@@ -30,6 +30,17 @@ def human_params(n: int | None) -> str:
     return str(n)
 
 
+def _tested_hardware_line(tested: list | None) -> str:
+    if not tested:
+        return "- Tested hardware: not yet tested — `modelvault run` records the first real run"
+    parts = []
+    for e in tested:
+        label = e.get("chip") or e.get("host") or "unknown machine"
+        perf = f", {e['tokens_per_second']} tok/s" if e.get("tokens_per_second") else ""
+        parts.append(f"{label} ({e.get('device', '?')}, {e.get('engine', '?')}{perf}, {str(e.get('at', ''))[:10]})")
+    return "- Tested hardware: " + "; ".join(parts)
+
+
 def _curation_body(bundle_dir: Path) -> str | None:
     path = bundle_dir / "curation.md"
     if not path.is_file():
@@ -127,7 +138,7 @@ def render_bundle_readme(bundle_dir: Path, m: dict) -> str:
         "",
         f"- Engines (from shipped formats): {', '.join(rt['supported_engines']) if rt['supported_engines'] else 'unknown'}",
         f"- Estimated minimum RAM/VRAM: {rt['estimated_min_ram_gb']} GB (estimate, weights x1.2)",
-        f"- Tested hardware: {rt['tested_hardware'] or 'not yet tested — record after first run'}",
+        _tested_hardware_line(rt["tested_hardware"]),
         f"- CPU inference: {'yes' if rt['cpu_inference'] else 'unknown'}",
         "",
         "## Validation",
@@ -188,7 +199,16 @@ def render_bundle_readme(bundle_dir: Path, m: dict) -> str:
         "",
         "## Using this bundle",
         "",
-        "The payload under `model/` is a pristine snapshot — point any Hugging Face-compatible loader at it directly:",
+        "One command — builds (or reuses) a local env, then runs a prompt fully offline:",
+        "",
+        "```bash",
+        f"modelvault run {bundle_path} \"Say hello in one short sentence.\"",
+        "```",
+        "",
+        "(`modelvault hydrate` prepares the env without running; envs live outside the",
+        "bundle under the vault's `.runtime/` and are recorded in `hydration.json`.)",
+        "",
+        "Or point any Hugging Face-compatible loader at the pristine payload directly:",
         "",
         "```python",
         "from transformers import AutoModelForCausalLM, AutoTokenizer",

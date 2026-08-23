@@ -1,4 +1,4 @@
-# .mvb.tar — single-file bundle format (v1.0)
+# .mvb.tar — single-file bundle format (v1.1)
 
 A modelvault export packs one bundle into one file for offsite storage and
 transfer. The format is a plain tar, deliberately boring: any standard tar
@@ -13,16 +13,19 @@ tool can list and unpack it decades from now, with or without modelvault.
 - **Entry order:** the marker `<bundle_id>/.mvb.json` first, then every bundle
   file as `<bundle_id>/<path>`, sorted by path. Only regular files — no
   directory entries, no symlinks (export refuses bundles containing them).
-- **Excluded from the tar:** `exports.json` (see Determinism) and `.DS_Store`.
+- **Excluded from the tar:** `exports.json` and `hydration.json` — volatile
+  machine-local state (see Determinism; hydration/run records are meaningless
+  on another machine) — plus `.DS_Store`. (v1.1 added the `hydration.json`
+  exclusion; v1.0 readers import v1.1 files unchanged.)
 
 ## Marker (`.mvb.json`, always the first entry)
 
 ```json
 {
-  "mvb_format_version": "1.0",
+  "mvb_format_version": "1.1",
   "bundle_id": "qwen--qwen3-0.6b@c1899de289a0",
   "artifact_type": "model",
-  "schema_version": "1.0.0",
+  "schema_version": "1.1.0",
   "bundle_hash": {"algorithm": "sha256-of-sorted-sha256-lines", "value": "…", "covers": "…"},
   "payload_file_count": 10,
   "payload_size_bytes": 1519114970,

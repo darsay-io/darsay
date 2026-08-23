@@ -19,9 +19,14 @@ point `modelvault` (argparse, subcommands in `cli.py`).
 - `src/modelvault/` — `archiver.py` (download + manifest assembly),
   `verify.py`, `smoke.py`, `export.py` (.mvb.tar), `readme_gen.py`,
   `metadata.py`, `licensing.py`, `hashing.py`, `safetensors_meta.py`,
-  `schema.py` (artifact-type registry), `cli.py`.
+  `schema.py` (artifact-type registry), `hydrate.py` (ENGINES registry, env
+  management, `hydrate`/`run`), `runners/` (standalone per-engine scripts run
+  inside hydrated envs — stdlib + engine only, no modelvault imports),
+  `cli.py`.
 - `docs/MANIFEST.md` — field-by-field manifest schema reference.
   `docs/MVB-FORMAT.md` — single-file export format spec.
+  `docs/HYDRATION.md` — bundle→runnable-install design (envs, runner
+  contract, hydration.json).
   **Update these whenever manifest fields or the export format change**, and
   bump `SCHEMA_VERSION` (`__init__.py`) / `MVB_FORMAT_VERSION` (`export.py`)
   appropriately (major = breaking).
@@ -35,9 +40,9 @@ point `modelvault` (argparse, subcommands in `cli.py`).
   metadata files; the bundle hash covers `model/` only.
 - **Export determinism:** the same bundle state must produce a byte-identical
   `.mvb.tar` (sorted entries, marker first, normalized tar metadata, no wall
-  clock inside the tar). Volatile data — like export logs — goes in
-  `exports.json`, which is excluded from exports. Check: export twice,
-  compare SHA-256.
+  clock inside the tar). Volatile machine-local data — export logs, hydration
+  and run records — goes in `exports.json` / `hydration.json`, which are
+  excluded from exports. Check: export twice, compare SHA-256.
 - **Record, don't fabricate:** manifests contain only what was established
   from upstream or the payload; unknown = `null` (curator fills in later).
   Query caps must be recorded (`query_limit`), never silently truncated.
@@ -47,4 +52,9 @@ point `modelvault` (argparse, subcommands in `cli.py`).
   (`regen`); `curation.md` is the curator's file and must never be
   overwritten once it exists.
 - **Extensibility:** new artifact types are added via the `ARTIFACT_TYPES`
-  registry in `schema.py`, not by special-casing elsewhere.
+  registry in `schema.py`, and new inference runtimes via the `ENGINES`
+  registry in `hydrate.py` — not by special-casing elsewhere.
+- **Hydration is disposable:** envs live outside bundles (under
+  `<vault>/.runtime/`, shared and content-keyed); deleting `hydration.json`
+  or any env must never lose archival data. Inference runs are offline
+  (`HF_HUB_OFFLINE=1`) so a passing run proves payload self-sufficiency.

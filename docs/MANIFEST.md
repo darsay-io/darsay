@@ -1,4 +1,4 @@
-# manifest.json — schema reference (v1.0.0)
+# manifest.json — schema reference (v1.1.0)
 
 `manifest.json` is the machine-readable source of truth for a bundle. This
 document describes every field so a bundle remains interpretable without the
@@ -17,7 +17,7 @@ Conventions:
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | Version of this schema (`"1.0.0"`). |
+| `schema_version` | Version of this schema (`"1.1.0"`; 1.1 defined the shape of `runtime.tested_hardware`, previously always null). |
 | `artifact_type` | Registry key driving completeness rules (`"model"`; future: datasets, GGUF packs, papers — see `src/modelvault/schema.py`). |
 | `bundle_id` | `<repo_id lowercased, "/"→"--">@<first 12 of pinned commit>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Stable, deterministic, unique per (repo, revision). |
 
@@ -96,7 +96,7 @@ torch required).
 |---|---|
 | `supported_engines` | Derived from shipped formats only (safetensors → transformers, gguf → llama.cpp). |
 | `estimated_min_ram_gb`, `estimated_min_vram_gb` | Estimates: weight bytes × 1.2. |
-| `tested_hardware` | **curator** — record after actually running the model. |
+| `tested_hardware` | Measured runs, never estimates. `modelvault run` appends/refreshes one entry per (host, device, engine) on each successful run: `{at, host, os, chip, device, engine, engine_versions, tokens_per_second, status, via}`. Curators may add entries by hand in the same shape. Null until the model has actually run somewhere. |
 | `os_support`, `cuda_notes`, `rocm_notes`, `cpu_inference` | Coarse defaults; refine by hand. |
 | `notes` | States the estimation method. |
 
@@ -135,7 +135,10 @@ Statuses: `pass` / `fail` / `skipped` (dependency or file missing) / `not-run`.
 
 Export events are logged in the sibling file `exports.json`
 (`{"exports": [{at, file, sha256, size_bytes, mvb_format_version}]}`), not in
-the manifest — see [MVB-FORMAT.md](MVB-FORMAT.md) for why.
+the manifest — see [MVB-FORMAT.md](MVB-FORMAT.md) for why. Hydration state and
+run history live in the sibling file `hydration.json` for the same reason:
+both are volatile machine-local state, excluded from exports — see
+[HYDRATION.md](HYDRATION.md).
 
 ## `security`
 

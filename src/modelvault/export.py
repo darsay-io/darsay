@@ -30,11 +30,12 @@ from pathlib import Path
 from .hashing import bundle_hash, hash_file, iter_payload_files
 
 # Bump major on incompatible layout changes; import requires a matching major.
-MVB_FORMAT_VERSION = "1.0"
+MVB_FORMAT_VERSION = "1.1"
 MARKER_NAME = ".mvb.json"
 
-# Bundle-root files that never go into an export.
-EXPORT_EXCLUDE = {"exports.json", ".DS_Store"}
+# Bundle-root files that never go into an export: volatile machine-local state
+# (export log, hydration/run records) and OS noise.
+EXPORT_EXCLUDE = {"exports.json", "hydration.json", ".DS_Store"}
 
 
 def _bundle_files(bundle_dir: Path) -> list[tuple[str, Path]]:

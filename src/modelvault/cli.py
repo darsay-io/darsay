@@ -8,6 +8,10 @@
     modelvault regen   vault/<bundle>           rebuild README.md after editing curation.md
     modelvault export  vault/<bundle> [-o DIR]  pack into a single deterministic .mvb.tar
     modelvault import  <file.mvb.tar>           unpack + verify into the vault
+    modelvault hydrate vault/<bundle>           build a runnable env for the bundle
+    modelvault run     vault/<bundle> [PROMPT]  hydrate if needed, then generate (offline)
+    modelvault dehydrate vault/<bundle>         drop the bundle's hydration record
+    modelvault envs [--prune]                   list / clean up shared runtime envs
 """
 
 from __future__ import annotations
@@ -106,6 +110,16 @@ def cmd_info(args) -> int:
     print(f"  integrity:  {m['security']['integrity_status']}  last check {m['archive']['last_integrity_check']}")
     smoke = m["validation"]["smoke_tests"]
     print(f"  smoke:      tokenizer={smoke['tokenizer']['status']} inference={smoke['inference']['status']}")
+    from .hydrate import load_hydration
+
+    hyd = load_hydration(bundle)
+    if hyd:
+        last = hyd["runs"][-1] if hyd.get("runs") else None
+        run_note = (f"last run {last['status']} ({last['at'][:10]}, {last.get('tokens_per_second')} tok/s)"
+                    if last else "no runs yet")
+        print(f"  hydration:  {hyd['engine']} in env {hyd['env']['key']} — {run_note}")
+    else:
+        print(f"  hydration:  not hydrated (modelvault hydrate {bundle})")
     m["archive"]["last_accessed"] = utc_now()
     write_manifest(bundle, m)
     return 0
@@ -123,6 +137,70 @@ def cmd_import(args) -> int:
     from .export import import_bundle
 
     import_bundle(Path(args.file), _vault_path(args), force=args.force)
+    return 0
+
+
+def cmd_hydrate(args) -> int:
+    from .hydrate import hydrate_bundle
+
+    record = hydrate_bundle(
+        _bundle_dir(args.bundle),
+        engine=args.engine,
+        python=args.python,
+        weights=args.weights,
+        force=args.force,
+        dry_run=args.dry_run,
+    )
+    if record.get("dry_run"):
+        return 0
+    return 0 if record["probe"].get("status") == "pass" else 1
+
+
+def cmd_run(args) -> int:
+    from .hydrate import run_bundle
+
+    record = run_bundle(
+        _bundle_dir(args.bundle),
+        prompt=args.prompt,
+        engine=args.engine,
+        max_new_tokens=args.max_new_tokens,
+        raw=args.raw,
+        sample=args.sample,
+        device=args.device,
+        dtype=args.dtype,
+        trust_remote_code=args.trust_remote_code,
+        seed=args.seed,
+        timeout=args.timeout,
+        python=args.python,
+        weights=args.weights,
+    )
+    return 0 if record["status"] == "pass" else 1
+
+
+def cmd_dehydrate(args) -> int:
+    from .hydrate import dehydrate_bundle
+
+    dehydrate_bundle(_bundle_dir(args.bundle))
+    return 0
+
+
+def cmd_envs(args) -> int:
+    from .hydrate import list_envs, prune_envs
+    from .readme_gen import human_size
+
+    vault = _vault_path(args)
+    if args.prune:
+        prune_envs(vault)
+        return 0
+    envs = list_envs(vault)
+    if not envs:
+        print(f"No runtime envs under {vault}/.runtime/envs/ (or $MODELVAULT_RUNTIME)")
+        return 0
+    for env in envs:
+        used = ", ".join(env["used_by"]) or "UNREFERENCED (candidate for --prune)"
+        print(f"{env['key']}  python {env['python']}  {human_size(env['size_bytes'])}  created {env['created_at'][:10]}")
+        print(f"  {env['path']}")
+        print(f"  used by: {used}")
     return 0
 
 
@@ -168,6 +246,39 @@ def main(argv=None) -> int:
     p = sub.add_parser("regen", help="rebuild a bundle's README.md from manifest + curation.md")
     p.add_argument("bundle")
     p.set_defaults(func=cmd_regen)
+
+    p = sub.add_parser("hydrate", help="build (or reuse) a runnable local env for a bundle")
+    p.add_argument("bundle")
+    p.add_argument("--engine", help="runtime engine (default: auto-detect from the payload)")
+    p.add_argument("--python", help="interpreter for the env (default: $MODELVAULT_PYTHON or this python)")
+    p.add_argument("--weights", help="payload weights file for single-file engines, e.g. model/foo.gguf")
+    p.add_argument("--force", action="store_true", help="rebuild the env even if it exists")
+    p.add_argument("--dry-run", action="store_true", help="show the plan without touching anything")
+    p.set_defaults(func=cmd_hydrate)
+
+    p = sub.add_parser("run", help="run a prompt against a bundle (hydrates first if needed; fully offline)")
+    p.add_argument("bundle")
+    p.add_argument("prompt", nargs="?", help='prompt text (default: "Say hello in one short sentence.")')
+    p.add_argument("--engine", help="runtime engine (default: the hydrated one, else auto-detect)")
+    p.add_argument("--max-new-tokens", type=int, default=256)
+    p.add_argument("--device", default="auto", help="auto | cpu | cuda | mps")
+    p.add_argument("--dtype", default="auto", help="transformers only: auto | float32 | bfloat16 | float16")
+    p.add_argument("--raw", action="store_true", help="plain completion — skip the chat template")
+    p.add_argument("--sample", action="store_true", help="sample with the model's generation defaults (default: greedy)")
+    p.add_argument("--seed", type=int, help="seed for --sample")
+    p.add_argument("--trust-remote-code", action="store_true", help="allow custom modeling code from the payload")
+    p.add_argument("--timeout", type=float, help="kill the run after N seconds")
+    p.add_argument("--python", help="interpreter if hydration is needed")
+    p.add_argument("--weights", help="weights file if hydration is needed (single-file engines)")
+    p.set_defaults(func=cmd_run)
+
+    p = sub.add_parser("dehydrate", help="remove a bundle's hydration record (envs are shared; prune via `envs --prune`)")
+    p.add_argument("bundle")
+    p.set_defaults(func=cmd_dehydrate)
+
+    p = sub.add_parser("envs", help="list shared runtime envs and which bundles use them")
+    p.add_argument("--prune", action="store_true", help="delete envs no hydrated bundle references")
+    p.set_defaults(func=cmd_envs)
 
     p = sub.add_parser("export", help="pack a bundle into a single deterministic .mvb.tar file")
     p.add_argument("bundle")
