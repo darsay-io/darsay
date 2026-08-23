@@ -1,93 +1,94 @@
 # model-vault
 
+Tools for downloading and archiving **full model ecosystems** as reproducible,
+auditable bundles — museum-grade curation that stays directly usable.
 
+`modelvault` pulls a model repo from Hugging Face at a pinned revision, hashes
+every file (SHA-256, plus BLAKE3 when available), cross-checks each file
+against upstream LFS/git checksums, captures the license verbatim with rights
+flags, extracts model metadata straight from the payload (parameter counts are
+read from safetensors headers — no torch needed), snapshots the downstream
+ecosystem (quantizations, GGUFs, finetunes), and writes it all into a bundle
+that any Hugging Face-compatible loader can use as-is.
 
-## Getting started
+## Install
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
-
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e .                 # core: huggingface_hub only
+.venv/bin/pip install -e ".[fast-hash,smoke]"   # + blake3, tokenizers
+.venv/bin/pip install -e ".[inference]"    # + transformers/torch for inference smoke test
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/archive-dawn/model-vault.git
-git branch -M main
-git push -uf origin main
-```
-
-## Integrate with your tools
-
-* [Set up project integrations](https://gitlab.com/archive-dawn/model-vault/-/settings/integrations)
-
-## Collaborate with your team
-
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
-
-## Test and Deploy
-
-Use the built-in continuous integration in GitLab.
-
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
-
-***
-
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
 
 ## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+```bash
+modelvault archive Qwen/Qwen3-0.6B          # download + hash + manifest + reports
+modelvault verify vault/qwen--qwen3-0.6b/<rev>    # re-hash, detect tampering
+modelvault smoke  vault/qwen--qwen3-0.6b/<rev> [--inference]
+modelvault list                             # inventory of the whole vault
+modelvault info   vault/qwen--qwen3-0.6b/<rev>
+modelvault regen  vault/qwen--qwen3-0.6b/<rev>    # rebuild README after editing curation.md
+```
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+The vault root defaults to `./vault` (override with `--vault` or
+`$MODELVAULT_HOME`). Bundles are gitignored — they are large binary payloads
+that live on disk or in your backup tier, not in this repo.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+## Bundle layout
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+```
+vault/qwen--qwen3-0.6b/<revision12>/
+├── model/              # immutable payload: pristine snapshot of the upstream repo
+├── manifest.json       # machine-readable record (the source of truth)
+├── README.md           # human-readable summary, generated from the manifest
+├── VERIFICATION.md     # latest verification report
+├── verification.json   # verification history (last 50 runs)
+├── curation.md         # curator's notes — the only hand-edited file
+└── LICENSE             # upstream license text, surfaced at the root
+```
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+The payload under `model/` is **immutable after archiving**; the bundle hash
+covers it alone. Metadata at the bundle root is mutable by design, so
+verification runs, curation notes, and access timestamps never disturb the
+archived artifact. To use the model, point `transformers` (or any HF-compatible
+loader) at `<bundle>/model` — no unpacking or conversion needed.
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+## What the manifest records
 
-## License
-For open source projects, say how it is licensed.
+| Section | Contents |
+|---|---|
+| `identity` | model name, family, publisher, version, release date, bundle id |
+| `source` | origin, repo id, pinned commit, download timestamp, downloader tool versions, mirrors, signatures, upstream popularity + tags at archive time |
+| `licensing` | SPDX id, license files, commercial-use / redistribution / modification / attribution flags, patent grant, trademark terms, manual-review flag |
+| `inventory` | per-file size + SHA-256 (+BLAKE3), upstream LFS/git checksums with match status, deterministic bundle hash, expected layout |
+| `model_metadata` | parameter count (by dtype, read from safetensors headers), architecture, context length, precision/quantization, tokenizer class + vocab + special tokens + chat template, languages, training cutoff |
+| `runtime` | supported engines (from shipped formats), estimated min RAM/VRAM, tested hardware, OS support, CUDA/ROCm notes, CPU inference |
+| `validation` | checksum verification, completeness against artifact-type rules, tokenizer + inference smoke tests |
+| `relationships` | base/parent model, finetuned-from, known quantizations + GGUF repos + finetune counts (snapshot at archive time) |
+| `archive` | date archived, location, host, storage tier, backup status, replicas, last integrity check, last access |
+| `security` | integrity status, unexpected-change flags (modified/missing/extra files), trust level, review notes |
+| `curation` | historical significance, capabilities, limitations, successors, personal notes (via `curation.md`) |
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+`schema_version` is recorded in every manifest; `verification.json` keeps an
+auditable history of every integrity check.
+
+## Verification model
+
+- **At archive time** every file is checked against upstream expectations:
+  LFS files against their upstream SHA-256, small files against their git blob
+  SHA-1 (computed locally). Result: `verified-against-upstream`.
+- **`modelvault verify`** re-hashes the payload and diffs it against the
+  manifest: modified, missing, and extra files are flagged in
+  `security.unexpected_changes`, integrity status flips to `compromised`, and
+  the command exits non-zero — suitable for cron.
+- The **bundle hash** (SHA-256 over the sorted per-file hash lines) gives a
+  single value that fingerprints the entire payload.
+
+## Extending to new artifact types
+
+The design is registry-based so new artifact types slot in later. A bundle's
+`artifact_type` drives completeness rules from `ARTIFACT_TYPES` in
+`src/modelvault/schema.py` — add an entry (e.g. `dataset`, `gguf-pack`,
+`paper`) with its required/recommended file patterns, plus an extractor if it
+has structured metadata, and the verify/report machinery works unchanged.

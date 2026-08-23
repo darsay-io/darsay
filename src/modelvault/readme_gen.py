@@ -1,0 +1,230 @@
+"""Generate the human-readable bundle README.md from manifest.json + curation.md.
+
+The README is a derived view: edit curation.md (notes) or manifest.json
+(structured fields), then `modelvault regen` to rebuild it.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+
+def human_size(n: int | None) -> str:
+    if n is None:
+        return "?"
+    size = float(n)
+    for unit in ("B", "KiB", "MiB", "GiB", "TiB"):
+        if size < 1024 or unit == "TiB":
+            return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} B"
+        size /= 1024
+    return f"{n} B"
+
+
+def human_params(n: int | None) -> str:
+    if n is None:
+        return "unknown"
+    if n >= 1e9:
+        return f"{n / 1e9:.2f}B"
+    if n >= 1e6:
+        return f"{n / 1e6:.1f}M"
+    return str(n)
+
+
+def _curation_body(bundle_dir: Path) -> str | None:
+    path = bundle_dir / "curation.md"
+    if not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8")
+    # Include from the first section heading on (skips the H1 + instruction note),
+    # demoting headings one level so they nest under the README's "## Curation".
+    idx = text.find("\n## ")
+    if idx == -1:
+        return None
+    body = text[idx + 1:].strip()
+    return "\n".join("#" + line if line.startswith("## ") else line for line in body.splitlines())
+
+
+def render_bundle_readme(bundle_dir: Path, m: dict) -> str:
+    ident = m["identity"]
+    src = m["source"]
+    lic = m["licensing"]
+    inv = m["inventory"]
+    meta = m["model_metadata"]
+    rt = m["runtime"]
+    val = m["validation"]
+    rel = m["relationships"]
+    arc = m["archive"]
+    sec = m["security"]
+
+    check = val["checksum_verification"]
+    tok_smoke = val["smoke_tests"]["tokenizer"]["status"]
+    inf_smoke = val["smoke_tests"]["inference"]["status"]
+
+    lines = [
+        f"# {ident['publisher']} / {ident['model_name']}",
+        "",
+        f"> Archived model bundle `{m['bundle_id']}` — schema v{m['schema_version']}, artifact type `{m['artifact_type']}`.",
+        "",
+        "| | |",
+        "|---|---|",
+        f"| **Family** | {ident['family']} |",
+        f"| **Publisher** | {ident['publisher']} |",
+        f"| **Version** | {ident['version'] or '—'} |",
+        f"| **Released** | {ident['release_date'] or 'unknown'} |",
+        f"| **Parameters** | {human_params(meta['parameter_count'])} ({meta['precision'] or '?'}) |",
+        f"| **Architecture** | {meta['architecture'] or '?'} ({meta['model_type'] or '?'}) |",
+        f"| **Context length** | {meta['context_length'] or '?'} |",
+        f"| **License** | {lic['name'] or lic['spdx_id'] or 'UNKNOWN'} |",
+        f"| **Payload** | {inv['file_count']} files, {human_size(inv['total_size_bytes'])} |",
+        f"| **Integrity** | {sec['integrity_status']} (last check {arc['last_integrity_check']}) |",
+        "",
+        "## Source & provenance",
+        "",
+        f"- Origin: [{src['repo_id']}]({src['upstream_url']}) on {src['origin']}",
+        f"- Pinned revision: `{src['revision']}` (ref `{src['revision_ref']}`, last modified upstream {src['last_modified_upstream'] or '?'})",
+        f"- Downloaded: {src['download_timestamp']} by {src['downloader']['tool']} v{src['downloader']['version']} "
+        f"(huggingface_hub {src['downloader']['huggingface_hub']}, Python {src['downloader']['python']})",
+        f"- Signatures: {src['signatures'] or 'none provided upstream'}",
+    ]
+    stats = src.get("upstream_stats_at_archive") or {}
+    if stats.get("downloads_last_month") is not None:
+        lines.append(f"- Upstream popularity at archive time: {stats['downloads_last_month']:,} downloads/month, "
+                     f"{stats.get('likes', 0):,} likes")
+
+    def flag(v):
+        return {True: "yes", False: "no", None: "review required"}[v]
+
+    lines += [
+        "",
+        "## Licensing",
+        "",
+        f"- SPDX: `{lic['spdx_id'] or 'unknown'}`" + (" — **needs manual review**" if lic["needs_manual_review"] else ""),
+        f"- Commercial use: {flag(lic['commercial_use'])} · Redistribution: {flag(lic['redistribution'])} · "
+        f"Modification: {flag(lic['modification'])} · Attribution required: {flag(lic['attribution_required'])}",
+        f"- License text in bundle: {', '.join('`' + f + '`' for f in lic['license_files']) or 'NONE SHIPPED UPSTREAM'}",
+    ]
+    if lic["trademark_terms"]:
+        lines.append(f"- Trademark terms: {lic['trademark_terms']}")
+    if lic["notes"]:
+        lines.append(f"- Note: {lic['notes']}")
+
+    tok = meta["tokenizer"]
+    lines += [
+        "",
+        "## Model metadata",
+        "",
+        f"- Parameters: {meta['parameter_count']:,}" if meta["parameter_count"] else "- Parameters: unknown",
+        f"- Layers {meta['num_hidden_layers']} · hidden {meta['hidden_size']} · heads {meta['num_attention_heads']}"
+        + (f" (KV {meta['num_key_value_heads']})" if meta.get("num_key_value_heads") else ""),
+        f"- Precision: {meta['precision'] or '?'} · Quantization: {meta['quantization'] or 'none'}"
+        f" · Shards: {meta['weight_shards'] or '?'}",
+        f"- Tokenizer: {tok['class'] or '?'}, vocab {tok['vocab_size'] or '?'}, "
+        f"chat template {'present' if tok['chat_template_present'] else 'absent'}",
+        f"- Languages (per model card): {', '.join(meta['languages']) if meta['languages'] else 'not declared'}",
+        f"- Training cutoff: {meta['training_cutoff'] or 'not published'}",
+        "",
+        "## Runtime",
+        "",
+        f"- Engines (from shipped formats): {', '.join(rt['supported_engines']) if rt['supported_engines'] else 'unknown'}",
+        f"- Estimated minimum RAM/VRAM: {rt['estimated_min_ram_gb']} GB (estimate, weights x1.2)",
+        f"- Tested hardware: {rt['tested_hardware'] or 'not yet tested — record after first run'}",
+        f"- CPU inference: {'yes' if rt['cpu_inference'] else 'unknown'}",
+        "",
+        "## Validation",
+        "",
+        f"- Checksums: **{check['status'].upper()}** at {check['at']} ({check['files_checked']} files)",
+        f"- Completeness: **{val['completeness']['status']}**"
+        + (f" — missing recommended: {', '.join(val['completeness']['missing_recommended'])}"
+           if val["completeness"].get("missing_recommended") else ""),
+        f"- Smoke tests: tokenizer `{tok_smoke}`, inference `{inf_smoke}`",
+        f"- Full report: [VERIFICATION.md](VERIFICATION.md) · history in `verification.json`",
+        "",
+        "## Relationships",
+        "",
+        f"- Base / finetuned from: {rel['base_model'] or 'none declared (base model)'}",
+    ]
+    if rel.get("gguf_repos"):
+        shown = rel["gguf_repos"][:8]
+        more = len(rel["gguf_repos"]) - len(shown)
+        lines.append(f"- Known GGUF conversions ({len(rel['gguf_repos'])}): "
+                     + ", ".join(f"`{g}`" for g in shown) + (f" … +{more} more" if more > 0 else ""))
+    cap = rel.get("query_limit") or 100
+
+    def capped(n):
+        return f"≥{n} (query capped)" if n == cap else str(n)
+
+    if rel.get("quantized_versions"):
+        lines.append(f"- Known quantizations at archive time: {capped(len(rel['quantized_versions']))} repos (full list in manifest)")
+    if rel.get("finetunes_count") is not None:
+        lines.append(f"- Public finetunes at archive time: {capped(rel['finetunes_count'])}"
+                     + (f" · adapters: {capped(rel['adapters_count'])}" if rel.get("adapters_count") is not None else ""))
+    lines.append(f"- Ecosystem snapshot taken: {rel.get('ecosystem_snapshot_as_of', 'n/a')}")
+
+    lines += [
+        "",
+        "## Archive record",
+        "",
+        f"- Archived: {arc['date_archived']} on `{arc['host']}` ({arc['storage_tier']})",
+        f"- Location: `{arc['location']}`",
+        f"- Backups: {arc['backup_status']} · Replicas: {len(arc['replicas'])}",
+        f"- Trust level: {sec['trust_level']}"
+        + (f" — reviewed by {sec['reviewed_by']}" if sec.get("reviewed_by") else ""),
+        "",
+        "## Inventory",
+        "",
+        f"Bundle hash (`{inv['bundle_hash']['algorithm']}`): `{inv['bundle_hash']['value']}`",
+        "",
+        "| File | Size | SHA-256 (first 16) | Upstream match |",
+        "|---|---|---|---|",
+    ]
+    for f in inv["files"]:
+        match = {True: "✓", False: "✗ MISMATCH", None: "—"}[f["verified_against_upstream"]]
+        lines.append(f"| `{f['path']}` | {human_size(f['size'])} | `{f['sha256'][:16]}…` | {match} |")
+    lines.append("\nFull hashes (SHA-256" + (", BLAKE3" if any(f.get("blake3") for f in inv["files"]) else "")
+                 + ", upstream LFS/git) are in `manifest.json`.")
+
+    bundle_path = arc["location"]
+    lines += [
+        "",
+        "## Using this bundle",
+        "",
+        "The payload under `model/` is a pristine snapshot — point any Hugging Face-compatible loader at it directly:",
+        "",
+        "```python",
+        "from transformers import AutoModelForCausalLM, AutoTokenizer",
+        "",
+        f'path = "{bundle_path}/model"',
+        "tokenizer = AutoTokenizer.from_pretrained(path)",
+        'model = AutoModelForCausalLM.from_pretrained(path, torch_dtype="auto")',
+        "```",
+        "",
+        "## Reproduce & audit",
+        "",
+        "```bash",
+        "# Re-verify this bundle against its manifest",
+        f"modelvault verify {bundle_path}",
+        "",
+        "# Re-create an identical bundle from upstream (bit-for-bit payload)",
+        f"modelvault archive {src['repo_id']} --revision {src['revision']}",
+        "```",
+    ]
+
+    curation = _curation_body(bundle_dir)
+    lines += ["", "## Curation", ""]
+    if curation:
+        lines.append(curation)
+    else:
+        lines.append("_No curation notes yet — edit `curation.md` and run `modelvault regen`._")
+
+    lines += [
+        "",
+        "---",
+        f"_Generated by modelvault from `manifest.json` (schema v{m['schema_version']}). "
+        "Do not edit this file directly; edit `curation.md` or the manifest and run `modelvault regen`._",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def write_bundle_readme(bundle_dir: Path, manifest: dict) -> None:
+    (bundle_dir / "README.md").write_text(render_bundle_readme(bundle_dir, manifest), encoding="utf-8")

@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "modelvault"
+version = "0.1.0"
+description = "Download, archive, and curate full model ecosystems as reproducible, auditable bundles"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+dependencies = [
+    "huggingface_hub>=0.24",
+]
+
+[project.optional-dependencies]
+# Faster secondary hash recorded alongside SHA-256
+fast-hash = ["blake3"]
+# Tokenizer round-trip smoke test without pulling in torch
+smoke = ["tokenizers"]
+# Full inference smoke test
+inference = ["transformers", "torch"]
+
+[project.scripts]
+modelvault = "modelvault.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

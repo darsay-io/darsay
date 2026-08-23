@@ -1,0 +1,7 @@
+# Archived bundles are large binary payloads; they live on disk, not in git.
+vault/
+
+.venv/
+__pycache__/
+*.egg-info/
+.DS_Store
