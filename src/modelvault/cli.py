@@ -1,5 +1,6 @@
 """modelvault CLI.
 
+    modelvault estimate Qwen/Qwen3-0.6B         preflight: size, params, disk — no download
     modelvault archive Qwen/Qwen3-0.6B          download + hash + manifest + reports
     modelvault verify  vault/<bundle>           re-hash and compare against manifest
     modelvault smoke   vault/<bundle> [--inference]
@@ -34,6 +35,24 @@ def _bundle_dir(path_str: str) -> Path:
     if not (bundle / "manifest.json").is_file():
         sys.exit(f"error: no manifest.json in {bundle} — not a modelvault bundle")
     return bundle
+
+
+def cmd_estimate(args) -> int:
+    from .estimate import estimate_repo, print_estimate
+
+    est = estimate_repo(
+        args.repo_id,
+        revision=args.revision,
+        vault=_vault_path(args),
+        include=args.include,
+        variants=args.variants,
+        progress=(lambda *a: None) if args.json else print,
+    )
+    if args.json:
+        print(json.dumps(est, indent=2, ensure_ascii=False))
+    else:
+        print_estimate(est)
+    return 1 if est["disk"]["verdict"] == "insufficient" else 0
 
 
 def cmd_archive(args) -> int:
@@ -220,6 +239,17 @@ def main(argv=None) -> int:
     parser.add_argument("--version", action="version", version=f"modelvault {__version__}")
     parser.add_argument("--vault", help="vault root (default: $MODELVAULT_HOME or ./vault)")
     sub = parser.add_subparsers(dest="command", required=True)
+
+    p = sub.add_parser("estimate", help="preflight a repo: size, params, disk headroom — no download")
+    p.add_argument("repo_id", help="e.g. Qwen/Qwen3.8-27B")
+    p.add_argument("--revision", help="branch, tag, or commit (default: main)")
+    p.add_argument("--include", action="append", metavar="GLOB",
+                   help="count only payload files matching GLOB (repeatable), "
+                        "e.g. --include '*Q4_K_M*' to size one GGUF quant of a pack repo")
+    p.add_argument("--variants", action="store_true",
+                   help="also list upstream quantized variants of this model, with sizes")
+    p.add_argument("--json", action="store_true", help="machine-readable output")
+    p.set_defaults(func=cmd_estimate)
 
     p = sub.add_parser("archive", help="download and archive a model repo as a bundle")
     p.add_argument("repo_id", help="e.g. Qwen/Qwen3-0.6B")

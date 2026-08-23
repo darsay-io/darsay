@@ -17,6 +17,7 @@ point `modelvault` (argparse, subcommands in `cli.py`).
 ## Layout
 
 - `src/modelvault/` — `archiver.py` (download + manifest assembly),
+  `estimate.py` (read-only preflight: sizes/params/disk from Hub metadata),
   `verify.py`, `smoke.py`, `export.py` (.mvb.tar), `readme_gen.py`,
   `metadata.py`, `licensing.py`, `hashing.py`, `safetensors_meta.py`,
   `schema.py` (artifact-type registry), `hydrate.py` (ENGINES registry, env
@@ -27,6 +28,8 @@ point `modelvault` (argparse, subcommands in `cli.py`).
   `docs/MVB-FORMAT.md` — single-file export format spec.
   `docs/HYDRATION.md` — bundle→runnable-install design (envs, runner
   contract, hydration.json).
+  `docs/QUANTIZATION.md` — fidelity policy: what gets archived vs derived
+  when a model has quantized variants.
   **Update these whenever manifest fields or the export format change**, and
   bump `SCHEMA_VERSION` (`__init__.py`) / `MVB_FORMAT_VERSION` (`export.py`)
   appropriately (major = breaking).

@@ -11,7 +11,10 @@ read from safetensors headers — no torch needed), snapshots the downstream
 ecosystem (quantizations, GGUFs, finetunes), and writes it all into a bundle
 that any Hugging Face-compatible loader can use as-is. When you want to hear
 the archived model speak, `modelvault run <bundle>` takes it from cold storage
-to a local inference — building the environment for you — in one command.
+to a local inference — building the environment for you — in one command. And
+before committing tens of gigabytes, `modelvault estimate` prices a repo from
+Hub metadata alone — exact sizes, parameter counts, disk headroom, and its
+quantized ecosystem — without downloading a byte.
 
 ## Install
 
@@ -28,6 +31,8 @@ of them — hydration builds its own isolated env per engine (see below).
 ## Usage
 
 ```bash
+modelvault estimate Qwen/Qwen3.8-27B --variants   # preflight: size, params, disk, quantized ecosystem — no download
+modelvault estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'   # price one quant of a pack repo
 modelvault archive Qwen/Qwen3-0.6B          # download + hash + manifest + reports
 modelvault verify vault/qwen--qwen3-0.6b/<rev>    # re-hash, detect tampering
 modelvault smoke  vault/qwen--qwen3-0.6b/<rev> [--inference]
@@ -87,6 +92,58 @@ loader) at `<bundle>/model` — no unpacking or conversion needed.
 `schema_version` is recorded in every manifest; `verification.json` keeps an
 auditable history of every integrity check. Full field-by-field reference:
 [docs/MANIFEST.md](docs/MANIFEST.md).
+
+## Estimating before you archive
+
+A 27B model is a 50+ GB commitment; `modelvault estimate` prices it first.
+It is a read-only preflight against the Hub API — nothing downloaded, nothing
+written: the pinned revision's exact file inventory, parameter counts by dtype
+(published in the Hub's safetensors metadata), the engines the payload will
+support, a completeness pre-check against the artifact-type rules, and a disk
+verdict for the target vault. The command exits non-zero when free space is
+insufficient, so it doubles as a guard in scripts. Upstream numbers are
+reported as facts; derived figures (min RAM, download scratch) are labeled
+estimates — the manifest's record-don't-fabricate rule applies even to a
+command that writes nothing.
+
+```
+$ modelvault estimate Qwen/Qwen3.8-27B
+
+Qwen/Qwen3.8-27B @ main -> 1d4bf0f2ff60
+  image-text-to-text | license apache-2.0
+  parameters:   27.78B BF16  [upstream safetensors metadata]
+  payload:      32 files, 51.8 GiB
+                weights 51.7 GiB in 18 files (largest 3.7 GiB: model-00004-of-00018.safetensors)
+                support 22.0 MiB in 14 files
+  engines:      transformers
+  completeness: complete
+  estimated:    download scratch +3.7 GiB (largest file in flight), min RAM/VRAM 62.1 GB (weight bytes x1.2)
+  bundle:       vault/qwen--qwen3.8-27b/1d4bf0f2ff60  (new)
+  disk:         needs ~55.5 GiB, free 1022.6 GiB — OK
+
+To archive: modelvault archive Qwen/Qwen3.8-27B
+```
+
+`--variants` additionally lists the model's quantized ecosystem (via the
+Hub's `base_model:quantized` relation), sized for the most-downloaded repos
+with the query caps recorded in the output. `--include GLOB` prices a subset
+of a repo — e.g. the single Q4_K_M file (15.3 GiB) inside a 439.7 GiB GGUF
+pack — and warns that `archive` itself has no subset mode yet. `--json`
+emits the full machine-readable estimate.
+
+## Quantized models: fidelity first
+
+When a model ships in many precisions, the canonical bundle is the
+**highest-fidelity upstream release**, archived byte-exact — the master is
+the negative, quants are prints. Published quants that matter historically
+(the official FP8, the community-standard GGUF) are archived as ordinary
+**satellite bundles**: most are calibration-based (AWQ/GPTQ, imatrix GGUFs,
+curated FP8 layer maps) and can never be regenerated bit-exact from the
+master, so if it matters what people actually ran, the bytes themselves must
+be kept. Everything else — running the model smaller on your own hardware —
+is disposable hydration-time derivation, never archival. The full policy,
+with the Qwen3.8-27B case study and the proposed `archive --include` /
+`hydrate --quantize` mechanics: [docs/QUANTIZATION.md](docs/QUANTIZATION.md).
 
 ## Verification model
 

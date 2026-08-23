@@ -1,6 +1,6 @@
 """modelvault: archive full model ecosystems as reproducible, auditable bundles."""
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 # Version of the manifest.json schema, independent of the tool version.
 # Bump the major component on breaking layout changes; consumers should
