@@ -47,6 +47,7 @@ vault/qwen--qwen3-0.6b/<revision12>/
 ├── VERIFICATION.md     # latest verification report
 ├── verification.json   # verification history (last 50 runs)
 ├── curation.md         # curator's notes — the only hand-edited file
+├── exports.json        # log of single-file exports (appears after first export)
 └── LICENSE             # upstream license text, surfaced at the root
 ```
 
@@ -73,7 +74,8 @@ loader) at `<bundle>/model` — no unpacking or conversion needed.
 | `curation` | historical significance, capabilities, limitations, successors, personal notes (via `curation.md`) |
 
 `schema_version` is recorded in every manifest; `verification.json` keeps an
-auditable history of every integrity check.
+auditable history of every integrity check. Full field-by-field reference:
+[docs/MANIFEST.md](docs/MANIFEST.md).
 
 ## Verification model
 
@@ -104,7 +106,9 @@ to a staging directory (safe extraction filter), re-hashes the entire payload
 against the embedded manifest and marker bundle hash, and only then registers
 the bundle in the vault — a corrupted archive is refused with a non-zero exit
 and nothing written. The import provenance (source file, its SHA-256, when)
-is recorded in the imported manifest under `archive.imported`.
+is recorded in the imported manifest under `archive.imported`. Full container
+spec, including manual recovery without the tool:
+[docs/MVB-FORMAT.md](docs/MVB-FORMAT.md).
 
 ## Extending to new artifact types
 

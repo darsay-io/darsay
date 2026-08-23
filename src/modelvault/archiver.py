@@ -233,6 +233,7 @@ def archive_model(
             "related_variants": None,
             "successors": None,
             "ecosystem_snapshot_as_of": related["as_of"],
+            "query_limit": related["query_limit"],
         },
         "archive": {
             "date_archived": now,
