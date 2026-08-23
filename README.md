@@ -9,7 +9,9 @@ against upstream LFS/git checksums, captures the license verbatim with rights
 flags, extracts model metadata straight from the payload (parameter counts are
 read from safetensors headers — no torch needed), snapshots the downstream
 ecosystem (quantizations, GGUFs, finetunes), and writes it all into a bundle
-that any Hugging Face-compatible loader can use as-is.
+that any Hugging Face-compatible loader can use as-is. When you want to hear
+the archived model speak, `modelvault run <bundle>` takes it from cold storage
+to a local inference — building the environment for you — in one command.
 
 ## Install
 
@@ -19,6 +21,9 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[fast-hash,smoke]"   # + blake3, tokenizers
 .venv/bin/pip install -e ".[inference]"    # + transformers/torch for inference smoke test
 ```
+
+The extras only serve the in-process smoke tests; `modelvault run` needs none
+of them — hydration builds its own isolated env per engine (see below).
 
 ## Usage
 
@@ -31,6 +36,11 @@ modelvault info   vault/qwen--qwen3-0.6b/<rev>
 modelvault regen  vault/qwen--qwen3-0.6b/<rev>    # rebuild README after editing curation.md
 modelvault export vault/qwen--qwen3-0.6b/<rev> -o /backups   # single-file .mvb.tar
 modelvault import /backups/qwen--qwen3-0.6b@<rev>.mvb.tar    # unpack + verify + register
+
+modelvault run     vault/qwen--qwen3-0.6b/<rev> "Say hello"  # hydrate if needed + offline inference
+modelvault hydrate vault/qwen--qwen3-0.6b/<rev> [--dry-run]  # just build/reuse the runnable env
+modelvault envs [--prune]                   # list shared runtime envs / delete unreferenced ones
+modelvault dehydrate vault/qwen--qwen3-0.6b/<rev>            # drop a bundle's hydration record
 ```
 
 The vault root defaults to `./vault` (override with `--vault` or
@@ -48,6 +58,7 @@ vault/qwen--qwen3-0.6b/<revision12>/
 ├── verification.json   # verification history (last 50 runs)
 ├── curation.md         # curator's notes — the only hand-edited file
 ├── exports.json        # log of single-file exports (appears after first export)
+├── hydration.json      # runnable-env record + run history (appears after first hydrate)
 └── LICENSE             # upstream license text, surfaced at the root
 ```
 
@@ -66,7 +77,7 @@ loader) at `<bundle>/model` — no unpacking or conversion needed.
 | `licensing` | SPDX id, license files, commercial-use / redistribution / modification / attribution flags, patent grant, trademark terms, manual-review flag |
 | `inventory` | per-file size + SHA-256 (+BLAKE3), upstream LFS/git checksums with match status, deterministic bundle hash, expected layout |
 | `model_metadata` | parameter count (by dtype, read from safetensors headers), architecture, context length, precision/quantization, tokenizer class + vocab + special tokens + chat template, languages, training cutoff |
-| `runtime` | supported engines (from shipped formats), estimated min RAM/VRAM, tested hardware, OS support, CUDA/ROCm notes, CPU inference |
+| `runtime` | supported engines (from shipped formats), estimated min RAM/VRAM, tested hardware (measured entries written by `modelvault run`), OS support, CUDA/ROCm notes, CPU inference |
 | `validation` | checksum verification, completeness against artifact-type rules, tokenizer + inference smoke tests |
 | `relationships` | base/parent model, finetuned-from, known quantizations + GGUF repos + finetune counts (snapshot at archive time) |
 | `archive` | date archived, location, host, storage tier, backup status, replicas, last integrity check, last access |
@@ -110,10 +121,36 @@ is recorded in the imported manifest under `archive.imported`. Full container
 spec, including manual recovery without the tool:
 [docs/MVB-FORMAT.md](docs/MVB-FORMAT.md).
 
-## Extending to new artifact types
+## Running archived models (hydration)
+
+`modelvault run <bundle> ["prompt"]` goes from bundle to generated tokens in
+one command (macOS and Linux). Under the hood it *hydrates* first: picks an
+engine from what the payload ships (safetensors → `transformers`,
+GGUF → `llama-cpp`), builds a dedicated virtualenv **outside the bundle**
+under `<vault>/.runtime/envs/` — content-keyed so bundles with the same needs
+share one env — and probes it against the payload. Inference then runs fully
+**offline** (`HF_HUB_OFFLINE=1`): a passing run is evidence the archived
+payload alone is sufficient, with nothing quietly fetched at load time.
+
+The chat template is applied when the tokenizer ships one (`--raw` for plain
+completion); decoding is greedy for reproducibility (`--sample --seed N` for
+the model's own sampling defaults). Everything is recorded, nothing
+fabricated: the exact interpreter, installer, and resolved package versions
+go to the bundle's `hydration.json` along with the last 20 runs, and each
+successful run writes a measured `runtime.tested_hardware` entry (host, chip,
+device, engine versions, tokens/sec) into the manifest. The payload stays
+byte-immutable throughout — `verify` passes before and after. Envs are
+disposable: `modelvault envs --prune` reclaims the disk, and the next `run`
+rebuilds. Design details: [docs/HYDRATION.md](docs/HYDRATION.md).
+
+## Extending to new artifact types and engines
 
 The design is registry-based so new artifact types slot in later. A bundle's
 `artifact_type` drives completeness rules from `ARTIFACT_TYPES` in
 `src/modelvault/schema.py` — add an entry (e.g. `dataset`, `gguf-pack`,
 `paper`) with its required/recommended file patterns, plus an extractor if it
 has structured metadata, and the verify/report machinery works unchanged.
+Inference runtimes work the same way: `ENGINES` in `src/modelvault/hydrate.py`
+maps detection globs to pip requirements and a standalone runner script, so an
+MLX, vLLM, or ONNX engine is a registry entry plus a runner, with no special
+cases elsewhere.
