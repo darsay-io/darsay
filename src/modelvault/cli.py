@@ -6,6 +6,8 @@
     modelvault list                             all bundles in the vault
     modelvault info    vault/<bundle>           quick manifest summary
     modelvault regen   vault/<bundle>           rebuild README.md after editing curation.md
+    modelvault export  vault/<bundle> [-o DIR]  pack into a single deterministic .mvb.tar
+    modelvault import  <file.mvb.tar>           unpack + verify into the vault
 """
 
 from __future__ import annotations
@@ -109,6 +111,21 @@ def cmd_info(args) -> int:
     return 0
 
 
+def cmd_export(args) -> int:
+    from .export import export_bundle
+
+    out = export_bundle(_bundle_dir(args.bundle), Path(args.output_dir))
+    print(f"Export ready: {out}")
+    return 0
+
+
+def cmd_import(args) -> int:
+    from .export import import_bundle
+
+    import_bundle(Path(args.file), _vault_path(args), force=args.force)
+    return 0
+
+
 def cmd_regen(args) -> int:
     from .archiver import load_manifest
     from .readme_gen import write_bundle_readme
@@ -151,6 +168,16 @@ def main(argv=None) -> int:
     p = sub.add_parser("regen", help="rebuild a bundle's README.md from manifest + curation.md")
     p.add_argument("bundle")
     p.set_defaults(func=cmd_regen)
+
+    p = sub.add_parser("export", help="pack a bundle into a single deterministic .mvb.tar file")
+    p.add_argument("bundle")
+    p.add_argument("-o", "--output-dir", default=".", help="directory for the .mvb.tar (default: cwd)")
+    p.set_defaults(func=cmd_export)
+
+    p = sub.add_parser("import", help="unpack a .mvb.tar into the vault, verifying before registering")
+    p.add_argument("file")
+    p.add_argument("--force", action="store_true", help="replace an existing bundle at the destination")
+    p.set_defaults(func=cmd_import)
 
     args = parser.parse_args(argv)
     return args.func(args)

@@ -29,6 +29,8 @@ modelvault smoke  vault/qwen--qwen3-0.6b/<rev> [--inference]
 modelvault list                             # inventory of the whole vault
 modelvault info   vault/qwen--qwen3-0.6b/<rev>
 modelvault regen  vault/qwen--qwen3-0.6b/<rev>    # rebuild README after editing curation.md
+modelvault export vault/qwen--qwen3-0.6b/<rev> -o /backups   # single-file .mvb.tar
+modelvault import /backups/qwen--qwen3-0.6b@<rev>.mvb.tar    # unpack + verify + register
 ```
 
 The vault root defaults to `./vault` (override with `--vault` or
@@ -84,6 +86,25 @@ auditable history of every integrity check.
   the command exits non-zero — suitable for cron.
 - The **bundle hash** (SHA-256 over the sorted per-file hash lines) gives a
   single value that fingerprints the entire payload.
+
+## Single-file exports (.mvb.tar)
+
+`modelvault export` packs a whole bundle into one **deterministic tar**:
+entries sorted (a `.mvb.json` marker first, carrying the format version,
+bundle id, and bundle hash), tar metadata normalized (mtime = the bundle's
+archive date, no owners), no compression — model weights are essentially
+incompressible and a plain tar stays inspectable with standard tools. The
+same bundle state always exports byte-identically, so the export file has one
+stable SHA-256 suitable for an offsite catalog. Export events (timestamp,
+path, tar hash) are logged to the bundle's `exports.json`, which is excluded
+from the tar precisely so it can't break determinism.
+
+`modelvault import` streams the marker, checks format compatibility, unpacks
+to a staging directory (safe extraction filter), re-hashes the entire payload
+against the embedded manifest and marker bundle hash, and only then registers
+the bundle in the vault — a corrupted archive is refused with a non-zero exit
+and nothing written. The import provenance (source file, its SHA-256, when)
+is recorded in the imported manifest under `archive.imported`.
 
 ## Extending to new artifact types
 

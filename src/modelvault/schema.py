@@ -28,7 +28,8 @@ ARTIFACT_TYPES = {
 }
 
 # Files the tool itself writes at the bundle root.
-BUNDLE_METADATA_FILES = ["manifest.json", "README.md", "VERIFICATION.md", "verification.json", "curation.md"]
+BUNDLE_METADATA_FILES = ["manifest.json", "README.md", "VERIFICATION.md", "verification.json",
+                         "curation.md", "exports.json"]
 
 
 def check_completeness(artifact_type: str, inventory_paths: list[str]) -> dict:
