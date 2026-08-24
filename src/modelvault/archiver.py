@@ -26,11 +26,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import huggingface_hub
-from huggingface_hub import HfApi, snapshot_download
+from huggingface_hub import HfApi
 from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
 
 from . import SCHEMA_VERSION, __version__
-from .hashing import HAVE_BLAKE3, bundle_hash, hash_file, iter_payload_files
+from .hashing import bundle_hash
 from .licensing import build_licensing_record
 from .metadata import estimate_runtime, extract_dataset_metadata, extract_model_metadata
 from .schema import ARTIFACT_TYPES, check_completeness, payload_root_for
@@ -186,81 +186,138 @@ def archive_model(
     repo_type: str = "model",
     progress=print,
 ) -> Path:
-    """Archive a Hub repo (model or dataset) as a bundle — one flow for every
-    artifact type, with what varies dispatched via the ARTIFACT_TYPES registry
-    and the per-type blocks below."""
+    """Archive a Hub repo through pin → reconcile → transfer → register."""
+    from .transfer import (
+        LedgerError,
+        begin_session,
+        find_resume,
+        finish_session,
+        load_ledger,
+        new_ledger,
+        reconcile,
+        record_event,
+        save_ledger,
+        transfer_all,
+        transfer_lock,
+    )
+
     api = HfApi()
-
-    progress(f"Resolving {repo_type} {repo_id} @ {revision or 'main'} ...")
-    try:
-        if repo_type == "dataset":
-            info = api.dataset_info(repo_id, revision=revision, files_metadata=True)
-        else:
-            info = api.model_info(repo_id, revision=revision, files_metadata=True)
-    except GatedRepoError:
-        raise SystemExit(_gated_message(repo_id, repo_type))
-    except RepositoryNotFoundError:
-        raise SystemExit(
-            f"error: {repo_type} {repo_id!r} not found on the Hub — it may be private "
-            "(authenticate with `hf auth login`), renamed, or removed. Nothing was archived."
-        )
-    commit = info.sha
-    card = info.card_data.to_dict() if info.card_data else {}
-    gated = getattr(info, "gated", None) or False  # "auto" | "manual" | False
-
-    bundle_dir = bundle_dir_for(vault, repo_id, commit, repo_type)
     root = payload_root_for(repo_type)
+    resume = find_resume(vault, repo_id, repo_type, revision, root)
+    pinned = resume[1] if resume else None
+    orphan_dir = resume[0] if resume and pinned is None else None
+
+    if pinned is not None:
+        bundle_dir = resume[0]
+        progress(
+            f"Resuming {repo_type} {repo_id} @ pinned commit "
+            f"{pinned['revision'][:12]} (no metadata refresh) ..."
+        )
+        info = None
+    else:
+        # A missing/corrupt ledger can be rebuilt without changing the pin: the
+        # bundle directory carries the first 12 commit characters.
+        pin_revision = orphan_dir.name if orphan_dir is not None else revision
+        progress(f"Resolving {repo_type} {repo_id} @ {pin_revision or 'main'} ...")
+        try:
+            if repo_type == "dataset":
+                info = api.dataset_info(repo_id, revision=pin_revision, files_metadata=True)
+            else:
+                info = api.model_info(repo_id, revision=pin_revision, files_metadata=True)
+        except GatedRepoError:
+            # Pin-time failures have no durable transfer state and must retain
+            # the pre-incremental clean-failure behavior.
+            if orphan_dir is not None:
+                shutil.rmtree(orphan_dir, ignore_errors=True)
+            raise SystemExit(_gated_message(repo_id, repo_type))
+        except RepositoryNotFoundError:
+            raise SystemExit(
+                f"error: {repo_type} {repo_id!r} not found on the Hub — it may be private "
+                "(authenticate with `hf auth login`), renamed, or removed. Nothing was archived."
+            )
+        bundle_dir = bundle_dir_for(vault, repo_id, info.sha, repo_type)
+
     payload_dir = bundle_dir / root
-    if (bundle_dir / "manifest.json").exists() and not force:
-        raise SystemExit(f"Bundle already exists: {bundle_dir} (use --force to re-archive)")
-    bundle_dir.mkdir(parents=True, exist_ok=True)
+    with transfer_lock(bundle_dir, progress=progress):
+        manifest_path = bundle_dir / "manifest.json"
+        if manifest_path.exists() and not force:
+            raise SystemExit(f"Bundle already exists: {bundle_dir} (use --force to re-archive)")
 
-    progress(f"Downloading snapshot {commit[:12]} into {payload_dir} ...")
-    try:
-        snapshot_download(repo_id, revision=commit, local_dir=payload_dir, repo_type=repo_type)
-    except GatedRepoError:
-        # Metadata and card files are public even on gated repos; the weights 403.
-        # Nothing was registered — drop the partial payload, unless this dir holds
-        # a previously registered bundle (--force re-archive of an existing one).
-        if not (bundle_dir / "manifest.json").exists():
-            shutil.rmtree(bundle_dir, ignore_errors=True)
-        raise SystemExit(_gated_message(repo_id, repo_type))
-    # Remove hub bookkeeping so the payload is a pristine copy of the repo tree.
+        if pinned is not None:
+            # Reload only after holding the lock so no stale in-memory ledger is
+            # used if a prior owner just finished a file.
+            ledger = load_ledger(bundle_dir)
+        else:
+            if force:
+                assert info is not None
+                ledger = new_ledger(repo_id, repo_type, revision or "main", info)
+                save_ledger(bundle_dir, ledger)
+            else:
+                try:
+                    ledger = load_ledger(bundle_dir)
+                except LedgerError:
+                    assert info is not None
+                    ledger = new_ledger(repo_id, repo_type, revision or "main", info)
+                    save_ledger(bundle_dir, ledger)
+            if force and manifest_path.exists():
+                # A forced rebuild becomes an ordinary resumable archive after
+                # the fresh pin is durable. Existing payload bytes are adopted.
+                manifest_path.unlink()
+
+        session = begin_session(bundle_dir, ledger)
+        session_finished = False
+        try:
+            plan = reconcile(bundle_dir, payload_dir, ledger, session, progress=progress)
+            progress(
+                "Transfer plan: "
+                f"{plan['files']['verified']}/{plan['files']['total']} files verified, "
+                f"{plan['bytes']['remaining_network']} bytes remaining"
+            )
+            plan = transfer_all(bundle_dir, payload_dir, ledger, session, progress=progress)
+            if not plan["complete"]:
+                raise RuntimeError("transfer ended without verifying every pinned file")
+
+            finish_session(bundle_dir, ledger, session, "complete")
+            session_finished = True
+            return _register_bundle(api, bundle_dir, payload_dir, ledger, progress)
+        except GatedRepoError:
+            record_event(
+                ledger,
+                None,
+                "gated",
+                "upstream access was denied during transfer; partial archive retained",
+            )
+            finish_session(bundle_dir, ledger, session, "error")
+            session_finished = True
+            raise SystemExit(
+                _gated_message(repo_id, repo_type).replace(
+                    "Nothing was archived.",
+                    "The partial archive was kept and resumes if access returns.",
+                )
+            )
+        except BaseException:
+            if not session_finished:
+                finish_session(bundle_dir, ledger, session, "error")
+            raise
+
+
+def _register_bundle(api: HfApi, bundle_dir: Path, payload_dir: Path, ledger: dict, progress) -> Path:
+    """Run completion-time extraction and register from pinned ledger facts."""
+    from .transfer import file_records as ledger_file_records, transfer_summary
+
+    repo_id = ledger["repo_id"]
+    repo_type = ledger["repo_type"]
+    commit = ledger["revision"]
+    root = payload_root_for(repo_type)
+    metadata = ledger["metadata"]
+    card = metadata.get("card_data") or {}
+    tags = list(metadata.get("tags") or [])
+    gated = metadata.get("gated", False)
+
+    # Hub local-dir bookkeeping owns resumable partials and therefore lives
+    # until every expected file is verified. It is not archival payload.
     shutil.rmtree(payload_dir / ".cache", ignore_errors=True)
-
-    # Upstream expectations per file: size, LFS sha256 (large files), git blob sha1 (small files).
-    upstream = {}
-    for sib in info.siblings or []:
-        upstream[sib.rfilename] = {
-            "size": sib.size,
-            "lfs_sha256": sib.lfs.sha256 if sib.lfs else None,
-            "git_sha1": sib.blob_id if not sib.lfs else None,
-        }
-
-    progress("Hashing payload (sha256%s + upstream cross-check) ..." % ("+blake3" if HAVE_BLAKE3 else ""))
-    file_records = []
-    upstream_mismatches = []
-    for rel, abs_path in iter_payload_files(payload_dir):
-        hashes = hash_file(abs_path, with_git_sha1=True)
-        up = upstream.get(rel, {})
-        verified = None
-        if up.get("lfs_sha256"):
-            verified = hashes["sha256"] == up["lfs_sha256"]
-        elif up.get("git_sha1"):
-            verified = hashes["git_sha1"] == up["git_sha1"]
-        if verified is False:
-            upstream_mismatches.append(rel)
-        record = {
-            "path": f"{root}/{rel}",
-            "size": abs_path.stat().st_size,
-            "sha256": hashes["sha256"],
-            "blake3": hashes.get("blake3"),
-            "upstream_lfs_sha256": up.get("lfs_sha256"),
-            "upstream_git_sha1": up.get("git_sha1"),
-            "verified_against_upstream": verified,
-        }
-        file_records.append(record)
-
+    file_records, upstream_mismatches = ledger_file_records(ledger, root)
     inventory_paths = [r["path"] for r in file_records]
     total_size = sum(r["size"] for r in file_records)
     completeness = check_completeness(repo_type, inventory_paths)
@@ -298,7 +355,7 @@ def archive_model(
         # Upstream lineage: card `base_model` (may list several parents — merges do)
         # plus the Hub's `base_model:*` tags, which also label the derivation edge.
         base_models = [b for b in (_as_list(card.get("base_model")) or []) if isinstance(b, str)]
-        tag_bases, tag_relations = parse_base_model_tags(list(info.tags or []))
+        tag_bases, tag_relations = parse_base_model_tags(tags)
         for b in tag_bases:
             if b not in base_models:
                 base_models.append(b)
@@ -340,7 +397,7 @@ def archive_model(
             "family": model_type or name.split("-")[0].lower(),
             "publisher": publisher,
             "version": _guess_version(name, model_type),
-            "release_date": info.created_at.isoformat(timespec="seconds") if info.created_at else None,
+            "release_date": metadata.get("created_at"),
             "aliases": [repo_id],
         },
         "source": {
@@ -348,9 +405,10 @@ def archive_model(
             "repo_id": repo_id,
             "upstream_url": hub_url(repo_id, repo_type),
             "revision": commit,
-            "revision_ref": revision or "main",
-            "last_modified_upstream": info.last_modified.isoformat(timespec="seconds") if info.last_modified else None,
+            "revision_ref": ledger["revision_ref"],
+            "last_modified_upstream": metadata.get("last_modified"),
             "download_timestamp": now,
+            "transfer": transfer_summary(ledger),
             "downloader": {
                 "tool": "modelvault",
                 "version": __version__,
@@ -370,10 +428,10 @@ def archive_model(
                 ) if gated else None,
             },
             "upstream_stats_at_archive": {
-                "downloads_last_month": getattr(info, "downloads", None),
-                "likes": getattr(info, "likes", None),
+                "downloads_last_month": metadata.get("downloads"),
+                "likes": metadata.get("likes"),
             },
-            "upstream_tags": list(info.tags or []),
+            "upstream_tags": tags,
         },
         "licensing": licensing,
         "inventory": {
@@ -394,6 +452,7 @@ def archive_model(
         "validation": {
             "checksum_verification": {
                 "at": now,
+                "method": "per-file at download completion",
                 "status": "pass" if not upstream_mismatches else "fail",
                 "files_checked": len(file_records),
                 "upstream_mismatches": upstream_mismatches,

@@ -142,7 +142,10 @@ def _declared_dataset_info(infos: dict, card_data: dict) -> dict | None:
 def _measured_row_counts(payload_root: Path) -> dict:
     """Row counts established from the payload itself. Parquet only, and only
     when pyarrow is available — otherwise recorded as skipped, never guessed."""
-    parquet_files = sorted(p for p in payload_root.rglob("*.parquet") if p.is_file())
+    parquet_files = sorted(
+        p for p in payload_root.rglob("*.parquet")
+        if p.is_file() and ".cache" not in p.relative_to(payload_root).parts
+    )
     if not parquet_files:
         return {"status": "skipped",
                 "reason": "no parquet files in payload (row counting covers parquet only)"}
