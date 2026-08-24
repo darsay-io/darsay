@@ -187,6 +187,8 @@ def archive_model(
     dry_run: bool = False,
     max_bytes: int | None = None,
     max_minutes: float | None = None,
+    rehash: bool = False,
+    jobs: int = 4,
     progress=print,
 ) -> Path | None:
     """Archive a Hub repo through pin → reconcile → transfer → register."""
@@ -294,6 +296,7 @@ def archive_model(
                 dry_session,
                 progress=progress,
                 apply=False,
+                rehash=rehash,
             )
             add_disk_preflight(bundle_dir, plan)
             print_plan(plan, progress=progress)
@@ -305,7 +308,14 @@ def archive_model(
             session = begin_session(bundle_dir, ledger)
             session_finished = False
             try:
-                plan = reconcile(bundle_dir, payload_dir, ledger, session, progress=progress)
+                plan = reconcile(
+                    bundle_dir,
+                    payload_dir,
+                    ledger,
+                    session,
+                    progress=progress,
+                    rehash=rehash,
+                )
                 add_disk_preflight(bundle_dir, plan)
                 print_plan(plan, progress=progress)
                 if plan["disk"]["verdict"] == "insufficient":
@@ -318,6 +328,7 @@ def archive_model(
                     session,
                     progress=progress,
                     stop_controller=stop_controller,
+                    jobs=jobs,
                 )
                 if not plan["complete"]:
                     raise RuntimeError("transfer ended without verifying every pinned file")

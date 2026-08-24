@@ -69,6 +69,16 @@ def _byte_size(value: str) -> int:
     return parsed
 
 
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected a positive integer, got {value!r}") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError(f"expected a positive integer, got {value!r}")
+    return parsed
+
+
 def cmd_estimate(args) -> int:
     from .archiver import parse_repo_ref
     from .estimate import estimate_repo, print_estimate
@@ -106,6 +116,8 @@ def cmd_archive(args) -> int:
             dry_run=args.dry_run,
             max_bytes=max_bytes,
             max_minutes=args.max_minutes,
+            rehash=args.rehash,
+            jobs=args.jobs,
         )
     except PartialTransfer as stop:
         print(f"\nArchive paused cleanly ({stop.reason}: {stop.detail}).")
@@ -321,6 +333,10 @@ def main(argv=None) -> int:
                         help="stop cleanly after network SIZE (e.g. 500M, 20G)")
     p.add_argument("--max-minutes", type=_positive_float, metavar="N",
                    help="stop cleanly when the transfer session reaches N minutes")
+    p.add_argument("--rehash", action="store_true",
+                   help="re-hash every present payload file instead of trusting verified ledger entries")
+    p.add_argument("--jobs", type=_positive_int, default=4, metavar="N",
+                   help="parallel workers for files smaller than 8 MiB (default: 4)")
     p.set_defaults(func=cmd_archive)
 
     p = sub.add_parser("verify", help="re-hash a bundle and compare against its manifest")

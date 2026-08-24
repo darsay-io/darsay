@@ -13,6 +13,7 @@ import signal
 import socket
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -24,6 +25,7 @@ from .hashing import hash_file, iter_payload_files
 TRANSFER_VERSION = 1
 TRANSFER_FILE = "transfer.json"
 LOCK_FILE = "transfer.lock"
+SMALL_FILE_LIMIT = 8 * 1024**2
 
 
 class LedgerError(ValueError):
@@ -395,6 +397,7 @@ def reconcile(
     session: dict,
     progress=print,
     apply: bool = True,
+    rehash: bool = False,
 ) -> dict:
     """Reconcile ledger acceleration state with authoritative payload bytes."""
     payload_dir.mkdir(parents=True, exist_ok=True)
@@ -417,6 +420,36 @@ def reconcile(
         size_matches = path.is_file() and (expected_size is None or path.stat().st_size == expected_size)
 
         if state.get("status") == "verified" and size_matches:
+            if not rehash:
+                continue
+            record = _verified_record(
+                expected,
+                path,
+                str(state.get("source") or "adopted"),
+                int(state.get("attempts") or 0),
+            )
+            matches = record["verified_against_upstream"]
+            if matches is None and state.get("sha256"):
+                matches = record["sha256"] == state["sha256"]
+            if matches is not False:
+                ledger["files"][relative] = record
+                if apply:
+                    save_ledger(bundle_dir, ledger)
+                continue
+            record_event(
+                ledger,
+                relative,
+                "rehash_mismatch",
+                "verified file failed digest re-check; removed and demoted",
+            )
+            if apply:
+                _discard_payload_file(path, payload_dir)
+            ledger["files"][relative] = {
+                "status": "missing",
+                "attempts": int(state.get("attempts") or 0),
+            }
+            if apply:
+                save_ledger(bundle_dir, ledger)
             continue
         if state.get("status") == "verified" and not path.is_file():
             record_event(ledger, relative, "verified_file_missing", "demoted to missing")
@@ -653,6 +686,71 @@ def _resumable_hub_transport():
         file_download._download_to_tmp_and_move = original
 
 
+def _download_one(
+    expected: dict,
+    payload_dir: Path,
+    ledger: dict,
+    counter: NetworkCounter,
+    stop_controller: StopController | None,
+) -> dict:
+    """Worker-safe download/hash result; it never writes the ledger."""
+    if stop_controller is not None:
+        stop_controller.check(counter.session)
+    relative = expected["path"]
+    path = _payload_path(payload_dir, relative)
+    previous = ledger["files"].get(relative) or {}
+    attempts = int(previous.get("attempts") or 0)
+    events = []
+    retries = 0
+    record = None
+    for retry in range(2):
+        attempts += 1
+        try:
+            hf_hub_download(
+                repo_id=ledger["repo_id"],
+                filename=relative,
+                revision=ledger["revision"],
+                local_dir=payload_dir,
+                repo_type=ledger["repo_type"],
+                force_download=retry > 0,
+                tqdm_class=_tqdm_class(counter),
+            )
+        except BaseException:
+            if counter.pending_stop is not None:
+                raise counter.pending_stop from None
+            raise
+        record = _verified_record(expected, path, "network", attempts)
+        if record["verified_against_upstream"] is not False:
+            break
+        events.append({
+            "at": _utc_now(),
+            "path": relative,
+            "event": "digest_mismatch",
+            "detail": f"download attempt {attempts} did not match pinned upstream digest",
+        })
+        if retry == 0:
+            retries += 1
+            _discard_payload_file(path, payload_dir)
+    assert record is not None
+    if record["verified_against_upstream"] is False:
+        events.append({
+            "at": _utc_now(),
+            "path": relative,
+            "event": "persistent_digest_mismatch",
+            "detail": "second download mismatch; retained and marked as an upstream verification failure",
+        })
+    return {"path": relative, "record": record, "events": events, "retries": retries}
+
+
+def _record_download_result(bundle_dir: Path, ledger: dict, session: dict, result: dict) -> None:
+    """Main-thread commit point for a worker's completed file."""
+    ledger["events"].extend(result["events"])
+    ledger["files"][result["path"]] = result["record"]
+    session["files_completed"] += 1
+    session["retries"] += result["retries"]
+    save_ledger(bundle_dir, ledger)
+
+
 def transfer_all(
     bundle_dir: Path,
     payload_dir: Path,
@@ -660,6 +758,7 @@ def transfer_all(
     session: dict,
     progress=print,
     stop_controller: StopController | None = None,
+    jobs: int = 4,
 ) -> dict:
     """Fetch and immediately verify every remaining file at the pinned commit."""
     remaining = [
@@ -667,62 +766,67 @@ def transfer_all(
         if (ledger["files"].get(expected["path"]) or {}).get("status") != "verified"
     ]
     remaining.sort(key=lambda item: (item.get("size") or 0, item["path"]))
+    small = [item for item in remaining if (item.get("size") or 0) < SMALL_FILE_LIMIT]
+    large = [item for item in remaining if (item.get("size") or 0) >= SMALL_FILE_LIMIT]
     counter = NetworkCounter(session, stop_controller)
-    tqdm_class = _tqdm_class(counter)
 
     with _resumable_hub_transport():
-        for index, expected in enumerate(remaining, 1):
-            if stop_controller is not None:
-                stop_controller.check(session)
-            relative = expected["path"]
-            path = _payload_path(payload_dir, relative)
-            previous = ledger["files"].get(relative) or {}
-            attempts = int(previous.get("attempts") or 0)
+        if small:
             progress(
-                f"Transferring {index}/{len(remaining)}: {relative} "
+                f"Transferring {len(small)} small files with {min(jobs, len(small))} workers "
+                f"(< {SMALL_FILE_LIMIT} bytes each) ..."
+            )
+            clean_stop = None
+            first_error = None
+            with ThreadPoolExecutor(max_workers=jobs) as executor:
+                futures = {
+                    executor.submit(
+                        _download_one,
+                        expected,
+                        payload_dir,
+                        ledger,
+                        counter,
+                        stop_controller,
+                    ): expected
+                    for expected in small
+                }
+                for future in as_completed(futures):
+                    expected = futures[future]
+                    try:
+                        result = future.result()
+                    except CleanStop as stop:
+                        if clean_stop is None or stop.reason == "interrupt":
+                            clean_stop = stop
+                    except BaseException as exc:
+                        if first_error is None:
+                            first_error = exc
+                    else:
+                        progress(f"Verified {expected['path']} ({result['record']['size']} bytes)")
+                        _record_download_result(bundle_dir, ledger, session, result)
+                        if stop_controller is not None:
+                            try:
+                                stop_controller.check(session)
+                            except CleanStop as stop:
+                                if clean_stop is None or stop.reason == "interrupt":
+                                    clean_stop = stop
+            if first_error is not None:
+                raise first_error
+            if clean_stop is not None:
+                raise clean_stop
+
+        for index, expected in enumerate(large, 1):
+            progress(
+                f"Transferring large file {index}/{len(large)}: {expected['path']} "
                 f"({expected.get('size') or 0} bytes)"
             )
-            record = None
-            for retry in range(2):
-                attempts += 1
-                try:
-                    hf_hub_download(
-                        repo_id=ledger["repo_id"],
-                        filename=relative,
-                        revision=ledger["revision"],
-                        local_dir=payload_dir,
-                        repo_type=ledger["repo_type"],
-                        force_download=retry > 0,
-                        tqdm_class=tqdm_class,
-                    )
-                except BaseException:
-                    if counter.pending_stop is not None:
-                        raise counter.pending_stop from None
-                    raise
-                record = _verified_record(expected, path, "network", attempts)
-                if record["verified_against_upstream"] is not False:
-                    break
-                record_event(
-                    ledger,
-                    relative,
-                    "digest_mismatch",
-                    f"download attempt {attempts} did not match pinned upstream digest",
-                )
-                if retry == 0:
-                    session["retries"] += 1
-                    _discard_payload_file(path, payload_dir)
-                    save_ledger(bundle_dir, ledger)
-            assert record is not None
-            if record["verified_against_upstream"] is False:
-                record_event(
-                    ledger,
-                    relative,
-                    "persistent_digest_mismatch",
-                    "second download mismatch; retained and marked as an upstream verification failure",
-                )
-            ledger["files"][relative] = record
-            session["files_completed"] += 1
-            save_ledger(bundle_dir, ledger)
+            result = _download_one(
+                expected,
+                payload_dir,
+                ledger,
+                counter,
+                stop_controller,
+            )
+            _record_download_result(bundle_dir, ledger, session, result)
             if stop_controller is not None:
                 stop_controller.check(session)
 
