@@ -34,15 +34,15 @@ MVB_FORMAT_VERSION = "1.1"
 MARKER_NAME = ".mvb.json"
 
 # Bundle-root files that never go into an export: volatile machine-local state
-# (export log, hydration/run records) and OS noise.
-EXPORT_EXCLUDE = {"exports.json", "hydration.json", ".DS_Store"}
+# (export log, hydration/run records, resumable-transfer ledger/lock).
+EXPORT_EXCLUDE = {"exports.json", "hydration.json", "transfer.json", "transfer.lock"}
 
 
 def _bundle_files(bundle_dir: Path) -> list[tuple[str, Path]]:
     files = []
     for p in bundle_dir.rglob("*"):
         rel = p.relative_to(bundle_dir).as_posix()
-        if p.name in EXPORT_EXCLUDE:
+        if rel in EXPORT_EXCLUDE or p.name == ".DS_Store":
             continue
         if p.is_symlink():
             raise SystemExit(f"error: refusing to export symlink in bundle: {rel}")

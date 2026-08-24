@@ -45,7 +45,8 @@ ARTIFACT_TYPES = {
 
 # Files the tool itself writes at the bundle root.
 BUNDLE_METADATA_FILES = ["manifest.json", "README.md", "VERIFICATION.md", "verification.json",
-                         "curation.md", "exports.json", "hydration.json"]
+                         "curation.md", "exports.json", "hydration.json", "transfer.json",
+                         "transfer.lock"]
 
 
 def payload_root_for(artifact_type: str) -> str:

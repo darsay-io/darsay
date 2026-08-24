@@ -152,22 +152,61 @@ def cmd_smoke(args) -> int:
 
 def cmd_list(args) -> int:
     vault = _vault_path(args)
-    manifests = sorted(vault.glob("*/*/manifest.json"))
-    if not manifests:
+    bundle_dirs = {
+        path.parent for pattern in ("manifest.json", "transfer.json")
+        for path in vault.glob(f"*/*/{pattern}")
+    }
+    if not bundle_dirs:
         print(f"No bundles in {vault}/")
         return 0
     from .readme_gen import human_size
+    from .schema import payload_root_for
+    from .transfer import LedgerError, load_ledger, transfer_plan
 
     rows = []
-    for mf in manifests:
-        m = json.loads(mf.read_text(encoding="utf-8"))
-        rows.append((
-            m["bundle_id"],
-            m["licensing"]["spdx_id"] or "?",
-            human_size(m["inventory"]["total_size_bytes"]),
-            m["security"]["integrity_status"],
-            m["archive"]["date_archived"][:10],
-        ))
+    for bundle_dir in sorted(bundle_dirs):
+        manifest_path = bundle_dir / "manifest.json"
+        if manifest_path.is_file():
+            m = json.loads(manifest_path.read_text(encoding="utf-8"))
+            rows.append((
+                m["bundle_id"],
+                m["licensing"]["spdx_id"] or "?",
+                human_size(m["inventory"]["total_size_bytes"]),
+                m["security"]["integrity_status"],
+                m["archive"]["date_archived"][:10],
+            ))
+            continue
+
+        try:
+            ledger = load_ledger(bundle_dir)
+            root = payload_root_for(ledger["repo_type"])
+            plan = transfer_plan(bundle_dir / root, ledger)
+            sizes = plan["bytes"]
+            files = plan["files"]
+            banked = sizes["verified"] + sizes["partial"]
+            percent = int(banked * 100 / sizes["total"]) if sizes["total"] else 0
+            status = (
+                f"archiving: {percent}% "
+                f"({human_size(banked)}/{human_size(sizes['total'])}, "
+                f"{files['verified']}/{files['total']} files verified)"
+            )
+            card = ledger.get("metadata", {}).get("card_data", {})
+            license_id = card.get("license") if isinstance(card, dict) else None
+            rows.append((
+                f"{bundle_dir.parent.name}@{ledger['revision'][:12]}",
+                license_id or "?",
+                human_size(sizes["total"]),
+                status,
+                ledger["pinned_at"][:10],
+            ))
+        except (LedgerError, KeyError, OSError, TypeError, ValueError):
+            rows.append((
+                f"{bundle_dir.parent.name}@{bundle_dir.name}",
+                "?",
+                "?",
+                "archiving: unreadable transfer ledger",
+                "?",
+            ))
     widths = [max(len(str(r[i])) for r in rows + [("BUNDLE", "LICENSE", "SIZE", "INTEGRITY", "ARCHIVED")])
               for i in range(5)]
     header = ("BUNDLE", "LICENSE", "SIZE", "INTEGRITY", "ARCHIVED")

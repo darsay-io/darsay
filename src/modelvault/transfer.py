@@ -414,17 +414,31 @@ def _discard_payload_file(path: Path, payload_dir: Path) -> None:
 
 
 def _partial_bytes(payload_dir: Path, expected: dict) -> int:
-    """Best-effort byte count for Hub local-dir incomplete files."""
+    """Best-effort byte count for Hub local-dir incomplete files.
+
+    This is also used by ``modelvault list``, so computing the path must not
+    create Hub bookkeeping directories as ``get_local_download_paths`` does.
+    """
     etag = expected.get("lfs_sha256") or expected.get("git_sha1")
     if not etag:
         return 0
+    download_root = payload_dir / ".cache" / "huggingface" / "download"
+    if not download_root.is_dir():
+        return 0
     try:
-        from huggingface_hub._local_folder import get_local_download_paths
+        from huggingface_hub._local_folder import _short_hash
 
-        paths = get_local_download_paths(payload_dir, expected["path"])
-        path = paths.incomplete_path(etag)
+        relative = PurePosixPath(expected["path"])
+        metadata_path = download_root.joinpath(*relative.parts).with_name(
+            f"{relative.name}.metadata"
+        )
+        path = metadata_path.parent / f"{_short_hash(metadata_path.name)}.{etag}.incomplete"
         return path.stat().st_size if path.is_file() else 0
-    except (ImportError, OSError, ValueError):
+    except ImportError:
+        # Compatibility fallback if Hub changes the private short-hash helper.
+        matches = list(download_root.rglob(f"*.{etag}.incomplete"))
+        return matches[0].stat().st_size if len(matches) == 1 else 0
+    except (OSError, ValueError):
         return 0
 
 
