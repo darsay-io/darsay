@@ -11,6 +11,7 @@
     modelvault regen   vault/<bundle>           rebuild README.md after editing curation.md
     modelvault export  vault/<bundle> [-o DIR]  pack into a single deterministic .mvb.tar
     modelvault import  <file.mvb.tar>           unpack + verify into the vault
+    modelvault assemble <partial> [<partial>…]  combine matching partials offline
     modelvault hydrate vault/<bundle>           build a runnable env for the bundle
     modelvault run     vault/<bundle> [PROMPT]  hydrate if needed, then generate (offline)
     modelvault dehydrate vault/<bundle>         drop the bundle's hydration record
@@ -27,6 +28,7 @@ import argparse
 import json
 import os
 import re
+import shlex
 import sys
 from pathlib import Path
 
@@ -79,6 +81,21 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _shard_key(value: str) -> tuple[int, int]:
+    """Parse the one-based cooperative transfer key N/T."""
+    match = re.fullmatch(r"\s*(\d+)\s*/\s*(\d+)\s*", value)
+    if not match:
+        raise argparse.ArgumentTypeError("expected N/T, for example 1/3")
+    participant, total = (int(part) for part in match.groups())
+    if total < 2:
+        raise argparse.ArgumentTypeError("the total in N/T must be at least 2")
+    if total > 1024:
+        raise argparse.ArgumentTypeError("the total in N/T cannot exceed 1024")
+    if participant < 1 or participant > total:
+        raise argparse.ArgumentTypeError("N/T requires 1 <= N <= T")
+    return participant, total
+
+
 def cmd_estimate(args) -> int:
     from .archiver import parse_repo_ref
     from .estimate import estimate_repo, print_estimate
@@ -118,6 +135,7 @@ def cmd_archive(args) -> int:
             max_minutes=args.max_minutes,
             rehash=args.rehash,
             jobs=args.jobs,
+            shard=args.shard,
         )
     except PartialTransfer as stop:
         print(f"\nArchive paused cleanly ({stop.reason}: {stop.detail}).")
@@ -267,6 +285,27 @@ def cmd_import(args) -> int:
     return 0
 
 
+def cmd_assemble(args) -> int:
+    from .transfer import assemble_partials
+
+    bundle, plan = assemble_partials(
+        [Path(path) for path in args.partials],
+        _vault_path(args),
+    )
+    ledger = json.loads((bundle / "transfer.json").read_text(encoding="utf-8"))
+    prefix = "datasets/" if ledger["repo_type"] == "dataset" else ""
+    print(f"\nCombined partial bundle: {bundle}")
+    if plan["complete"]:
+        print("All payload files are present and verified; run archive once to register the bundle:")
+    else:
+        print("Continue the combined transfer with:")
+    print(
+        f"  modelvault --vault {shlex.quote(str(_vault_path(args)))} "
+        f"archive {shlex.quote(prefix + ledger['repo_id'])}"
+    )
+    return 0
+
+
 def cmd_hydrate(args) -> int:
     from .hydrate import hydrate_bundle
 
@@ -376,6 +415,8 @@ def main(argv=None) -> int:
                    help="re-hash every present payload file instead of trusting verified ledger entries")
     p.add_argument("--jobs", type=_positive_int, default=4, metavar="N",
                    help="parallel workers for files smaller than 8 MiB (default: 4)")
+    p.add_argument("--shard", type=_shard_key, metavar="N/T",
+                   help="advisory cooperative order: fetch byte-balanced lane N of T first")
     p.set_defaults(func=cmd_archive)
 
     p = sub.add_parser("verify", help="re-hash a bundle and compare against its manifest")
@@ -440,6 +481,11 @@ def main(argv=None) -> int:
     p.add_argument("file")
     p.add_argument("--force", action="store_true", help="replace an existing bundle at the destination")
     p.set_defaults(func=cmd_import)
+
+    p = sub.add_parser("assemble", help="combine matching partial bundles offline into this vault")
+    p.add_argument("partials", nargs="+", metavar="BUNDLE",
+                   help="partial bundle directories with the same pinned revision")
+    p.set_defaults(func=cmd_assemble)
 
     args = parser.parse_args(argv)
     return args.func(args)

@@ -348,7 +348,7 @@ def new_ledger(repo_id: str, repo_type: str, revision_ref: str, info) -> dict:
     }
 
 
-def begin_session(bundle_dir: Path, ledger: dict) -> dict:
+def begin_session(bundle_dir: Path, ledger: dict, shard: tuple[int, int] | None = None) -> dict:
     session = {
         "started": _utc_now(),
         "ended": None,
@@ -360,6 +360,8 @@ def begin_session(bundle_dir: Path, ledger: dict) -> dict:
         "retries": 0,
         "host": socket.gethostname(),
     }
+    if shard is not None:
+        session["shard"] = f"{shard[0]}/{shard[1]}"
     ledger["sessions"].append(session)
     save_ledger(bundle_dir, ledger)
     return session
@@ -619,6 +621,53 @@ def print_plan(plan: dict, progress=print) -> None:
         f"free {human_size(disk['free_bytes'])} at {disk['checked_path']} — "
         f"{disk['verdict'].upper()}"
     )
+
+
+def transfer_groups(
+    expected: list[dict],
+    shard: tuple[int, int] | None = None,
+) -> list[tuple[int | None, list[dict]]]:
+    """Return deterministic byte-balanced lane groups in participant order."""
+    if shard is None:
+        return [(None, sorted(expected, key=lambda item: (item.get("size") or 0, item["path"])))]
+
+    participant, total_lanes = shard
+    lanes: list[list[dict]] = [[] for _ in range(total_lanes)]
+    lane_bytes = [0] * total_lanes
+    # Longest-processing-time balancing is deterministic and keeps typical
+    # equal-sized weight shards evenly distributed by bytes, not file count.
+    for item in sorted(expected, key=lambda value: (-(value.get("size") or 0), value["path"])):
+        lane = min(range(total_lanes), key=lambda number: (lane_bytes[number], number))
+        lanes[lane].append(item)
+        lane_bytes[lane] += item.get("size") or 0
+    for lane in lanes:
+        lane.sort(key=lambda item: (item.get("size") or 0, item["path"]))
+
+    first = participant - 1
+    order = [(first + offset) % total_lanes for offset in range(total_lanes)]
+    return [(lane, lanes[lane]) for lane in order]
+
+
+def print_shard_plan(ledger: dict, shard: tuple[int, int], progress=print) -> None:
+    """Describe the cooperative lane this participant will prioritize."""
+    from .readme_gen import human_size
+
+    groups = transfer_groups(ledger["expected"], shard)
+    lane, assigned = groups[0]
+    assigned_bytes = sum(item.get("size") or 0 for item in assigned)
+    total_bytes = sum(item.get("size") or 0 for item in ledger["expected"])
+    percent = (assigned_bytes * 100 / total_bytes) if total_bytes else 0
+    order = " -> ".join(str(number + 1) for number, _items in groups if number is not None)
+    progress(
+        f"Cooperative shard {shard[0]}/{shard[1]}: lane {lane + 1} first "
+        f"({len(assigned)} files, {human_size(assigned_bytes)}, {percent:.1f}% of bytes); "
+        f"full lane order {order}"
+    )
+    if len(assigned) == 0 or len(ledger["expected"]) < shard[1]:
+        progress(
+            "  WARNING: fewer files than cooperative lanes; this bundle cannot "
+            "distribute useful starting work across every participant"
+        )
 
 
 class NetworkCounter:
@@ -949,6 +998,66 @@ def _record_download_result(bundle_dir: Path, ledger: dict, session: dict, resul
     save_ledger(bundle_dir, ledger)
 
 
+def _transfer_small_files(
+    small: list[dict],
+    bundle_dir: Path,
+    payload_dir: Path,
+    ledger: dict,
+    session: dict,
+    counter: NetworkCounter,
+    local_sources: dict[str, list[dict]],
+    stop_controller: StopController | None,
+    jobs: int,
+    progress,
+) -> None:
+    if not small:
+        return
+    progress(
+        f"Transferring {len(small)} small files with {min(jobs, len(small))} workers "
+        f"(< {SMALL_FILE_LIMIT} bytes each) ..."
+    )
+    clean_stop = None
+    first_error = None
+    with ThreadPoolExecutor(max_workers=jobs) as executor:
+        futures = {
+            executor.submit(
+                _download_one,
+                expected,
+                payload_dir,
+                ledger,
+                counter,
+                stop_controller,
+                local_sources,
+            ): expected
+            for expected in small
+        }
+        for future in as_completed(futures):
+            expected = futures[future]
+            try:
+                result = future.result()
+            except CleanStop as stop:
+                if clean_stop is None or stop.reason == "interrupt":
+                    clean_stop = stop
+            except BaseException as exc:
+                if first_error is None:
+                    first_error = exc
+            else:
+                source = result["record"]["source"]
+                suffix = f" from {source}" if source.startswith("local:") else ""
+                progress(f"Verified {expected['path']} ({result['record']['size']} bytes){suffix}")
+                _record_download_result(bundle_dir, ledger, session, result)
+                if stop_controller is not None:
+                    try:
+                        stop_controller.check(session)
+                    except CleanStop as stop:
+                        if clean_stop is None or stop.reason == "interrupt":
+                            clean_stop = stop
+    if first_error is not None:
+        raise first_error
+    if clean_stop is not None:
+        raise clean_stop
+
+
 def transfer_all(
     bundle_dir: Path,
     payload_dir: Path,
@@ -957,85 +1066,231 @@ def transfer_all(
     progress=print,
     stop_controller: StopController | None = None,
     jobs: int = 4,
+    shard: tuple[int, int] | None = None,
 ) -> dict:
     """Fetch and immediately verify every remaining file at the pinned commit."""
-    remaining = [
-        expected for expected in ledger["expected"]
-        if (ledger["files"].get(expected["path"]) or {}).get("status") != "verified"
-    ]
-    remaining.sort(key=lambda item: (item.get("size") or 0, item["path"]))
-    small = [item for item in remaining if (item.get("size") or 0) < SMALL_FILE_LIMIT]
-    large = [item for item in remaining if (item.get("size") or 0) >= SMALL_FILE_LIMIT]
     counter = NetworkCounter(session, stop_controller)
     local_sources = local_source_index(bundle_dir, ledger)
+    groups = transfer_groups(ledger["expected"], shard)
 
     with _resumable_hub_transport(payload_dir):
-        if small:
-            progress(
-                f"Transferring {len(small)} small files with {min(jobs, len(small))} workers "
-                f"(< {SMALL_FILE_LIMIT} bytes each) ..."
-            )
-            clean_stop = None
-            first_error = None
-            with ThreadPoolExecutor(max_workers=jobs) as executor:
-                futures = {
-                    executor.submit(
-                        _download_one,
-                        expected,
-                        payload_dir,
-                        ledger,
-                        counter,
-                        stop_controller,
-                        local_sources,
-                    ): expected
-                    for expected in small
-                }
-                for future in as_completed(futures):
-                    expected = futures[future]
-                    try:
-                        result = future.result()
-                    except CleanStop as stop:
-                        if clean_stop is None or stop.reason == "interrupt":
-                            clean_stop = stop
-                    except BaseException as exc:
-                        if first_error is None:
-                            first_error = exc
-                    else:
-                        source = result["record"]["source"]
-                        suffix = f" from {source}" if source.startswith("local:") else ""
-                        progress(
-                            f"Verified {expected['path']} ({result['record']['size']} bytes){suffix}"
-                        )
-                        _record_download_result(bundle_dir, ledger, session, result)
-                        if stop_controller is not None:
-                            try:
-                                stop_controller.check(session)
-                            except CleanStop as stop:
-                                if clean_stop is None or stop.reason == "interrupt":
-                                    clean_stop = stop
-            if first_error is not None:
-                raise first_error
-            if clean_stop is not None:
-                raise clean_stop
-
-        for index, expected in enumerate(large, 1):
-            progress(
-                f"Transferring large file {index}/{len(large)}: {expected['path']} "
-                f"({expected.get('size') or 0} bytes)"
-            )
-            result = _download_one(
-                expected,
+        for lane, assigned in groups:
+            remaining = [
+                expected for expected in assigned
+                if (ledger["files"].get(expected["path"]) or {}).get("status") != "verified"
+            ]
+            if not remaining:
+                continue
+            if lane is not None:
+                progress(f"Cooperative lane {lane + 1}/{shard[1]} ...")
+            small = [item for item in remaining if (item.get("size") or 0) < SMALL_FILE_LIMIT]
+            large = [item for item in remaining if (item.get("size") or 0) >= SMALL_FILE_LIMIT]
+            _transfer_small_files(
+                small,
+                bundle_dir,
                 payload_dir,
                 ledger,
+                session,
                 counter,
-                stop_controller,
                 local_sources,
+                stop_controller,
+                jobs,
+                progress,
             )
-            _record_download_result(bundle_dir, ledger, session, result)
-            if stop_controller is not None:
-                stop_controller.check(session)
+
+            for index, expected in enumerate(large, 1):
+                progress(
+                    f"Transferring large file {index}/{len(large)}: {expected['path']} "
+                    f"({expected.get('size') or 0} bytes)"
+                )
+                result = _download_one(
+                    expected,
+                    payload_dir,
+                    ledger,
+                    counter,
+                    stop_controller,
+                    local_sources,
+                )
+                _record_download_result(bundle_dir, ledger, session, result)
+                if stop_controller is not None:
+                    stop_controller.check(session)
 
     return transfer_plan(payload_dir, ledger)
+
+
+def _same_transfer_set(left: dict, right: dict) -> bool:
+    return all(left.get(key) == right.get(key) for key in (
+        "transfer_version",
+        "repo_id",
+        "repo_type",
+        "revision",
+        "expected",
+    ))
+
+
+def _merge_transfer_caches(
+    source_payloads: list[Path],
+    destination_payload: Path,
+) -> tuple[int, int]:
+    """Merge portable Hub caches with one copy of each longest byte partial."""
+    destination_cache = destination_payload / ".cache" / "huggingface"
+    copied_files = 0
+    copied_partial_bytes = 0
+    candidates: dict[Path, Path] = {}
+    for source_payload in source_payloads:
+        source_cache = source_payload / ".cache" / "huggingface"
+        if not source_cache.is_dir():
+            continue
+        for source in sorted(source_cache.rglob("*")):
+            if not source.is_file() or source.is_symlink() or source.name.endswith(".lock"):
+                continue
+            relative = source.relative_to(source_cache)
+            current = candidates.get(relative)
+            if current is None or (
+                source.name.endswith(".incomplete")
+                and source.stat().st_size > current.stat().st_size
+            ):
+                candidates[relative] = source
+
+    for relative, source in sorted(candidates.items()):
+        destination = destination_cache / relative
+        if source.name.endswith(".incomplete"):
+            source_size = source.stat().st_size
+            if destination.is_file() and destination.stat().st_size >= source_size:
+                continue
+            _copy_local_file(source, destination)
+            copied_files += 1
+            copied_partial_bytes += source_size
+        elif not destination.exists():
+            _copy_local_file(source, destination)
+            copied_files += 1
+    return copied_files, copied_partial_bytes
+
+
+def assemble_partials(
+    partials: list[Path],
+    vault: Path,
+    progress=print,
+) -> tuple[Path, dict]:
+    """Combine matching partial bundles offline into one resumable target."""
+    import copy
+
+    from .archiver import bundle_dir_for
+    from .schema import payload_root_for
+
+    if not partials:
+        raise SystemExit("error: assemble needs at least one partial bundle")
+
+    sources = []
+    for source_dir in partials:
+        try:
+            source_ledger = load_ledger(source_dir)
+        except LedgerError as exc:
+            raise SystemExit(f"error: cannot assemble {source_dir}: {exc}") from exc
+        sources.append((source_dir, source_ledger))
+
+    seed = sources[0][1]
+    for source_dir, source_ledger in sources[1:]:
+        if not _same_transfer_set(seed, source_ledger):
+            raise SystemExit(
+                f"error: {source_dir} does not have the same pinned repository, "
+                "revision, and expected inventory as the first partial"
+            )
+
+    destination = bundle_dir_for(
+        vault,
+        seed["repo_id"],
+        seed["revision"],
+        seed["repo_type"],
+    )
+    root = payload_root_for(seed["repo_type"])
+    destination_payload = destination / root
+    expected_paths = {item["path"] for item in seed["expected"]}
+
+    with transfer_lock(destination, progress=progress):
+        if (destination / "manifest.json").is_file():
+            raise SystemExit(f"error: destination is already a registered bundle: {destination}")
+        if ledger_path(destination).is_file():
+            ledger = load_ledger(destination)
+            if not _same_transfer_set(seed, ledger):
+                raise SystemExit(
+                    f"error: destination partial has a different transfer set: {destination}"
+                )
+        else:
+            ledger = copy.deepcopy(seed)
+            ledger["files"] = {}
+            ledger["sessions"] = []
+            ledger["events"] = []
+            save_ledger(destination, ledger)
+
+        session = begin_session(destination, ledger)
+        session["assembly_sources"] = len(sources)
+        session_finished = False
+        copied_payload_files = 0
+        copied_cache_files = 0
+        copied_partial_bytes = 0
+        try:
+            # Validate anything already present in the destination before it
+            # suppresses a good copy from one of the incoming partials.
+            plan = reconcile(
+                destination,
+                destination_payload,
+                ledger,
+                session,
+                progress=progress,
+                rehash=True,
+            )
+            for ordinal, (source_dir, source_ledger) in enumerate(sources, 1):
+                source_payload = source_dir / root
+                progress(f"Merging partial {ordinal}/{len(sources)}: {source_dir}")
+                for relative, source_file in iter_payload_files(source_payload):
+                    if relative not in expected_paths:
+                        continue
+                    destination_file = _payload_path(destination_payload, relative)
+                    if destination_file.exists():
+                        continue
+                    _copy_local_file(source_file, destination_file)
+                    copied_payload_files += 1
+
+                hosts = sorted({
+                    str(item.get("host"))
+                    for item in source_ledger.get("sessions", [])
+                    if item.get("host")
+                })
+                host_note = ", ".join(hosts) if hosts else "unknown host"
+                record_event(
+                    ledger,
+                    None,
+                    "assembled_partial",
+                    f"merged cooperative input {ordinal}/{len(sources)} from {host_note}",
+                )
+                plan = reconcile(
+                    destination,
+                    destination_payload,
+                    ledger,
+                    session,
+                    progress=progress,
+                )
+
+            copied_cache_files, copied_partial_bytes = _merge_transfer_caches(
+                [source_dir / root for source_dir, _source_ledger in sources],
+                destination_payload,
+            )
+
+            finish_session(destination, ledger, session, "assemble")
+            session_finished = True
+        except BaseException:
+            if not session_finished:
+                finish_session(destination, ledger, session, "error")
+            raise
+
+        plan = add_disk_preflight(destination, transfer_plan(destination_payload, ledger))
+        progress(
+            f"Assembled {copied_payload_files} payload files and {copied_cache_files} cache files "
+            f"({copied_partial_bytes} partial bytes copied)"
+        )
+        print_plan(plan, progress=progress)
+        return destination, plan
 
 
 def file_records(ledger: dict, payload_root: str) -> tuple[list[dict], list[str]]:

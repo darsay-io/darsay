@@ -189,6 +189,7 @@ def archive_model(
     max_minutes: float | None = None,
     rehash: bool = False,
     jobs: int = 4,
+    shard: tuple[int, int] | None = None,
     progress=print,
 ) -> Path | None:
     """Archive a Hub repo through pin → reconcile → transfer → register."""
@@ -207,6 +208,7 @@ def archive_model(
         record_event,
         save_ledger,
         print_plan,
+        print_shard_plan,
         transfer_all,
         transfer_lock,
         transfer_plan,
@@ -306,12 +308,14 @@ def archive_model(
             )
             add_disk_preflight(bundle_dir, plan)
             print_plan(plan, progress=progress)
+            if shard is not None:
+                print_shard_plan(ledger, shard, progress=progress)
             return None
 
         stop_controller = StopController(max_bytes=max_bytes, max_minutes=max_minutes)
         stop_controller.start()
         with stop_controller.sigint_handler():
-            session = begin_session(bundle_dir, ledger)
+            session = begin_session(bundle_dir, ledger, shard=shard)
             session_finished = False
             try:
                 plan = reconcile(
@@ -324,6 +328,8 @@ def archive_model(
                 )
                 add_disk_preflight(bundle_dir, plan)
                 print_plan(plan, progress=progress)
+                if shard is not None:
+                    print_shard_plan(ledger, shard, progress=progress)
                 if plan["disk"]["verdict"] == "insufficient":
                     progress("WARNING: disk preflight is insufficient; transfer may end with ENOSPC")
                 stop_controller.check(session)
@@ -335,6 +341,7 @@ def archive_model(
                     progress=progress,
                     stop_controller=stop_controller,
                     jobs=jobs,
+                    shard=shard,
                 )
                 if not plan["complete"]:
                     raise RuntimeError("transfer ended without verifying every pinned file")
