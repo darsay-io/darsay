@@ -33,7 +33,7 @@ from . import SCHEMA_VERSION, __version__
 from .hashing import bundle_hash
 from .licensing import build_licensing_record
 from .metadata import estimate_runtime, extract_dataset_metadata, extract_model_metadata
-from .schema import ARTIFACT_TYPES, check_completeness, payload_root_for
+from .schema import ARTIFACT_TYPES, BUNDLE_METADATA_FILES, check_completeness, payload_root_for
 
 
 def utc_now() -> str:
@@ -522,8 +522,7 @@ def _register_bundle(api: HfApi, bundle_dir: Path, payload_dir: Path, ledger: di
             "bundle_hash": bundle_hash(file_records, root),
             "layout": {
                 "payload_root": ARTIFACT_TYPES[repo_type]["payload_root"],
-                "mutable_metadata": ["manifest.json", "README.md", "VERIFICATION.md",
-                                     "verification.json", "curation.md", "LICENSE"],
+                "mutable_metadata": [*BUNDLE_METADATA_FILES, "LICENSE"],
             },
             "files": file_records,
         },

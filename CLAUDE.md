@@ -18,6 +18,8 @@ point `modelvault` (argparse, subcommands in `cli.py`).
 ## Layout
 
 - `src/modelvault/` — `archiver.py` (download + manifest assembly),
+  `transfer.py` (pin ledger, reconciliation, resumable/budgeted per-file
+  transfer, cooperative lanes/assembly, sibling-blob reuse),
   `estimate.py` (read-only preflight: sizes/params/disk from Hub metadata),
   `verify.py`, `smoke.py`, `export.py` (.mvb.tar), `readme_gen.py`,
   `metadata.py`, `licensing.py`, `hashing.py`, `safetensors_meta.py`,
@@ -35,8 +37,8 @@ point `modelvault` (argparse, subcommands in `cli.py`).
   longevity rests on the formats, not the tool.
   `docs/DATASETS.md` — dataset bundles (implemented, schema 1.2.0):
   Hub-address refs, per-type payload roots, dataset manifest sections.
-  `docs/INCREMENTAL.md` — incremental archiving (design, NOT implemented;
-  target v0.5.0/schema 1.4.0): idempotent resumable transfer — pin →
+  `docs/INCREMENTAL.md` — incremental archiving (implemented in
+  v0.5.0/schema 1.4.0): idempotent resumable transfer — pin →
   reconcile → plan → transfer → register, `transfer.json` ledger, session
   budgets, local-source adoption.
   **Update these whenever manifest fields or the export format change**, and
@@ -50,11 +52,17 @@ point `modelvault` (argparse, subcommands in `cli.py`).
 - **Payload immutability:** nothing under a bundle's `model/` is ever
   modified after archiving. All tool-written state goes to bundle-root
   metadata files; the bundle hash covers `model/` only.
+- **Partial bytes are authoritative and portable:** `transfer.json` is
+  disposable acceleration state; full payload files and bundle-local
+  `.cache/huggingface/` partials must survive budgets, SIGINT, ledger loss,
+  and copying to a different vault. Never put source-machine absolute paths
+  in the ledger.
 - **Export determinism:** the same bundle state must produce a byte-identical
   `.mvb.tar` (sorted entries, marker first, normalized tar metadata, no wall
   clock inside the tar). Volatile machine-local data — export logs, hydration
   and run records — goes in `exports.json` / `hydration.json`, which are
-  excluded from exports. Check: export twice, compare SHA-256.
+  excluded from exports. `transfer.json` / `transfer.lock` are excluded too.
+  Check: export twice, compare SHA-256.
 - **Record, don't fabricate:** manifests contain only what was established
   from upstream or the payload; unknown = `null` (curator fills in later).
   Query caps must be recorded (`query_limit`), never silently truncated.

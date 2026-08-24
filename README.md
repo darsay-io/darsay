@@ -11,8 +11,11 @@ read from safetensors headers — no torch needed), snapshots the downstream
 ecosystem (quantizations, GGUFs, finetunes), and writes it all into a bundle
 that any Hugging Face-compatible loader can use as-is. When you want to hear
 the archived model speak, `modelvault run <bundle>` takes it from cold storage
-to a local inference — building the environment for you — in one command. And
-before committing tens of gigabytes, `modelvault estimate` prices a repo from
+to a local inference — building the environment for you — in one command.
+Large archives are incremental by default: budgets and Ctrl-C leave durable
+Range partials, copied partial bundles resume on another machine, and friends
+can coordinate byte-balanced transfer orders and assemble their work offline.
+Before committing tens of gigabytes, `modelvault estimate` prices a repo from
 Hub metadata alone — exact sizes, parameter counts, disk headroom, and its
 quantized ecosystem — without downloading a byte.
 
@@ -37,6 +40,10 @@ modelvault estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'   # price one 
 modelvault estimate datasets/saidutta69/fable-5-premium   # datasets use the Hub's own address grammar
 modelvault archive Qwen/Qwen3-0.6B          # download + hash + manifest + reports
 modelvault archive datasets/saidutta69/fable-5-premium    # dataset bundle: payload under data/
+modelvault archive Qwen/Qwen3.8-27B --max-gb 10           # pause cleanly; rerun to resume
+modelvault archive Qwen/Qwen3.8-27B --dry-run             # verified/partial/missing plan
+modelvault archive Qwen/Qwen3.8-27B --shard 1/3 --max-gb 20  # participant 1 of 3
+modelvault --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle>
 modelvault verify vault/qwen--qwen3-0.6b/<rev>    # re-hash, detect tampering
 modelvault smoke  vault/qwen--qwen3-0.6b/<rev> [--inference]
 modelvault list                             # inventory of the whole vault
@@ -70,6 +77,8 @@ vault/qwen--qwen3-0.6b/<revision12>/
 ├── curation.md         # curator's notes — the only hand-edited file
 ├── exports.json        # log of single-file exports (appears after first export)
 ├── hydration.json      # runnable-env record + run history (appears after first hydrate)
+├── transfer.json       # disposable resumable-transfer ledger + detailed history
+├── transfer.lock       # transient per-bundle writer lock (only during archive/assemble)
 └── LICENSE             # upstream license text, surfaced at the root
 ```
 
@@ -79,12 +88,39 @@ verification runs, curation notes, and access timestamps never disturb the
 archived artifact. To use the model, point `transformers` (or any HF-compatible
 loader) at `<bundle>/model` — no unpacking or conversion needed.
 
+## Incremental, relocatable, and cooperative transfers
+
+The first `archive` run pins one immutable commit and writes its expected file
+set to `transfer.json`. Every later run reconciles that set against local
+bytes, trusts already verified files, hashes and adopts unrecorded complete
+files, resumes bundle-local `.incomplete` files with HTTP Range, and only
+registers `manifest.json` after every expected file is verified. `--max-gb`,
+`--max-bytes`, and `--max-minutes` stop cleanly with exit code 10; `--rehash`
+rechecks trusted ledger entries; `--jobs` controls the small-file pool.
+
+Partial bundles are self-contained and relocatable. Copy the entire
+`<repo-slug>/<revision12>/` directory—including the payload `.cache`—under a
+different vault and rerun the same `archive` command. The pin is unchanged,
+completed files are adopted, the longest Range partial continues, and an
+inherited lock is safely recognized as a copied lock.
+
+For cooperative acquisition, collaborators use `--shard N/T`: `1/3`, `2/3`,
+and `3/3` deterministically prioritize different byte-balanced whole-file
+lanes, but each still proceeds through all lanes and can finish the identical
+bundle alone. `modelvault --vault DEST assemble PARTIAL...` validates that all
+inputs have the same full pin and expected inventory, clone-copies complete
+files, re-hashes them, and keeps the longest matching partial—all offline.
+File-granular coordination works especially well for sharded weights; one
+monolithic weight file cannot be divided into independent starting regions.
+Full design, ledger shape, and failure semantics:
+[docs/INCREMENTAL.md](docs/INCREMENTAL.md).
+
 ## What the manifest records
 
 | Section | Contents |
 |---|---|
 | `identity` | model name, family, publisher, version, release date, bundle id |
-| `source` | origin, repo id, pinned commit, download timestamp, downloader tool versions, mirrors, signatures, upstream popularity + tags at archive time |
+| `source` | origin, repo id, pinned commit, transfer session/byte accounting, downloader tool versions, local mirrors, signatures, upstream popularity + tags at archive time |
 | `licensing` | SPDX id, license files, commercial-use / redistribution / modification / attribution flags, patent grant, trademark terms, manual-review flag |
 | `inventory` | per-file size + SHA-256 (+BLAKE3), upstream LFS/git checksums with match status, deterministic bundle hash, expected layout |
 | `model_metadata` | parameter count (by dtype, read from safetensors headers), architecture, context length, precision/quantization, tokenizer class + vocab + special tokens + chat template, languages, training cutoff |

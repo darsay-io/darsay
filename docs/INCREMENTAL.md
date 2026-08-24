@@ -1,11 +1,11 @@
 # Incremental archiving — idempotent, resumable transfer
 
-**Status: design, not yet implemented.** Target: v0.5.0, manifest schema
-1.4.0 (additive). Companion to [QUANTIZATION.md](QUANTIZATION.md) (what to
+**Status: implemented** in v0.5.0, manifest schema 1.4.0 (additive),
+2026-08-24. Companion to [QUANTIZATION.md](QUANTIZATION.md) (what to
 archive) — this document is about *how the bytes get here* when "what" is
 tens of gigabytes to terabytes.
 
-The goal: `modelvault archive` becomes an operation you can interrupt at any
+`modelvault archive` is now an operation you can interrupt at any
 moment, re-run any number of times, and spread across days of budgeted
 sessions — and every run does the minimum network work required to converge
 on the same verified bundle:
@@ -17,9 +17,11 @@ modelvault archive Qwen/Qwen3.8-27B --dry-run       # what's left? (rsync -n)
 modelvault archive Qwen/Qwen3.8-27B                 # finish, verify, register
 ```
 
-No new subcommand and no "resume mode": **idempotent convergence is the
-default behavior of `archive`**. A completed bundle re-run is a no-op; an
-interrupted one continues; a damaged one heals.
+No new resume subcommand or mode: **idempotent convergence is the default
+behavior of `archive`**. An interrupted run continues and a damaged partial
+heals. A registered bundle remains protected by the existing already-exists
+guard; `--force` performs a fresh pin and adopts matching payload bytes
+instead of downloading them again.
 
 ## 1. Why this can beat rsync at its own game
 
@@ -48,8 +50,8 @@ around that one line.
 1. **The pinned revision is the transfer set.** The first run resolves the
    requested ref to a commit and records it; every later run uses the pin
    and never re-resolves. Upstream moving `main` cannot change, corrupt, or
-   restart an archive in progress (a moved ref is reported as information
-   only). One revision, one bundle dir, one convergence target — this is
+   restart an archive in progress (resume deliberately does not query the
+   moving ref). One revision, one bundle dir, one convergence target — this is
    what makes re-running safe.
 2. **Bytes are the authority; transfer state is a disposable cache.** The
    per-file ledger in `transfer.json` (§4) exists to avoid re-hashing
@@ -125,10 +127,11 @@ upstream mismatch and set aside — it never silently blocks the rest of the
 transfer. Small files (< 8 MiB) may fetch through a bounded worker pool
 (`--jobs`, default 4 — dataset bundles with thousands of parquet shards
 need this); large files download sequentially, one saturating stream at a
-time. When `hf_xet` is installed and the repo is Xet-backed, chunk-level
-transfer applies transparently inside `hf_hub_download`; the design neither
-requires nor is aware of it (optional-extra doctrine: benefit when present,
-degrade to plain HTTP when not).
+time. modelvault deliberately selects `hf_hub_download`'s HTTP path even
+when `hf_xet` is installed: current Xet aborts discard in-flight
+reconstruction state, while HTTP Range leaves a durable `.incomplete` file
+that survives budgets, SIGINT, process restarts, and filesystem copies. The
+Hub client still owns authentication, redirects, Range requests, and retries.
 
 **Register** — runs only when every expected file is `verified` (persistent
 upstream mismatches are carried into `checksum_verification` as `fail`,
@@ -144,12 +147,14 @@ existing rule that a manifest's presence blocks re-archiving (absent
 pin whose reconciliation adopts every verified byte, i.e. a re-verification
 plus manifest rebuild, not a re-download.
 
-Session accounting: every run appends a session record (started, ended,
-end reason — `complete` / `budget` / `interrupt` / `error` — bytes from
-network, bytes adopted, files completed, host). SIGINT finishes the
-in-flight state write and exits cleanly with the resume hint.
+Session accounting: every run appends a session record (started, ended, end
+reason — `complete` / `budget` / `interrupt` / `assemble` / `error` — bytes
+from network, bytes adopted, files completed, host). SIGINT finishes the
+in-flight state write and exits cleanly with the resume hint. Cooperative
+archive sessions also record their advisory `shard: "N/T"`; assembly records
+the number of merged inputs.
 
-**Exit codes:** `0` — bundle complete and registered (or already was);
+**Exit codes:** `0` — bundle completed and registered by this invocation;
 `10` — clean partial stop, more remains (budgets and interrupts), so
 wrappers can loop; `1` — error.
 
@@ -182,7 +187,8 @@ Bundle-root, machine-local, excluded from `.mvb.tar` exports exactly like
   "sessions": [
     {"started": "…", "ended": "…", "end_reason": "budget",
      "bytes_network": 10737418240, "bytes_adopted": 0,
-     "files_completed": 3, "host": "…"}
+     "bytes_local_sources": 4966786096, "retries": 0,
+     "files_completed": 3, "host": "…", "shard": "1/3"}
   ],
   "events": [
     {"at": "…", "path": "…", "event": "digest_mismatch", "detail": "…"}
@@ -190,11 +196,35 @@ Bundle-root, machine-local, excluded from `.mvb.tar` exports exactly like
 }
 ```
 
-A `transfer.lock` (pid, host, started) guards against two concurrent runs on
-one bundle; a lock whose pid is dead on the same host is stale and reclaimed
-with a notice. The half-state signal is directional and unambiguous:
+A `transfer.lock` (pid, host, started, physical bundle identity) guards
+against two concurrent runs on one bundle; a lock whose pid is dead on the
+same host is stale and reclaimed with a notice. A lock copied with a partial
+bundle is also reclaimed when its recorded device/inode differs, while two
+paths to the same physical directory still exclude one another. The
+half-state signal is directional and unambiguous:
 `transfer.json` without `manifest.json` = archive in progress;
 `manifest.json` present = registered, ledger is history.
+
+### Relocating a partial transfer
+
+The durable `transfer.json` and resume cache contain repository-relative paths
+and pinned upstream facts, never the source machine's vault path. HTTP partials
+and Hub metadata live under the payload's `.cache/huggingface/`; the Xet cache
+is pointed there too
+as a defensive fallback. Copy the partial bundle directory—including its
+payload `.cache` and `transfer.json`—under another vault's same two-level
+`<repo-slug>/<revision12>/` layout, then re-run the same archive command:
+
+```bash
+cp -a /Volumes/USB/qwen--qwen3-0.6b/c1899de289a0 /srv/vault/qwen--qwen3-0.6b/
+modelvault --vault /srv/vault archive Qwen/Qwen3-0.6B
+```
+
+The copied lock, if any, is recognized as belonging to the original physical
+directory and reclaimed. Reconciliation adopts completed files, Range resumes
+the copied partial, registered siblings in the destination vault remain
+eligible local sources, and no pin/metadata refresh changes the convergence
+target.
 
 ## 5. Minimizing network traffic
 
@@ -219,7 +249,42 @@ In descending order of bytes saved:
    a 10 GB shard costs 200 MB to finish, not 10 GB.
 4. **Metadata thrift**: the plan is fetched once at pin time; resume
    sessions make no API calls, and registration makes only the
-   completion-time ones (ecosystem queries, card).
+   completion-time ecosystem queries. Card facts come from the pin ledger.
+
+### Cooperative shard keys and offline assembly
+
+`--shard N/T` is an advisory transfer-order key for T collaborators. It does
+not filter the expected set: every participant still proceeds through all
+lanes and can independently finish the identical bundle. Files are assigned
+deterministically to T lanes with longest-file-first byte balancing; participant
+N fetches lane N first, then cycles through every other lane. For three people:
+
+```bash
+# Alice, Bob, and Carol use the same repo/revision and budget, but distinct starts.
+modelvault archive Qwen/Qwen3.8-27B --shard 1/3 --max-gb 20
+modelvault archive Qwen/Qwen3.8-27B --shard 2/3 --max-gb 20
+modelvault archive Qwen/Qwen3.8-27B --shard 3/3 --max-gb 20
+```
+
+The plan prints the chosen lane's file count, byte size, percentage, and full
+lane order. This is whole-file scheduling: a normally sharded weight set
+distributes well, while one monolithic weight file cannot yield three distinct
+starting thirds without a different Range protocol.
+
+Matching partials can then be combined with no network access:
+
+```bash
+modelvault --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle> /usb/carol/<bundle>
+modelvault --vault ./combined archive Qwen/Qwen3.8-27B
+```
+
+`assemble` requires identical repo/type/pin/expected inventories before it
+creates a destination. It clone-copies or copies full payload files, re-hashes
+them against the pin, merges portable cache metadata, keeps only the longest
+copy of each matching `.incomplete`, and records an `assemble` session without
+embedding source-machine paths in the ledger. The final `archive` invocation
+continues any remainder—or, when assembly reached 100%, performs registration
+with zero payload network bytes.
 
 ## 6. Session budgets
 
@@ -230,8 +295,11 @@ In descending order of bytes saved:
 | `--dry-run` | pin (if new) + reconcile + plan report; move no payload bytes |
 | `--rehash` | re-verify every present file by digest instead of trusting the ledger (periodic paranoia for months-long archives) |
 | `--jobs N` | small-file worker pool width (default 4; large files always sequential) |
+| `--shard N/T` | advisory cooperative order: byte-balance files into T lanes and fetch lane N first; the expected set is unchanged |
 
-Budgets are checked at chunk boundaries: the in-flight file is left as a
+Budgets are approximate and checked at received-chunk boundaries: active
+small-file workers and the chunk that crosses a cap may overshoot it. The
+in-flight file is left as a
 resumable partial, counted toward the next session. `modelvault list` grows
 an in-progress row for bundles with a ledger but no manifest —
 `archiving: 61% (34.1/55.6 GB, 9/15 files verified)` — so the vault's
@@ -260,6 +328,8 @@ a schema change.
 | Persistent digest mismatch | Retried once, then recorded; registration proceeds with `checksum_verification: fail` and the warning — same contract as the one-shot flow. |
 | Disk fills mid-session | Plan-phase preflight warns before starting; a mid-session `ENOSPC` ends the session as `error` with state intact. |
 | Two concurrent runs | Second exits on the live lock. |
+| Partial bundle copied or moved | Relative ledger/cache state resumes at the new vault; an inherited lock is reclaimed only when the physical directory identity changed. |
+| Cooperative inputs disagree | `assemble` rejects them before creating a destination; repo, type, full pin, and expected inventory must all match. |
 
 ## 9. Considered and rejected
 
@@ -267,9 +337,7 @@ a schema change.
   immutable and content-addressed; there is no "changed file" to delta
   against, only absent bytes. Cross-revision similarity is real but
   weight retraining changes shards wholesale, so whole-file local-source
-  reuse (§5.2) captures nearly all of the win at none of the complexity —
-  and Xet-backed repos already get content-defined-chunk dedup below our
-  layer when `hf_xet` is present.
+  reuse (§5.2) captures nearly all of the win at none of the complexity.
 - **Staging directory + atomic rename into the vault.** The vault already
   has an atomic registration point — `manifest.json` — and downloading
   in place is what makes partials resumable and visible to `list`. A
@@ -281,12 +349,34 @@ a schema change.
 - **Multi-source / torrent-style fetch.** Out of scope; `mirrors_used`
   leaves the manifest room for it if a second origin ever exists.
 
+## 10. Implementation notes and deliberate drift
+
+- `huggingface_hub` 1.18 replaced stable local-dir incomplete names with
+  process-unique temporary files and removes them on failure. Because
+  modelvault holds a stronger per-bundle lock, its transport compatibility
+  wrapper restores a stable bundle-local incomplete file, then delegates the
+  actual HTTP Range/retry work to the Hub client's `http_get`. Core now
+  requires `huggingface_hub>=1.23`, which also reports actual network bytes
+  separately from reconstruction progress.
+- The design originally treated Xet as transparently resumable. Current
+  `hf_xet` abort behavior did not preserve a usable mid-file checkpoint in
+  validation, so v0.5.0 forces the durable HTTP/Range route for archival
+  transfers. This can be revisited when Xet exposes durable cross-process
+  continuation without weakening byte budgets or Ctrl-C semantics.
+- Gated repositories marked gated at pin time receive a read-authorization
+  check before any ledger or payload is created. If access disappears only
+  after pinning, the partial is retained and its error is recorded.
+- Cooperative lanes and `assemble` were added during implementation. They
+  operate above the same pinned expected set: order and offline aggregation
+  are acceleration only and cannot change the registered payload.
+
 ## See also
 
-- [MANIFEST.md](MANIFEST.md) — `source.transfer` fields once implemented.
+- [MANIFEST.md](MANIFEST.md) — `source.transfer` fields and local-source
+  provenance.
 - [QUANTIZATION.md](QUANTIZATION.md) — deciding *what* to archive; its
   proposed `archive --include` subsets compose with this design (the
   expected set is filtered before planning, recorded as `source.subset`).
 - [DESIGN.md](DESIGN.md) — why huggingface_hub stays the transport
-  (`hf_hub_download` owns Range/retry/Xet mechanics; this design owns
+  (`hf_hub_download` owns authentication/Range/retry mechanics; this design owns
   state, verification, and convergence).

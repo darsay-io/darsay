@@ -1,4 +1,4 @@
-# manifest.json — schema reference (v1.3.0)
+# manifest.json — schema reference (v1.4.0)
 
 `manifest.json` is the machine-readable source of truth for a bundle. This
 document describes every field so a bundle remains interpretable without the
@@ -21,7 +21,7 @@ Conventions:
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | Version of this schema (`"1.3.0"`; 1.1 defined the shape of `runtime.tested_hardware`; 1.2 added the dataset artifact type and `relationships.training_datasets`; 1.3 added `source.access` and structured lineage (`relationships.base_models`, `base_model_relation`) — all additive). |
+| `schema_version` | Version of this schema (`"1.4.0"`; 1.1 defined `runtime.tested_hardware`; 1.2 added datasets; 1.3 added gate and structured-lineage provenance; 1.4 added incremental-transfer accounting and local-source provenance — all additive). |
 | `artifact_type` | Registry key driving completeness rules and the payload root (`"model"` or `"dataset"`; future: GGUF packs, papers — see `src/modelvault/schema.py`). |
 | `bundle_id` | `<repo_id lowercased, "/"→"--">@<first 12 of pinned commit>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Dataset bundles take a `datasets--` prefix (`datasets--saidutta69--fable-5-premium@684cb1f849fe`) since model and dataset namespaces can collide on the Hub. Stable, deterministic, unique per (repo, revision). |
 
@@ -47,9 +47,10 @@ Provenance of the download.
 | `revision` | Full commit hash the download is pinned to. Re-archiving this revision reproduces the payload bit-for-bit. |
 | `revision_ref` | The ref that was requested (`main`, a tag, or a hash). |
 | `last_modified_upstream` | Upstream's last-commit time at archive time. |
-| `download_timestamp` | When the archive was made. |
+| `download_timestamp` | When the transfer completed and the bundle was registered. |
+| `transfer` | Durable summary of incremental acquisition: `sessions`, `started`, `completed`, actual `bytes_network`, `bytes_adopted`, `bytes_local_sources`, and `retries`. One uninterrupted archive has `sessions: 1`; totals may span budgeted, resumed, or offline-assembly runs. |
 | `downloader` | Tool name/version, `huggingface_hub` version, Python version, platform — enough to reconstruct the download environment. |
-| `mirrors_used` | Non-primary sources, if any were used (empty list otherwise). |
+| `mirrors_used` | Stable `local:<bundle_id>` references when registered sibling bundles supplied matching LFS blobs (empty list otherwise). Every local copy is independently re-hashed before attribution. |
 | `signatures` | Upstream cryptographic signatures, when provided (null otherwise — Hugging Face repos generally ship none). |
 | `access` | `{gated, notes}`. `gated` is the Hub gate status at archive time: `"auto"` (agree → instant access, contact info shared with the authors), `"manual"` (authors approve each request), or `false`. The gate agreement text lives in Hub repo settings, **not** in the repo tree, so it is not part of the snapshot — `notes` records that. Gates are enforced server-side on file downloads; an archive of a gated repo means the archiving account had accepted the terms. |
 | `upstream_stats_at_archive` | Downloads/month and likes at archive time — a popularity snapshot for the historical record. |
@@ -73,7 +74,7 @@ Provenance of the download.
 |---|---|
 | `file_count`, `total_size_bytes` | Payload totals. |
 | `bundle_hash` | `{algorithm, value, covers}`. SHA-256 over the sorted `"<sha256>  <path>"` lines of the payload — one value that fingerprints the whole payload. Covers the payload root only; bundle-root metadata is mutable by design. |
-| `layout` | `payload_root` (`model/` for model bundles, `data/` for dataset bundles — readers must take the root from here, writers from the registry) and the list of mutable metadata files. |
+| `layout` | `payload_root` (`model/` for model bundles, `data/` for dataset bundles — readers must take the root from here, writers from the registry) and the list of mutable bundle-root metadata files, including machine-local transfer/export/hydration state. |
 | `files[]` | Per file: `path`, `size`, `sha256`, `blake3` (null if blake3 wasn't installed), `upstream_lfs_sha256` (LFS files), `upstream_git_sha1` (small git-blob files), `verified_against_upstream` (true/false/null = no upstream expectation). |
 
 ## `model_metadata` — model bundles only
@@ -217,7 +218,11 @@ Export events are logged in the sibling file `exports.json`
 the manifest — see [MVB-FORMAT.md](MVB-FORMAT.md) for why. Hydration state and
 run history live in the sibling file `hydration.json` for the same reason:
 both are volatile machine-local state, excluded from exports — see
-[HYDRATION.md](HYDRATION.md).
+[HYDRATION.md](HYDRATION.md). The resumable acquisition ledger
+`transfer.json` and transient `transfer.lock` are also bundle-root,
+machine-local, payload-excluded, and export-excluded. `transfer.json` remains
+as detailed history after registration but is disposable: payload bytes and
+the manifest are archival authority. See [INCREMENTAL.md](INCREMENTAL.md).
 
 ## `security`
 

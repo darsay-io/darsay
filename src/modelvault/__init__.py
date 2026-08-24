@@ -1,6 +1,6 @@
 """modelvault: archive full model ecosystems as reproducible, auditable bundles."""
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 # Version of the manifest.json schema, independent of the tool version.
 # Bump the major component on breaking layout changes; consumers should
@@ -15,4 +15,7 @@ __version__ = "0.4.0"
 #        model-tree edge label), with finetuned_from now set only when the
 #        declared relation is `finetune`; licensing needs_manual_review/notes
 #        are gate-aware. Additive.
-SCHEMA_VERSION = "1.3.0"
+# 1.4.0: source.transfer session/accounting summary; source.mirrors_used is
+#        populated for verified sibling-bundle copies; archive-time checksum
+#        verification records its per-file timing. Additive.
+SCHEMA_VERSION = "1.4.0"
