@@ -235,6 +235,12 @@ def archive_model(
                 info = api.dataset_info(repo_id, revision=pin_revision, files_metadata=True)
             else:
                 info = api.model_info(repo_id, revision=pin_revision, files_metadata=True)
+            # Cards and repository metadata are publicly readable for many
+            # gated repos. Confirm actual read authorization before creating
+            # the ledger so an initially unauthorized archive remains clean;
+            # a later gate change still follows the partial-preserving path.
+            if getattr(info, "gated", None):
+                api.auth_check(repo_id, repo_type=repo_type)
         except GatedRepoError:
             # Pin-time failures have no durable transfer state and must retain
             # the pre-incremental clean-failure behavior.
