@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import socket
+import threading
+import time
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path, PurePosixPath
@@ -25,6 +28,67 @@ LOCK_FILE = "transfer.lock"
 
 class LedgerError(ValueError):
     """The transfer ledger cannot be trusted as acceleration state."""
+
+
+class CleanStop(Exception):
+    """Internal control flow for a budget or handled SIGINT stop."""
+
+    def __init__(self, reason: str, detail: str):
+        super().__init__(detail)
+        self.reason = reason
+        self.detail = detail
+
+
+class PartialTransfer(Exception):
+    """A cleanly stopped archive that should make the CLI exit 10."""
+
+    def __init__(self, bundle_dir: Path, reason: str, detail: str, plan: dict):
+        super().__init__(detail)
+        self.bundle_dir = bundle_dir
+        self.reason = reason
+        self.detail = detail
+        self.plan = plan
+
+
+class StopController:
+    """Coordinate byte/time budgets and a non-destructive SIGINT."""
+
+    def __init__(self, max_bytes: int | None = None, max_minutes: float | None = None):
+        self.max_bytes = max_bytes
+        self.max_seconds = max_minutes * 60 if max_minutes is not None else None
+        self.deadline: float | None = None
+        self.interrupted = False
+
+    def start(self) -> None:
+        if self.max_seconds is not None:
+            self.deadline = time.monotonic() + self.max_seconds
+
+    def check(self, session: dict) -> None:
+        if self.interrupted:
+            raise CleanStop("interrupt", "SIGINT received")
+        if self.max_bytes is not None and session["bytes_network"] >= self.max_bytes:
+            raise CleanStop(
+                "budget",
+                f"network byte budget reached ({session['bytes_network']} >= {self.max_bytes})",
+            )
+        if self.deadline is not None and time.monotonic() >= self.deadline:
+            raise CleanStop("budget", "time budget reached")
+
+    @contextmanager
+    def sigint_handler(self):
+        if threading.current_thread() is not threading.main_thread():
+            yield
+            return
+        previous = signal.getsignal(signal.SIGINT)
+
+        def request_stop(_signum, _frame):
+            self.interrupted = True
+
+        signal.signal(signal.SIGINT, request_stop)
+        try:
+            yield
+        finally:
+            signal.signal(signal.SIGINT, previous)
 
 
 def _utc_now() -> str:
@@ -309,18 +373,29 @@ def _discard_payload_file(path: Path, payload_dir: Path) -> None:
         parent = parent.parent
 
 
-def _partial_bytes(payload_dir: Path, relative: str) -> int:
+def _partial_bytes(payload_dir: Path, expected: dict) -> int:
     """Best-effort byte count for Hub local-dir incomplete files."""
-    rel = PurePosixPath(relative)
-    download_dir = payload_dir / ".cache" / "huggingface" / "download"
-    parent = download_dir.joinpath(*rel.parts[:-1])
-    if not parent.is_dir():
+    etag = expected.get("lfs_sha256") or expected.get("git_sha1")
+    if not etag:
         return 0
-    sizes = [p.stat().st_size for p in parent.glob(f"{rel.name}*.incomplete") if p.is_file()]
-    return max(sizes, default=0)
+    try:
+        from huggingface_hub._local_folder import get_local_download_paths
+
+        paths = get_local_download_paths(payload_dir, expected["path"])
+        path = paths.incomplete_path(etag)
+        return path.stat().st_size if path.is_file() else 0
+    except (ImportError, OSError, ValueError):
+        return 0
 
 
-def reconcile(bundle_dir: Path, payload_dir: Path, ledger: dict, session: dict, progress=print) -> dict:
+def reconcile(
+    bundle_dir: Path,
+    payload_dir: Path,
+    ledger: dict,
+    session: dict,
+    progress=print,
+    apply: bool = True,
+) -> dict:
     """Reconcile ledger acceleration state with authoritative payload bytes."""
     payload_dir.mkdir(parents=True, exist_ok=True)
     expected_by_path = {item["path"]: item for item in ledger["expected"]}
@@ -329,8 +404,9 @@ def reconcile(bundle_dir: Path, payload_dir: Path, ledger: dict, session: dict, 
     for relative in sorted(set(present_by_path) - set(expected_by_path)):
         path = present_by_path[relative]
         record_event(ledger, relative, "unexpected_file", "removed; not in pinned transfer set")
-        _discard_payload_file(path, payload_dir)
-        save_ledger(bundle_dir, ledger)
+        if apply:
+            _discard_payload_file(path, payload_dir)
+            save_ledger(bundle_dir, ledger)
 
     adopted_files = 0
     adopted_bytes = 0
@@ -352,7 +428,8 @@ def reconcile(bundle_dir: Path, payload_dir: Path, ledger: dict, session: dict, 
                 "size_mismatch",
                 f"expected {expected_size}, found {actual_size}; removed and demoted",
             )
-            _discard_payload_file(path, payload_dir)
+            if apply:
+                _discard_payload_file(path, payload_dir)
         elif path.is_file():
             record = _verified_record(expected, path, "adopted", int(state.get("attempts") or 0))
             if record["verified_against_upstream"] is not False:
@@ -361,16 +438,19 @@ def reconcile(bundle_dir: Path, payload_dir: Path, ledger: dict, session: dict, 
                 adopted_bytes += record["size"]
                 session["files_completed"] += 1
                 session["bytes_adopted"] += record["size"]
-                save_ledger(bundle_dir, ledger)
+                if apply:
+                    save_ledger(bundle_dir, ledger)
                 continue
             record_event(ledger, relative, "digest_mismatch", "local bytes did not match upstream; removed")
-            _discard_payload_file(path, payload_dir)
+            if apply:
+                _discard_payload_file(path, payload_dir)
 
         ledger["files"][relative] = {
             "status": "missing",
             "attempts": int(state.get("attempts") or 0),
         }
-        save_ledger(bundle_dir, ledger)
+        if apply:
+            save_ledger(bundle_dir, ledger)
 
     if adopted_files:
         progress(f"Adopted {adopted_files} existing files ({adopted_bytes} bytes) after hashing")
@@ -389,7 +469,7 @@ def transfer_plan(payload_dir: Path, ledger: dict) -> dict:
             counts["verified"] += 1
             bytes_by_state["verified"] += size
             continue
-        partial = min(_partial_bytes(payload_dir, expected["path"]), size) if size else 0
+        partial = min(_partial_bytes(payload_dir, expected), size) if size else 0
         if partial:
             counts["partial"] += 1
             bytes_by_state["partial"] += partial
@@ -404,22 +484,103 @@ def transfer_plan(payload_dir: Path, ledger: dict) -> dict:
     }
 
 
+def add_disk_preflight(bundle_dir: Path, plan: dict) -> dict:
+    """Attach estimate-style free-space headroom to a transfer plan."""
+    import shutil
+
+    probe = bundle_dir.resolve()
+    while not probe.exists():
+        probe = probe.parent
+    free = shutil.disk_usage(probe).free
+    needed = plan["bytes"]["remaining_network"]
+    if free >= needed * 1.1:
+        verdict = "ok"
+    elif free >= needed:
+        verdict = "tight"
+    else:
+        verdict = "insufficient"
+    plan["disk"] = {
+        "checked_path": str(probe),
+        "free_bytes": free,
+        "needed_bytes": needed,
+        "verdict": verdict,
+    }
+    return plan
+
+
+def print_plan(plan: dict, progress=print) -> None:
+    from .readme_gen import human_size
+
+    files = plan["files"]
+    sizes = plan["bytes"]
+    progress("Transfer plan:")
+    progress(
+        f"  verified: {files['verified']}/{files['total']} files, "
+        f"{human_size(sizes['verified'])}"
+    )
+    progress(
+        f"  partial:  {files['partial']} files, {human_size(sizes['partial'])} banked"
+    )
+    progress(
+        f"  missing:  {files['missing']} files; estimated network remaining "
+        f"{human_size(sizes['remaining_network'])}"
+    )
+    disk = plan["disk"]
+    progress(
+        f"  disk:     needs {human_size(disk['needed_bytes'])}, "
+        f"free {human_size(disk['free_bytes'])} at {disk['checked_path']} — "
+        f"{disk['verdict'].upper()}"
+    )
+
+
 class NetworkCounter:
     """Receive actual network-byte callbacks from huggingface_hub progress."""
 
-    def __init__(self, session: dict):
+    def __init__(self, session: dict, stop_controller: StopController | None = None):
         self.session = session
+        self.stop_controller = stop_controller
+        self.lock = threading.Lock()
+        self.pending_stop: CleanStop | None = None
 
-    def add(self, amount: int) -> None:
-        self.session["bytes_network"] += max(0, int(amount))
+    def add(self, amount: int, defer_only: bool = False) -> None:
+        with self.lock:
+            self.session["bytes_network"] += max(0, int(amount))
+            if self.stop_controller is not None:
+                # huggingface_hub reports a chunk immediately before writing it.
+                # Defer the first stop until the following callback so the
+                # triggering chunk is durably banked in the incomplete file.
+                if self.pending_stop is not None:
+                    if not defer_only:
+                        raise self.pending_stop
+                    return
+                try:
+                    self.stop_controller.check(self.session)
+                except CleanStop as stop:
+                    self.pending_stop = stop
 
 
 def _tqdm_class(counter: NetworkCounter):
     from tqdm.auto import tqdm
 
     class TransferTqdm(tqdm):
+        def __init__(self, *args, **kwargs):
+            name = str(kwargs.get("name") or "")
+            desc = str(kwargs.get("desc") or "")
+            self._modelvault_xet = name.startswith("huggingface_hub.xet_get") or (
+                "reconstructing file" in desc
+            )
+            super().__init__(*args, **kwargs)
+
         def update_transfer(self, amount=1):
-            counter.add(amount)
+            counter.add(amount, defer_only=self._modelvault_xet)
+            if self._modelvault_xet and counter.pending_stop is not None:
+                # Python exceptions raised by a Rust progress callback are
+                # reported as unraisable and do not stop Xet. Abort its global
+                # session explicitly; the caller translates the resulting
+                # transport exception back to the pending clean stop.
+                from huggingface_hub.utils._xet import abort_xet_session
+
+                abort_xet_session()
 
         def set_transfer_postfix_str(self, *args, **kwargs):
             # Xet routes its actual network-byte counter through this class in
@@ -429,12 +590,76 @@ def _tqdm_class(counter: NetworkCounter):
     return TransferTqdm
 
 
+@contextmanager
+def _resumable_hub_transport():
+    """Restore safe same-bundle partial resume around ``hf_hub_download``.
+
+    huggingface_hub 1.18 switched to process-unique temporary files and
+    intentionally stopped preserving cross-call partials. modelvault has a
+    stronger per-bundle lock, so a stable local-dir incomplete file is safe
+    here. The Hub client still owns metadata, HTTP Range requests, retries,
+    Xet, and the final move; this wrapper only restores its former temp-file
+    lifetime while the modelvault lock is held.
+    """
+    import huggingface_hub.file_download as file_download
+
+    original = file_download._download_to_tmp_and_move
+
+    def resumable_download(
+        incomplete_path,
+        destination_path,
+        url_to_download,
+        headers,
+        expected_size,
+        filename,
+        force_download,
+        etag,
+        xet_file_data,
+        tqdm_class=None,
+    ):
+        if destination_path.exists() and not force_download:
+            return
+        if incomplete_path.exists() and force_download:
+            incomplete_path.unlink(missing_ok=True)
+        with incomplete_path.open("ab") as handle:
+            resume_size = handle.tell()
+            if expected_size is not None:
+                file_download._check_disk_space(expected_size, incomplete_path.parent)
+                file_download._check_disk_space(expected_size, destination_path.parent)
+            if xet_file_data is not None and file_download.is_xet_available():
+                file_download.xet_get(
+                    incomplete_path=incomplete_path,
+                    xet_file_data=xet_file_data,
+                    headers=headers,
+                    expected_size=expected_size,
+                    displayed_filename=filename,
+                    tqdm_class=tqdm_class,
+                )
+            else:
+                file_download.http_get(
+                    url_to_download,
+                    handle,
+                    resume_size=resume_size,
+                    headers=headers,
+                    expected_size=expected_size,
+                    tqdm_class=tqdm_class,
+                )
+        file_download._chmod_and_move(incomplete_path, destination_path)
+
+    file_download._download_to_tmp_and_move = resumable_download
+    try:
+        yield
+    finally:
+        file_download._download_to_tmp_and_move = original
+
+
 def transfer_all(
     bundle_dir: Path,
     payload_dir: Path,
     ledger: dict,
     session: dict,
     progress=print,
+    stop_controller: StopController | None = None,
 ) -> dict:
     """Fetch and immediately verify every remaining file at the pinned commit."""
     remaining = [
@@ -442,54 +667,64 @@ def transfer_all(
         if (ledger["files"].get(expected["path"]) or {}).get("status") != "verified"
     ]
     remaining.sort(key=lambda item: (item.get("size") or 0, item["path"]))
-    counter = NetworkCounter(session)
+    counter = NetworkCounter(session, stop_controller)
     tqdm_class = _tqdm_class(counter)
 
-    for index, expected in enumerate(remaining, 1):
-        relative = expected["path"]
-        path = _payload_path(payload_dir, relative)
-        previous = ledger["files"].get(relative) or {}
-        attempts = int(previous.get("attempts") or 0)
-        progress(
-            f"Transferring {index}/{len(remaining)}: {relative} "
-            f"({expected.get('size') or 0} bytes)"
-        )
-        record = None
-        for retry in range(2):
-            attempts += 1
-            hf_hub_download(
-                repo_id=ledger["repo_id"],
-                filename=relative,
-                revision=ledger["revision"],
-                local_dir=payload_dir,
-                repo_type=ledger["repo_type"],
-                force_download=retry > 0,
-                tqdm_class=tqdm_class,
+    with _resumable_hub_transport():
+        for index, expected in enumerate(remaining, 1):
+            if stop_controller is not None:
+                stop_controller.check(session)
+            relative = expected["path"]
+            path = _payload_path(payload_dir, relative)
+            previous = ledger["files"].get(relative) or {}
+            attempts = int(previous.get("attempts") or 0)
+            progress(
+                f"Transferring {index}/{len(remaining)}: {relative} "
+                f"({expected.get('size') or 0} bytes)"
             )
-            record = _verified_record(expected, path, "network", attempts)
-            if record["verified_against_upstream"] is not False:
-                break
-            record_event(
-                ledger,
-                relative,
-                "digest_mismatch",
-                f"download attempt {attempts} did not match pinned upstream digest",
-            )
-            if retry == 0:
-                session["retries"] += 1
-                _discard_payload_file(path, payload_dir)
-                save_ledger(bundle_dir, ledger)
-        assert record is not None
-        if record["verified_against_upstream"] is False:
-            record_event(
-                ledger,
-                relative,
-                "persistent_digest_mismatch",
-                "second download mismatch; retained and marked as an upstream verification failure",
-            )
-        ledger["files"][relative] = record
-        session["files_completed"] += 1
-        save_ledger(bundle_dir, ledger)
+            record = None
+            for retry in range(2):
+                attempts += 1
+                try:
+                    hf_hub_download(
+                        repo_id=ledger["repo_id"],
+                        filename=relative,
+                        revision=ledger["revision"],
+                        local_dir=payload_dir,
+                        repo_type=ledger["repo_type"],
+                        force_download=retry > 0,
+                        tqdm_class=tqdm_class,
+                    )
+                except BaseException:
+                    if counter.pending_stop is not None:
+                        raise counter.pending_stop from None
+                    raise
+                record = _verified_record(expected, path, "network", attempts)
+                if record["verified_against_upstream"] is not False:
+                    break
+                record_event(
+                    ledger,
+                    relative,
+                    "digest_mismatch",
+                    f"download attempt {attempts} did not match pinned upstream digest",
+                )
+                if retry == 0:
+                    session["retries"] += 1
+                    _discard_payload_file(path, payload_dir)
+                    save_ledger(bundle_dir, ledger)
+            assert record is not None
+            if record["verified_against_upstream"] is False:
+                record_event(
+                    ledger,
+                    relative,
+                    "persistent_digest_mismatch",
+                    "second download mismatch; retained and marked as an upstream verification failure",
+                )
+            ledger["files"][relative] = record
+            session["files_completed"] += 1
+            save_ledger(bundle_dir, ledger)
+            if stop_controller is not None:
+                stop_controller.check(session)
 
     return transfer_plan(payload_dir, ledger)
 

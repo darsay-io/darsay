@@ -184,11 +184,18 @@ def archive_model(
     vault: Path = Path("vault"),
     force: bool = False,
     repo_type: str = "model",
+    dry_run: bool = False,
+    max_bytes: int | None = None,
+    max_minutes: float | None = None,
     progress=print,
-) -> Path:
+) -> Path | None:
     """Archive a Hub repo through pin → reconcile → transfer → register."""
     from .transfer import (
         LedgerError,
+        CleanStop,
+        PartialTransfer,
+        StopController,
+        add_disk_preflight,
         begin_session,
         find_resume,
         finish_session,
@@ -197,8 +204,10 @@ def archive_model(
         reconcile,
         record_event,
         save_ledger,
+        print_plan,
         transfer_all,
         transfer_lock,
+        transfer_plan,
     )
 
     api = HfApi()
@@ -240,7 +249,7 @@ def archive_model(
     payload_dir = bundle_dir / root
     with transfer_lock(bundle_dir, progress=progress):
         manifest_path = bundle_dir / "manifest.json"
-        if manifest_path.exists() and not force:
+        if manifest_path.exists() and not force and not dry_run:
             raise SystemExit(f"Bundle already exists: {bundle_dir} (use --force to re-archive)")
 
         if pinned is not None:
@@ -248,7 +257,13 @@ def archive_model(
             # used if a prior owner just finished a file.
             ledger = load_ledger(bundle_dir)
         else:
-            if force:
+            if manifest_path.exists() and dry_run and not force:
+                try:
+                    ledger = load_ledger(bundle_dir)
+                except LedgerError:
+                    assert info is not None
+                    ledger = new_ledger(repo_id, repo_type, revision or "main", info)
+            elif force:
                 assert info is not None
                 ledger = new_ledger(repo_id, repo_type, revision or "main", info)
                 save_ledger(bundle_dir, ledger)
@@ -264,41 +279,84 @@ def archive_model(
                 # the fresh pin is durable. Existing payload bytes are adopted.
                 manifest_path.unlink()
 
-        session = begin_session(bundle_dir, ledger)
-        session_finished = False
-        try:
-            plan = reconcile(bundle_dir, payload_dir, ledger, session, progress=progress)
-            progress(
-                "Transfer plan: "
-                f"{plan['files']['verified']}/{plan['files']['total']} files verified, "
-                f"{plan['bytes']['remaining_network']} bytes remaining"
-            )
-            plan = transfer_all(bundle_dir, payload_dir, ledger, session, progress=progress)
-            if not plan["complete"]:
-                raise RuntimeError("transfer ended without verifying every pinned file")
+        if dry_run:
+            # Reconciliation must answer from actual bytes, but a dry run does
+            # not mutate payload state or consume provenance accounting. The
+            # next transferring session will durably adopt anything found.
+            import copy
 
-            finish_session(bundle_dir, ledger, session, "complete")
-            session_finished = True
-            return _register_bundle(api, bundle_dir, payload_dir, ledger, progress)
-        except GatedRepoError:
-            record_event(
-                ledger,
-                None,
-                "gated",
-                "upstream access was denied during transfer; partial archive retained",
+            dry_ledger = copy.deepcopy(ledger)
+            dry_session = {"bytes_adopted": 0, "files_completed": 0}
+            plan = reconcile(
+                bundle_dir,
+                payload_dir,
+                dry_ledger,
+                dry_session,
+                progress=progress,
+                apply=False,
             )
-            finish_session(bundle_dir, ledger, session, "error")
-            session_finished = True
-            raise SystemExit(
-                _gated_message(repo_id, repo_type).replace(
-                    "Nothing was archived.",
-                    "The partial archive was kept and resumes if access returns.",
+            add_disk_preflight(bundle_dir, plan)
+            print_plan(plan, progress=progress)
+            return None
+
+        stop_controller = StopController(max_bytes=max_bytes, max_minutes=max_minutes)
+        stop_controller.start()
+        with stop_controller.sigint_handler():
+            session = begin_session(bundle_dir, ledger)
+            session_finished = False
+            try:
+                plan = reconcile(bundle_dir, payload_dir, ledger, session, progress=progress)
+                add_disk_preflight(bundle_dir, plan)
+                print_plan(plan, progress=progress)
+                if plan["disk"]["verdict"] == "insufficient":
+                    progress("WARNING: disk preflight is insufficient; transfer may end with ENOSPC")
+                stop_controller.check(session)
+                plan = transfer_all(
+                    bundle_dir,
+                    payload_dir,
+                    ledger,
+                    session,
+                    progress=progress,
+                    stop_controller=stop_controller,
                 )
-            )
-        except BaseException:
-            if not session_finished:
+                if not plan["complete"]:
+                    raise RuntimeError("transfer ended without verifying every pinned file")
+
+                finish_session(bundle_dir, ledger, session, "complete")
+                session_finished = True
+                return _register_bundle(api, bundle_dir, payload_dir, ledger, progress)
+            except CleanStop as stop:
+                plan = add_disk_preflight(bundle_dir, transfer_plan(payload_dir, ledger))
+                if plan["complete"]:
+                    # A chunk can cross the budget while finishing the final
+                    # file. There is nothing left to pause, so register now.
+                    finish_session(bundle_dir, ledger, session, "complete")
+                    session_finished = True
+                    return _register_bundle(api, bundle_dir, payload_dir, ledger, progress)
+                session["stop_detail"] = stop.detail
+                finish_session(bundle_dir, ledger, session, stop.reason)
+                session_finished = True
+                print_plan(plan, progress=progress)
+                raise PartialTransfer(bundle_dir, stop.reason, stop.detail, plan)
+            except GatedRepoError:
+                record_event(
+                    ledger,
+                    None,
+                    "gated",
+                    "upstream access was denied during transfer; partial archive retained",
+                )
                 finish_session(bundle_dir, ledger, session, "error")
-            raise
+                session_finished = True
+                raise SystemExit(
+                    _gated_message(repo_id, repo_type).replace(
+                        "Nothing was archived.",
+                        "The partial archive was kept and resumes if access returns.",
+                    )
+                )
+            except BaseException:
+                if not session_finished:
+                    finish_session(bundle_dir, ledger, session, "error")
+                raise
 
 
 def _register_bundle(api: HfApi, bundle_dir: Path, payload_dir: Path, ledger: dict, progress) -> Path:

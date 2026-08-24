@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -41,6 +42,31 @@ def _bundle_dir(path_str: str) -> Path:
     if not (bundle / "manifest.json").is_file():
         sys.exit(f"error: no manifest.json in {bundle} — not a modelvault bundle")
     return bundle
+
+
+def _positive_float(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"expected a positive number, got {value!r}") from exc
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError(f"expected a positive number, got {value!r}")
+    return parsed
+
+
+def _byte_size(value: str) -> int:
+    """Parse bytes with optional binary K/M/G/T suffixes (and optional B)."""
+    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([KMGT]?)\s*(?:I?B)?\s*", value.upper())
+    if not match:
+        raise argparse.ArgumentTypeError(
+            f"invalid byte size {value!r}; use bytes or a suffix such as 500M or 20G"
+        )
+    number = float(match.group(1))
+    multiplier = 1024 ** ("KMGT".index(match.group(2)) + 1) if match.group(2) else 1
+    parsed = int(number * multiplier)
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError(f"expected a positive byte size, got {value!r}")
+    return parsed
 
 
 def cmd_estimate(args) -> int:
@@ -66,15 +92,28 @@ def cmd_estimate(args) -> int:
 
 def cmd_archive(args) -> int:
     from .archiver import archive_model, parse_repo_ref
+    from .transfer import PartialTransfer
 
     repo_type, repo_id = parse_repo_ref(args.repo_id)
-    bundle = archive_model(
-        repo_id=repo_id,
-        revision=args.revision,
-        vault=_vault_path(args),
-        force=args.force,
-        repo_type=repo_type,
-    )
+    max_bytes = int(args.max_gb * 1024**3) if args.max_gb is not None else args.max_bytes
+    try:
+        bundle = archive_model(
+            repo_id=repo_id,
+            revision=args.revision,
+            vault=_vault_path(args),
+            force=args.force,
+            repo_type=repo_type,
+            dry_run=args.dry_run,
+            max_bytes=max_bytes,
+            max_minutes=args.max_minutes,
+        )
+    except PartialTransfer as stop:
+        print(f"\nArchive paused cleanly ({stop.reason}: {stop.detail}).")
+        print(f"Partial bundle: {stop.bundle_dir}")
+        print("Re-run the same archive command to continue from verified and partial bytes.")
+        return 10
+    if bundle is None:  # --dry-run printed the plan and intentionally did not register
+        return 0
     print(f"\nBundle ready: {bundle}")
     print(f"  manifest:     {bundle / 'manifest.json'}")
     print(f"  readme:       {bundle / 'README.md'}")
@@ -273,6 +312,15 @@ def main(argv=None) -> int:
     p.add_argument("repo_id", help="e.g. Qwen/Qwen3-0.6B, datasets/<owner>/<name>, or a huggingface.co URL")
     p.add_argument("--revision", help="branch, tag, or commit (default: main; always pinned to the resolved commit)")
     p.add_argument("--force", action="store_true", help="re-archive over an existing bundle")
+    p.add_argument("--dry-run", action="store_true",
+                   help="pin, reconcile, and print the transfer plan without moving payload bytes")
+    budget = p.add_mutually_exclusive_group()
+    budget.add_argument("--max-gb", type=_positive_float, metavar="N",
+                        help="stop cleanly after approximately N GiB of network transfer")
+    budget.add_argument("--max-bytes", type=_byte_size, metavar="SIZE",
+                        help="stop cleanly after network SIZE (e.g. 500M, 20G)")
+    p.add_argument("--max-minutes", type=_positive_float, metavar="N",
+                   help="stop cleanly when the transfer session reaches N minutes")
     p.set_defaults(func=cmd_archive)
 
     p = sub.add_parser("verify", help="re-hash a bundle and compare against its manifest")
