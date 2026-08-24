@@ -637,7 +637,10 @@ def transfer_groups(
     # Longest-processing-time balancing is deterministic and keeps typical
     # equal-sized weight shards evenly distributed by bytes, not file count.
     for item in sorted(expected, key=lambda value: (-(value.get("size") or 0), value["path"])):
-        lane = min(range(total_lanes), key=lambda number: (lane_bytes[number], number))
+        lane = min(
+            range(total_lanes),
+            key=lambda number: (lane_bytes[number], len(lanes[number]), number),
+        )
         lanes[lane].append(item)
         lane_bytes[lane] += item.get("size") or 0
     for lane in lanes:
@@ -667,6 +670,14 @@ def print_shard_plan(ledger: dict, shard: tuple[int, int], progress=print) -> No
         progress(
             "  WARNING: fewer files than cooperative lanes; this bundle cannot "
             "distribute useful starting work across every participant"
+        )
+    lane_sizes = [sum(item.get("size") or 0 for item in items) for _lane, items in groups]
+    ideal = total_bytes / shard[1] if shard[1] else 0
+    if ideal and max(lane_sizes) > ideal * 1.5:
+        progress(
+            f"  WARNING: whole-file lane sizes are uneven "
+            f"({human_size(min(lane_sizes))}–{human_size(max(lane_sizes))}); "
+            "a monolithic file limits cooperative coverage"
         )
 
 
