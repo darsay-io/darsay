@@ -1,4 +1,4 @@
-# manifest.json — schema reference (v1.2.0)
+# manifest.json — schema reference (v1.3.0)
 
 `manifest.json` is the machine-readable source of truth for a bundle. This
 document describes every field so a bundle remains interpretable without the
@@ -21,7 +21,7 @@ Conventions:
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | Version of this schema (`"1.2.0"`; 1.1 defined the shape of `runtime.tested_hardware`; 1.2 added the dataset artifact type and `relationships.training_datasets` — both additive). |
+| `schema_version` | Version of this schema (`"1.3.0"`; 1.1 defined the shape of `runtime.tested_hardware`; 1.2 added the dataset artifact type and `relationships.training_datasets`; 1.3 added `source.access` and structured lineage (`relationships.base_models`, `base_model_relation`) — all additive). |
 | `artifact_type` | Registry key driving completeness rules and the payload root (`"model"` or `"dataset"`; future: GGUF packs, papers — see `src/modelvault/schema.py`). |
 | `bundle_id` | `<repo_id lowercased, "/"→"--">@<first 12 of pinned commit>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Dataset bundles take a `datasets--` prefix (`datasets--saidutta69--fable-5-premium@684cb1f849fe`) since model and dataset namespaces can collide on the Hub. Stable, deterministic, unique per (repo, revision). |
 
@@ -51,6 +51,7 @@ Provenance of the download.
 | `downloader` | Tool name/version, `huggingface_hub` version, Python version, platform — enough to reconstruct the download environment. |
 | `mirrors_used` | Non-primary sources, if any were used (empty list otherwise). |
 | `signatures` | Upstream cryptographic signatures, when provided (null otherwise — Hugging Face repos generally ship none). |
+| `access` | `{gated, notes}`. `gated` is the Hub gate status at archive time: `"auto"` (agree → instant access, contact info shared with the authors), `"manual"` (authors approve each request), or `false`. The gate agreement text lives in Hub repo settings, **not** in the repo tree, so it is not part of the snapshot — `notes` records that. Gates are enforced server-side on file downloads; an archive of a gated repo means the archiving account had accepted the terms. |
 | `upstream_stats_at_archive` | Downloads/month and likes at archive time — a popularity snapshot for the historical record. |
 | `upstream_tags` | Raw repo tags at archive time. |
 
@@ -63,8 +64,8 @@ Provenance of the download.
 | `license_files` | License/notice text files shipped upstream, as archived paths. The primary one is also copied to the bundle root as `LICENSE`. |
 | `commercial_use`, `redistribution`, `modification`, `attribution_required`, `patent_grant` | Rights flags from the table. `null` = unknown license → review manually. Curator convenience, not legal advice. |
 | `trademark_terms` | Trademark clauses worth knowing about (e.g. Apache-2.0 §6). |
-| `needs_manual_review` | True when the license id is missing or not in the table. |
-| `notes` | Free text; auto-set when no license file ships upstream. |
+| `needs_manual_review` | True when the license id is missing or not in the table, **or when the upstream repo is gated** — the gate terms are outside the snapshot, so the flags alone can't settle redistribution. |
+| `notes` | Free text; auto-set when no license file ships upstream, the id is unrecognized, or the repo is gated. |
 
 ## `inventory`
 
@@ -177,7 +178,10 @@ Model bundles:
 
 | Field | Meaning |
 |---|---|
-| `base_model`, `finetuned_from` | Declared parent from the model card. |
+| `base_models` | All declared parents, from card `base_model` plus the Hub's `base_model:*` repo tags (merges have several; null when nothing is declared). |
+| `base_model` | The primary (first) parent — convenience alias for `base_models[0]`. |
+| `base_model_relation` | The model-tree edge label: `finetune`, `adapter`, `quantized`, or `merge`, from the card's `base_model_relation` or an unambiguous typed tag. Null when upstream doesn't label the edge (or labels conflict) — record, don't fabricate. Note the Hub has no relation type for alignment edits (e.g. abliteration); those surface only in tags and card text, and belong in `curation.md`. |
+| `finetuned_from` | The parent **only when the declared relation is `finetune`**; null otherwise — a quantization or alignment edit is not a finetune. (Pre-1.3 manifests set this to `base_model` unconditionally; treat old values as "parent", not "finetune parent".) |
 | `training_datasets` | Dataset ids the model card declares training on (`card.datasets`, normalized to a list; null when not declared) — the mirror of a dataset bundle's `models_trained_on`. |
 | `quantized_versions`, `gguf_repos` | Downstream repos found at archive time (GGUFs are the `*gguf*` subset). |
 | `finetunes_count`, `adapters_count` | Counts of downstream finetune/adapter repos. |

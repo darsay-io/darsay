@@ -27,6 +27,7 @@ from pathlib import Path
 
 import huggingface_hub
 from huggingface_hub import HfApi, snapshot_download
+from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
 
 from . import SCHEMA_VERSION, __version__
 from .hashing import HAVE_BLAKE3, bundle_hash, hash_file, iter_payload_files
@@ -105,6 +106,42 @@ def _guess_version(repo_name: str, model_type: str | None) -> str | None:
     return m.group(1) if m else None
 
 
+# Hub lineage tags: `base_model:<repo_id>` declares a parent, and
+# `base_model:<relation>:<repo_id>` labels the edge — this is what the Hub's
+# "model tree" renders. Relations per the Hub card spec.
+BASE_MODEL_RELATIONS = ("adapter", "finetune", "merge", "quantized")
+
+
+def parse_base_model_tags(tags: list[str]) -> tuple[list[str], dict[str, str]]:
+    """Parse `base_model[:<relation>]:<repo_id>` repo tags into
+    (parent repo ids in tag order, {repo_id: relation})."""
+    ids: list[str] = []
+    relations: dict[str, str] = {}
+    for tag in tags:
+        if not tag.startswith("base_model:"):
+            continue
+        rest = tag[len("base_model:"):]
+        for rel in BASE_MODEL_RELATIONS:
+            if rest.startswith(rel + ":"):
+                rest = rest[len(rel) + 1:]
+                if rest:
+                    relations[rest] = rel
+                break
+        if rest and rest not in ids:
+            ids.append(rest)
+    return ids, relations
+
+
+def _gated_message(repo_id: str, repo_type: str) -> str:
+    return (
+        f"error: {repo_type} {repo_id} is gated on the Hub and this account has not been "
+        "granted access. The gate is enforced server-side; modelvault does not bypass it.\n"
+        f"Visit {hub_url(repo_id, repo_type)} to review and accept the author's terms, "
+        "authenticate with `hf auth login`, then re-run.\n"
+        "Nothing was archived."
+    )
+
+
 def _related_repos(api: HfApi, repo_id: str) -> dict:
     """Snapshot of downstream ecosystem repos as of archive time (best effort)."""
     related = {"as_of": utc_now(), "query_limit": 100, "quantized_versions": None,
@@ -155,12 +192,21 @@ def archive_model(
     api = HfApi()
 
     progress(f"Resolving {repo_type} {repo_id} @ {revision or 'main'} ...")
-    if repo_type == "dataset":
-        info = api.dataset_info(repo_id, revision=revision, files_metadata=True)
-    else:
-        info = api.model_info(repo_id, revision=revision, files_metadata=True)
+    try:
+        if repo_type == "dataset":
+            info = api.dataset_info(repo_id, revision=revision, files_metadata=True)
+        else:
+            info = api.model_info(repo_id, revision=revision, files_metadata=True)
+    except GatedRepoError:
+        raise SystemExit(_gated_message(repo_id, repo_type))
+    except RepositoryNotFoundError:
+        raise SystemExit(
+            f"error: {repo_type} {repo_id!r} not found on the Hub — it may be private "
+            "(authenticate with `hf auth login`), renamed, or removed. Nothing was archived."
+        )
     commit = info.sha
     card = info.card_data.to_dict() if info.card_data else {}
+    gated = getattr(info, "gated", None) or False  # "auto" | "manual" | False
 
     bundle_dir = bundle_dir_for(vault, repo_id, commit, repo_type)
     root = payload_root_for(repo_type)
@@ -170,7 +216,15 @@ def archive_model(
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
     progress(f"Downloading snapshot {commit[:12]} into {payload_dir} ...")
-    snapshot_download(repo_id, revision=commit, local_dir=payload_dir, repo_type=repo_type)
+    try:
+        snapshot_download(repo_id, revision=commit, local_dir=payload_dir, repo_type=repo_type)
+    except GatedRepoError:
+        # Metadata and card files are public even on gated repos; the weights 403.
+        # Nothing was registered — drop the partial payload, unless this dir holds
+        # a previously registered bundle (--force re-archive of an existing one).
+        if not (bundle_dir / "manifest.json").exists():
+            shutil.rmtree(bundle_dir, ignore_errors=True)
+        raise SystemExit(_gated_message(repo_id, repo_type))
     # Remove hub bookkeeping so the payload is a pristine copy of the repo tree.
     shutil.rmtree(payload_dir / ".cache", ignore_errors=True)
 
@@ -220,7 +274,7 @@ def archive_model(
     license_id = card.get("license")
     if isinstance(license_id, list):  # dataset cards may declare a license list
         license_id = license_id[0] if license_id else None
-    licensing = build_licensing_record(license_id, payload_dir)
+    licensing = build_licensing_record(license_id, payload_dir, gated=bool(gated))
 
     # Surface the primary license file at the bundle root for museum visibility.
     for lf in licensing["license_files"]:
@@ -241,12 +295,26 @@ def archive_model(
     else:
         progress("Querying downstream ecosystem (quantizations, finetunes) ...")
         related = _related_repos(api, repo_id)
-        base_model = card.get("base_model")
-        if isinstance(base_model, list):
-            base_model = base_model[0] if base_model else None
+        # Upstream lineage: card `base_model` (may list several parents — merges do)
+        # plus the Hub's `base_model:*` tags, which also label the derivation edge.
+        base_models = [b for b in (_as_list(card.get("base_model")) or []) if isinstance(b, str)]
+        tag_bases, tag_relations = parse_base_model_tags(list(info.tags or []))
+        for b in tag_bases:
+            if b not in base_models:
+                base_models.append(b)
+        relation = card.get("base_model_relation")
+        if not isinstance(relation, str):
+            # Fall back to the typed tags, but only when they are unambiguous.
+            distinct = sorted(set(tag_relations.values()))
+            relation = distinct[0] if len(distinct) == 1 else None
+        primary_base = base_models[0] if base_models else None
         relationships = {
-            "base_model": base_model,
-            "finetuned_from": base_model,
+            "base_models": base_models or None,
+            "base_model": primary_base,
+            "base_model_relation": relation,
+            # Only a declared finetune edge is a finetune; a quantization or an
+            # alignment edit (e.g. abliteration) must not be recorded as one.
+            "finetuned_from": primary_base if relation == "finetune" else None,
             "training_datasets": _as_list(card.get("datasets")),
             "quantized_versions": related["quantized_versions"],
             "gguf_repos": related["gguf_repos"],
@@ -292,6 +360,15 @@ def archive_model(
             },
             "mirrors_used": [],
             "signatures": None,
+            "access": {
+                "gated": gated,
+                "notes": (
+                    f"Upstream repo is gated (mode: {gated}). Download required accepting "
+                    "the author's access agreement, which lives in Hub repo settings and "
+                    "is NOT part of the archived snapshot; re-fetching from upstream "
+                    "requires an account that has accepted it."
+                ) if gated else None,
+            },
             "upstream_stats_at_archive": {
                 "downloads_last_month": getattr(info, "downloads", None),
                 "likes": getattr(info, "likes", None),
@@ -383,6 +460,11 @@ README.md; nothing here is machine-generated after this template._
 ## Historical significance
 
 _Why this model matters._
+
+## Derivation & alignment changes
+
+_How this artifact differs from its base — finetune, quantization, merge,
+alignment modifications (e.g. abliteration) — beyond what upstream tags say._
 
 ## Major capabilities
 

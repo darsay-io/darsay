@@ -63,6 +63,11 @@ def _header_table_close(lines: list[str], lic: dict, inv: dict, arc: dict, sec: 
     ]
 
 
+# Upstream tags that flag alignment modifications — surfaced so a bundle README
+# never reads like a vanilla derivation of its base model.
+ALIGNMENT_MODIFICATION_TAGS = ("abliterated", "uncensored")
+
+
 def _source_lines(src: dict) -> list[str]:
     lines = [
         "",
@@ -74,6 +79,14 @@ def _source_lines(src: dict) -> list[str]:
         f"(huggingface_hub {src['downloader']['huggingface_hub']}, Python {src['downloader']['python']})",
         f"- Signatures: {src['signatures'] or 'none provided upstream'}",
     ]
+    access = src.get("access") or {}
+    if access.get("gated"):
+        lines.append(f"- Access: **gated upstream** (mode: {access['gated']}) — the gate agreement "
+                     "is not part of the snapshot; re-fetching requires an account that accepted it")
+    flagged = [t for t in (src.get("upstream_tags") or []) if t in ALIGNMENT_MODIFICATION_TAGS]
+    if flagged:
+        lines.append(f"- Upstream tags flag **alignment modifications**: {', '.join(flagged)} "
+                     "— see the archived model card and `curation.md`")
     stats = src.get("upstream_stats_at_archive") or {}
     if stats.get("downloads_last_month") is not None:
         lines.append(f"- Upstream popularity at archive time: {stats['downloads_last_month']:,} downloads/month, "
@@ -223,8 +236,14 @@ def _render_model_readme(bundle_dir: Path, m: dict) -> str:
         "",
         "## Relationships",
         "",
-        f"- Base / finetuned from: {rel['base_model'] or 'none declared (base model)'}",
     ]
+    bases = rel.get("base_models") or ([rel["base_model"]] if rel.get("base_model") else [])
+    if bases:
+        relation = rel.get("base_model_relation")
+        lines.append("- Derived from: " + ", ".join(f"`{b}`" for b in bases)
+                     + (f" — relation: **{relation}**" if relation else " — relation not declared upstream"))
+    else:
+        lines.append("- Derived from: none declared (base model)")
     if rel.get("gguf_repos"):
         shown = rel["gguf_repos"][:8]
         more = len(rel["gguf_repos"]) - len(shown)

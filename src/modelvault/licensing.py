@@ -126,10 +126,24 @@ def find_license_files(payload_root: Path) -> list[str]:
     return sorted(found)
 
 
-def build_licensing_record(spdx_id: str | None, payload_root: Path) -> dict:
+def build_licensing_record(spdx_id: str | None, payload_root: Path, gated: bool = False) -> dict:
     info = LICENSE_INFO.get(spdx_id) if spdx_id else None
     license_files = find_license_files(payload_root)
-    record = {
+    notes = []
+    if not license_files:
+        notes.append(
+            "Upstream repository ships no license text file; license identified only by "
+            "repo metadata tag. Verify terms at the source before redistribution."
+        )
+    if info is None and spdx_id is not None:
+        notes.append(f"License id '{spdx_id}' not in the rights-flags table; review manually.")
+    if gated:
+        notes.append(
+            "Upstream repo is gated: the files were obtained under an access agreement "
+            "that is not part of the payload (see source.access). Review those terms "
+            "before redistributing this bundle, whatever the license flags say."
+        )
+    return {
         "spdx_id": spdx_id,
         "name": info["name"] if info else None,
         "license_files": [f"{payload_root.name}/{f}" for f in license_files],
@@ -139,14 +153,6 @@ def build_licensing_record(spdx_id: str | None, payload_root: Path) -> dict:
         "attribution_required": info["attribution_required"] if info else None,
         "patent_grant": info["patent_grant"] if info else None,
         "trademark_terms": info["trademark_terms"] if info else None,
-        "needs_manual_review": info is None,
-        "notes": None,
+        "needs_manual_review": info is None or gated,
+        "notes": " ".join(notes) if notes else None,
     }
-    if not license_files:
-        record["notes"] = (
-            "Upstream repository ships no license text file; license identified only by "
-            "repo metadata tag. Verify terms at the source before redistribution."
-        )
-    if info is None and spdx_id is not None:
-        record["notes"] = f"License id '{spdx_id}' not in the rights-flags table; review manually."
-    return record
