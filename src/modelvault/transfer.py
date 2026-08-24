@@ -702,15 +702,20 @@ def _resumable_hub_transport(payload_dir: Path):
     original = file_download._download_to_tmp_and_move
     original_xet_cache = hub_constants.HF_XET_CACHE
     old_xet_cache_env = os.environ.get("HF_XET_CACHE")
+    original_xet_disabled = hub_constants.HF_HUB_DISABLE_XET
+    old_xet_disabled_env = os.environ.get("HF_HUB_DISABLE_XET")
     local_xet_cache = payload_dir / ".cache" / "huggingface" / "xet"
 
-    # hf_xet reads its cache path when its process-global session starts.
-    # Recreate that session inside the bundle so its content-addressed chunks
-    # travel with a partial archive instead of being stranded in this user's
-    # global cache. Assign the Hub constant too for supported older clients.
+    # Current hf_xet aborts discard an in-flight reconstruction rather than
+    # leaving a durable cross-process partial. Select the Hub client's HTTP
+    # path so budgets, SIGINT, and filesystem copies always retain byte-level
+    # progress. Keep Xet's cache local as a defensive fallback for older Hub
+    # clients that might not honor the disable flag.
     abort_xet_session()
     os.environ["HF_XET_CACHE"] = str(local_xet_cache)
     hub_constants.HF_XET_CACHE = local_xet_cache
+    os.environ["HF_HUB_DISABLE_XET"] = "1"
+    hub_constants.HF_HUB_DISABLE_XET = True
 
     def resumable_download(
         incomplete_path,
@@ -760,10 +765,15 @@ def _resumable_hub_transport(payload_dir: Path):
         file_download._download_to_tmp_and_move = original
         abort_xet_session()
         hub_constants.HF_XET_CACHE = original_xet_cache
+        hub_constants.HF_HUB_DISABLE_XET = original_xet_disabled
         if old_xet_cache_env is None:
             os.environ.pop("HF_XET_CACHE", None)
         else:
             os.environ["HF_XET_CACHE"] = old_xet_cache_env
+        if old_xet_disabled_env is None:
+            os.environ.pop("HF_HUB_DISABLE_XET", None)
+        else:
+            os.environ["HF_HUB_DISABLE_XET"] = old_xet_disabled_env
 
 
 def _download_one(
