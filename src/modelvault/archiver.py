@@ -372,7 +372,7 @@ def archive_model(
 
 def _register_bundle(api: HfApi, bundle_dir: Path, payload_dir: Path, ledger: dict, progress) -> Path:
     """Run completion-time extraction and register from pinned ledger facts."""
-    from .transfer import file_records as ledger_file_records, transfer_summary
+    from .transfer import file_records as ledger_file_records, local_mirrors, transfer_summary
 
     repo_id = ledger["repo_id"]
     repo_type = ledger["repo_type"]
@@ -485,7 +485,7 @@ def _register_bundle(api: HfApi, bundle_dir: Path, payload_dir: Path, ledger: di
                 "python": platform.python_version(),
                 "platform": platform.platform(),
             },
-            "mirrors_used": [],
+            "mirrors_used": local_mirrors(ledger),
             "signatures": None,
             "access": {
                 "gated": gated,

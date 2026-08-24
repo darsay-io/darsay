@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import signal
 import socket
+import subprocess
+import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -769,6 +772,7 @@ def _download_one(
     ledger: dict,
     counter: NetworkCounter,
     stop_controller: StopController | None,
+    local_sources: dict[str, list[dict]],
 ) -> dict:
     """Worker-safe download/hash result; it never writes the ledger."""
     if stop_controller is not None:
@@ -780,6 +784,44 @@ def _download_one(
     events = []
     retries = 0
     record = None
+
+    digest = expected.get("lfs_sha256")
+    for candidate in local_sources.get(digest, []) if digest else []:
+        attempts += 1
+        try:
+            method = _copy_local_file(candidate["path"], path)
+            record = _verified_record(
+                expected,
+                path,
+                f"local:{candidate['bundle_id']}",
+                attempts,
+            )
+        except OSError as exc:
+            _discard_payload_file(path, payload_dir)
+            events.append({
+                "at": _utc_now(),
+                "path": relative,
+                "event": "local_source_error",
+                "detail": f"{candidate['bundle_id']} could not be copied: {exc}",
+            })
+            continue
+        if record["verified_against_upstream"] is not False:
+            record["local_copy_method"] = method
+            return {
+                "path": relative,
+                "record": record,
+                "events": events,
+                "retries": retries,
+                "bytes_local_sources": record["size"],
+            }
+        events.append({
+            "at": _utc_now(),
+            "path": relative,
+            "event": "local_source_mismatch",
+            "detail": f"{candidate['bundle_id']} failed re-verification; falling back",
+        })
+        _discard_payload_file(path, payload_dir)
+
     for retry in range(2):
         attempts += 1
         try:
@@ -816,7 +858,75 @@ def _download_one(
             "event": "persistent_digest_mismatch",
             "detail": "second download mismatch; retained and marked as an upstream verification failure",
         })
-    return {"path": relative, "record": record, "events": events, "retries": retries}
+    return {
+        "path": relative,
+        "record": record,
+        "events": events,
+        "retries": retries,
+        "bytes_local_sources": 0,
+    }
+
+
+def _copy_local_file(source: Path, destination: Path) -> str:
+    """Copy an independent file, preferring APFS copy-on-write cloning."""
+    if not source.is_file() or source.is_symlink():
+        raise OSError(f"source file is absent or not a regular file: {source}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.unlink(missing_ok=True)
+    if sys.platform == "darwin":
+        try:
+            result = subprocess.run(
+                ["cp", "-c", str(source), str(destination)],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        except OSError:
+            result = None
+        if result is not None and result.returncode == 0:
+            return "clonefile"
+        destination.unlink(missing_ok=True)
+    shutil.copy2(source, destination)
+    return "copy"
+
+
+def local_source_index(bundle_dir: Path, ledger: dict) -> dict[str, list[dict]]:
+    """Index registered sibling LFS blobs from the same Hub repository."""
+    index: dict[str, list[dict]] = {}
+    for manifest_path in sorted(bundle_dir.parent.glob("*/manifest.json")):
+        if manifest_path.parent == bundle_dir:
+            continue
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            if (
+                manifest.get("artifact_type") != ledger["repo_type"]
+                or manifest.get("source", {}).get("repo_id") != ledger["repo_id"]
+            ):
+                continue
+            bundle_id = manifest["bundle_id"]
+            for item in manifest.get("inventory", {}).get("files", []):
+                digest = item.get("upstream_lfs_sha256")
+                if (
+                    not digest
+                    or item.get("sha256") != digest
+                    or item.get("verified_against_upstream") is False
+                ):
+                    continue
+                relative = PurePosixPath(item["path"])
+                if (
+                    relative.is_absolute()
+                    or not relative.parts
+                    or any(part in ("", ".", "..") for part in relative.parts)
+                ):
+                    continue
+                source = manifest_path.parent.joinpath(*relative.parts)
+                index.setdefault(digest, []).append({
+                    "bundle_id": bundle_id,
+                    "path": source,
+                })
+        except (json.JSONDecodeError, KeyError, OSError, TypeError):
+            continue
+    return index
 
 
 def _record_download_result(bundle_dir: Path, ledger: dict, session: dict, result: dict) -> None:
@@ -825,6 +935,7 @@ def _record_download_result(bundle_dir: Path, ledger: dict, session: dict, resul
     ledger["files"][result["path"]] = result["record"]
     session["files_completed"] += 1
     session["retries"] += result["retries"]
+    session["bytes_local_sources"] += result.get("bytes_local_sources", 0)
     save_ledger(bundle_dir, ledger)
 
 
@@ -846,6 +957,7 @@ def transfer_all(
     small = [item for item in remaining if (item.get("size") or 0) < SMALL_FILE_LIMIT]
     large = [item for item in remaining if (item.get("size") or 0) >= SMALL_FILE_LIMIT]
     counter = NetworkCounter(session, stop_controller)
+    local_sources = local_source_index(bundle_dir, ledger)
 
     with _resumable_hub_transport(payload_dir):
         if small:
@@ -864,6 +976,7 @@ def transfer_all(
                         ledger,
                         counter,
                         stop_controller,
+                        local_sources,
                     ): expected
                     for expected in small
                 }
@@ -878,7 +991,11 @@ def transfer_all(
                         if first_error is None:
                             first_error = exc
                     else:
-                        progress(f"Verified {expected['path']} ({result['record']['size']} bytes)")
+                        source = result["record"]["source"]
+                        suffix = f" from {source}" if source.startswith("local:") else ""
+                        progress(
+                            f"Verified {expected['path']} ({result['record']['size']} bytes){suffix}"
+                        )
                         _record_download_result(bundle_dir, ledger, session, result)
                         if stop_controller is not None:
                             try:
@@ -902,6 +1019,7 @@ def transfer_all(
                 ledger,
                 counter,
                 stop_controller,
+                local_sources,
             )
             _record_download_result(bundle_dir, ledger, session, result)
             if stop_controller is not None:
@@ -943,3 +1061,12 @@ def transfer_summary(ledger: dict) -> dict:
         "bytes_local_sources": sum(int(s.get("bytes_local_sources") or 0) for s in sessions),
         "retries": sum(int(s.get("retries") or 0) for s in sessions),
     }
+
+
+def local_mirrors(ledger: dict) -> list[str]:
+    """Return stable local-source provenance for the registered manifest."""
+    return sorted({
+        state["source"]
+        for state in ledger.get("files", {}).values()
+        if str(state.get("source") or "").startswith("local:")
+    })
