@@ -13,10 +13,12 @@ tool can list and unpack it decades from now, with or without modelvault.
 - **Entry order:** the marker `<bundle_id>/.mvb.json` first, then every bundle
   file as `<bundle_id>/<path>`, sorted by path. Only regular files — no
   directory entries, no symlinks (export refuses bundles containing them).
-- **Excluded from the tar:** `exports.json` and `hydration.json` — volatile
-  machine-local state (see Determinism; hydration/run records are meaningless
-  on another machine) — plus `.DS_Store`. (v1.1 added the `hydration.json`
-  exclusion; v1.0 readers import v1.1 files unchanged.)
+- **Excluded from the tar:** `exports.json`, `hydration.json`, `transfer.json`,
+  and `transfer.lock` — volatile machine-local state (see Determinism; run,
+  transfer, and lock records are meaningless on another machine) — plus
+  `.DS_Store`. (v1.1 added the `hydration.json` exclusion; v1.0 readers import
+  v1.1 files unchanged. The transfer sidecars are likewise excluded without a
+  container-format change.)
 
 ## Marker (`.mvb.json`, always the first entry)
 
@@ -52,10 +54,10 @@ label. Guaranteed by:
 - fixed entry order (marker, then sorted paths);
 - normalized tar metadata on every entry: `mtime` = the bundle's
   `archive.date_archived`, `uid`/`gid` = 0, empty `uname`/`gname`, mode `0644`;
-- **no volatile content inside the tar**: the export *event* (timestamp, tar
-  sha256, destination) is appended to the bundle's `exports.json`, which is
-  excluded from the tar precisely so that exporting doesn't change what the
-  next export contains.
+- **no volatile content inside the tar**: export, hydration, and incremental
+  transfer sidecars are excluded. In particular, the export *event* (timestamp,
+  tar sha256, destination) is appended to the bundle's `exports.json`, so
+  exporting doesn't change what the next export contains.
 
 Scope of the guarantee: same bundle state and same format version. Bundle-root
 metadata is mutable by design (a `verify` run updates the manifest), and any
