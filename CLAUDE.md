@@ -32,6 +32,8 @@ point `modelvault` (argparse, subcommands in `cli.py`).
   when a model has quantized variants.
   `docs/DESIGN.md` — implementation rationale: why Python, and why bundle
   longevity rests on the formats, not the tool.
+  `docs/DATASETS.md` — design (not yet implemented) for dataset bundles:
+  Hub-address refs, per-type payload roots, dataset manifest sections.
   **Update these whenever manifest fields or the export format change**, and
   bump `SCHEMA_VERSION` (`__init__.py`) / `MVB_FORMAT_VERSION` (`export.py`)
   appropriately (major = breaking).
