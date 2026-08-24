@@ -35,6 +35,10 @@ point `modelvault` (argparse, subcommands in `cli.py`).
   longevity rests on the formats, not the tool.
   `docs/DATASETS.md` — dataset bundles (implemented, schema 1.2.0):
   Hub-address refs, per-type payload roots, dataset manifest sections.
+  `docs/INCREMENTAL.md` — incremental archiving (design, NOT implemented;
+  target v0.5.0/schema 1.4.0): idempotent resumable transfer — pin →
+  reconcile → plan → transfer → register, `transfer.json` ledger, session
+  budgets, local-source adoption.
   **Update these whenever manifest fields or the export format change**, and
   bump `SCHEMA_VERSION` (`__init__.py`) / `MVB_FORMAT_VERSION` (`export.py`)
   appropriately (major = breaking).
