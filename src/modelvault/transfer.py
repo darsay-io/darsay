@@ -166,12 +166,48 @@ def _pid_alive(pid: int) -> bool:
     return True
 
 
+def _bundle_identity(bundle_dir: Path) -> dict:
+    """Identify this directory so a lock copied with a bundle is detectable."""
+    stat = bundle_dir.stat()
+    return {
+        "path": str(bundle_dir.resolve()),
+        "device": stat.st_dev,
+        "inode": stat.st_ino,
+    }
+
+
+def _lock_was_copied(owner: dict, ours: dict) -> bool:
+    """Return whether a lock belongs to a different physical directory.
+
+    The absolute path is useful diagnostics, but device/inode identity is the
+    safety boundary: aliases of the same live directory must retain mutual
+    exclusion, while a filesystem copy (including one carried on removable
+    media) must not inherit the source directory's live lock.
+    """
+    owner_bundle = owner.get("bundle")
+    our_bundle = ours["bundle"]
+    if not isinstance(owner_bundle, dict):
+        return False
+    try:
+        return (
+            int(owner_bundle["device"]),
+            int(owner_bundle["inode"]),
+        ) != (our_bundle["device"], our_bundle["inode"])
+    except (KeyError, TypeError, ValueError):
+        return False
+
+
 @contextmanager
 def transfer_lock(bundle_dir: Path, progress=print):
-    """Hold the per-bundle lock, reclaiming a dead same-host owner."""
+    """Hold the per-bundle lock, reclaiming dead or copied owners."""
     bundle_dir.mkdir(parents=True, exist_ok=True)
     path = bundle_dir / LOCK_FILE
-    ours = {"pid": os.getpid(), "host": socket.gethostname(), "started": _utc_now()}
+    ours = {
+        "pid": os.getpid(),
+        "host": socket.gethostname(),
+        "started": _utc_now(),
+        "bundle": _bundle_identity(bundle_dir),
+    }
     while True:
         try:
             with path.open("x", encoding="utf-8") as handle:
@@ -188,9 +224,11 @@ def transfer_lock(bundle_dir: Path, progress=print):
                 owner_pid = int(owner.get("pid") or 0)
             except (TypeError, ValueError):
                 owner_pid = 0
-            stale = not owner or (same_host and not _pid_alive(owner_pid))
+            copied = bool(owner) and _lock_was_copied(owner, ours)
+            stale = not owner or copied or (same_host and not _pid_alive(owner_pid))
             if stale:
-                progress(f"Reclaiming stale transfer lock: {path}")
+                kind = "copied" if copied else "stale"
+                progress(f"Reclaiming {kind} transfer lock: {path}")
                 try:
                     path.unlink()
                 except FileNotFoundError:
@@ -624,7 +662,7 @@ def _tqdm_class(counter: NetworkCounter):
 
 
 @contextmanager
-def _resumable_hub_transport():
+def _resumable_hub_transport(payload_dir: Path):
     """Restore safe same-bundle partial resume around ``hf_hub_download``.
 
     huggingface_hub 1.18 switched to process-unique temporary files and
@@ -634,9 +672,28 @@ def _resumable_hub_transport():
     Xet, and the final move; this wrapper only restores its former temp-file
     lifetime while the modelvault lock is held.
     """
+    import huggingface_hub.constants as hub_constants
     import huggingface_hub.file_download as file_download
+    try:
+        from huggingface_hub.utils._xet import abort_xet_session
+    except ImportError:
+        # Older supported Hub clients do not keep a process-global Xet
+        # session; assigning HF_XET_CACHE below is sufficient for them.
+        def abort_xet_session():
+            return None
 
     original = file_download._download_to_tmp_and_move
+    original_xet_cache = hub_constants.HF_XET_CACHE
+    old_xet_cache_env = os.environ.get("HF_XET_CACHE")
+    local_xet_cache = payload_dir / ".cache" / "huggingface" / "xet"
+
+    # hf_xet reads its cache path when its process-global session starts.
+    # Recreate that session inside the bundle so its content-addressed chunks
+    # travel with a partial archive instead of being stranded in this user's
+    # global cache. Assign the Hub constant too for supported older clients.
+    abort_xet_session()
+    os.environ["HF_XET_CACHE"] = str(local_xet_cache)
+    hub_constants.HF_XET_CACHE = local_xet_cache
 
     def resumable_download(
         incomplete_path,
@@ -684,6 +741,12 @@ def _resumable_hub_transport():
         yield
     finally:
         file_download._download_to_tmp_and_move = original
+        abort_xet_session()
+        hub_constants.HF_XET_CACHE = original_xet_cache
+        if old_xet_cache_env is None:
+            os.environ.pop("HF_XET_CACHE", None)
+        else:
+            os.environ["HF_XET_CACHE"] = old_xet_cache_env
 
 
 def _download_one(
@@ -770,7 +833,7 @@ def transfer_all(
     large = [item for item in remaining if (item.get("size") or 0) >= SMALL_FILE_LIMIT]
     counter = NetworkCounter(session, stop_controller)
 
-    with _resumable_hub_transport():
+    with _resumable_hub_transport(payload_dir):
         if small:
             progress(
                 f"Transferring {len(small)} small files with {min(jobs, len(small))} workers "
