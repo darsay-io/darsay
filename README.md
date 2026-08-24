@@ -23,6 +23,7 @@ python3 -m venv .venv
 .venv/bin/pip install -e .                 # core: huggingface_hub only
 .venv/bin/pip install -e ".[fast-hash,smoke]"   # + blake3, tokenizers
 .venv/bin/pip install -e ".[inference]"    # + transformers/torch for inference smoke test
+.venv/bin/pip install -e ".[datasets]"     # + pyarrow for measured dataset row counts
 ```
 
 The extras only serve the in-process smoke tests; `modelvault run` needs none
@@ -33,7 +34,9 @@ of them — hydration builds its own isolated env per engine (see below).
 ```bash
 modelvault estimate Qwen/Qwen3.8-27B --variants   # preflight: size, params, disk, quantized ecosystem — no download
 modelvault estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'   # price one quant of a pack repo
+modelvault estimate datasets/saidutta69/fable-5-premium   # datasets use the Hub's own address grammar
 modelvault archive Qwen/Qwen3-0.6B          # download + hash + manifest + reports
+modelvault archive datasets/saidutta69/fable-5-premium    # dataset bundle: payload under data/
 modelvault verify vault/qwen--qwen3-0.6b/<rev>    # re-hash, detect tampering
 modelvault smoke  vault/qwen--qwen3-0.6b/<rev> [--inference]
 modelvault list                             # inventory of the whole vault
@@ -50,7 +53,10 @@ modelvault dehydrate vault/qwen--qwen3-0.6b/<rev>            # drop a bundle's h
 
 The vault root defaults to `./vault` (override with `--vault` or
 `$MODELVAULT_HOME`). Bundles are gitignored — they are large binary payloads
-that live on disk or in your backup tier, not in this repo.
+that live on disk or in your backup tier, not in this repo. Repo refs use the
+Hub's own grammar — `owner/name` is a model, `datasets/owner/name` a dataset,
+and either huggingface.co URL pastes straight from the browser; bundle-path
+commands need nothing, they dispatch on the manifest's `artifact_type`.
 
 ## Bundle layout
 
@@ -145,6 +151,55 @@ is disposable hydration-time derivation, never archival. The full policy,
 with the Qwen3.8-27B case study and the proposed `archive --include` /
 `hydrate --quantize` mechanics: [docs/QUANTIZATION.md](docs/QUANTIZATION.md).
 
+## Dataset bundles
+
+Datasets are the vault's second artifact type — models are functions of data,
+and datasets are *more* endangered than weights (DMCA'd, gated retroactively,
+quietly rewritten, rarely mirrored). One sentence covers the difference:
+datasets are addressed as `datasets/owner/name` and their payload lives in
+`data/`; everything else is identical. Bundle directories take a `datasets--`
+prefix, the manifest carries `dataset_metadata` (formats from the inventory;
+configs, splits, and example counts recorded as **declared** upstream claims,
+with **measured** parquet row counts only when pyarrow is installed —
+`modelvault[datasets]`) and a two-sided relationship graph: dataset bundles
+record `models_trained_on`, model bundles record `training_datasets`.
+`smoke` runs stdlib-only structural checks (parquet magic bytes, JSONL
+first-line parse, CSV dialect sniff); `hydrate`/`run` don't apply — a dataset
+bundle has no engine, and any reader can be pointed at `data/` directly.
+
+`estimate` prices a dataset exactly like a model, printing a formats
+breakdown where a model shows parameters:
+
+```
+$ modelvault estimate datasets/saidutta69/fable-5-premium
+
+datasets/saidutta69/fable-5-premium @ main -> 684cb1f849fe
+  license mit
+  formats:      jsonl 1.5 GiB in 6, parquet 702.2 MiB in 6, png 49.0 KiB in 1, py 15.3 KiB in 1, json 3.9 KiB in 2, md 3.0 KiB in 1, (none) 2.8 KiB in 1
+  payload:      18 files, 2.2 GiB
+                data 2.2 GiB in 14 files (largest 689.4 MiB: openai_chat/train.jsonl)
+                support 70.0 KiB in 4 files
+  engines:      none (dataset bundle — hydrate/run not applicable)
+  completeness: complete
+  estimated:    download scratch +689.4 MiB (largest file in flight)
+  bundle:       vault/datasets--saidutta69--fable-5-premium/684cb1f849fe  (new)
+  disk:         needs ~2.8 GiB, free 997.5 GiB — OK
+
+To archive: modelvault archive datasets/saidutta69/fable-5-premium
+```
+
+Using an archived dataset needs no unpacking or conversion — the payload is
+the upstream repo's own files:
+
+```python
+import pyarrow.parquet as pq   # or pandas, polars, datasets — plain files either way
+
+path = "vault/datasets--cornell-movie-review-data--rotten_tomatoes/aa13bc287fa6/data"
+table = pq.read_table(f"{path}/train.parquet")     # 8,530 rows, offline
+```
+
+Design and rationale: [docs/DATASETS.md](docs/DATASETS.md).
+
 ## Verification model
 
 - **At archive time** every file is checked against upstream expectations:
@@ -203,10 +258,12 @@ rebuilds. Design details: [docs/HYDRATION.md](docs/HYDRATION.md).
 ## Extending to new artifact types and engines
 
 The design is registry-based so new artifact types slot in later. A bundle's
-`artifact_type` drives completeness rules from `ARTIFACT_TYPES` in
-`src/modelvault/schema.py` — add an entry (e.g. `dataset`, `gguf-pack`,
-`paper`) with its required/recommended file patterns, plus an extractor if it
-has structured metadata, and the verify/report machinery works unchanged.
+`artifact_type` drives the payload root and completeness rules from
+`ARTIFACT_TYPES` in `src/modelvault/schema.py` — add an entry (e.g.
+`gguf-pack`, `paper`) with its payload root and required/recommended file
+patterns, plus an extractor if it has structured metadata, and the
+verify/export/report machinery works unchanged; the `dataset` type was added
+exactly this way.
 Inference runtimes work the same way: `ENGINES` in `src/modelvault/hydrate.py`
 maps detection globs to pip requirements and a standalone runner script, so an
 MLX, vLLM, or ONNX engine is a registry entry plus a runner, with no special

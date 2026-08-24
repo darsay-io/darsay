@@ -1,4 +1,4 @@
-# manifest.json — schema reference (v1.1.0)
+# manifest.json — schema reference (v1.2.0)
 
 `manifest.json` is the machine-readable source of truth for a bundle. This
 document describes every field so a bundle remains interpretable without the
@@ -8,29 +8,33 @@ component changes only on breaking layout changes.
 Conventions:
 
 - Timestamps are ISO 8601 UTC with second precision (`2026-08-23T00:30:58+00:00`).
-- File paths are bundle-root-relative POSIX paths (`model/config.json`).
+- File paths are bundle-root-relative POSIX paths (`model/config.json`,
+  `data/train.parquet`) rooted at the bundle's `inventory.layout.payload_root`.
 - `null` means *unknown or not yet recorded* — the tool records what it can
   establish and never fabricates. Fields marked **curator** below are meant to
   be filled in by hand (directly in the manifest, or via `curation.md`).
+- Sections are universal across artifact types unless marked otherwise.
+  Per-type presence: **model bundles** carry `model_metadata` + `runtime`;
+  **dataset bundles** carry `dataset_metadata` instead.
 
 ## Top level
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | Version of this schema (`"1.1.0"`; 1.1 defined the shape of `runtime.tested_hardware`, previously always null). |
-| `artifact_type` | Registry key driving completeness rules (`"model"`; future: datasets, GGUF packs, papers — see `src/modelvault/schema.py`). |
-| `bundle_id` | `<repo_id lowercased, "/"→"--">@<first 12 of pinned commit>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Stable, deterministic, unique per (repo, revision). |
+| `schema_version` | Version of this schema (`"1.2.0"`; 1.1 defined the shape of `runtime.tested_hardware`; 1.2 added the dataset artifact type and `relationships.training_datasets` — both additive). |
+| `artifact_type` | Registry key driving completeness rules and the payload root (`"model"` or `"dataset"`; future: GGUF packs, papers — see `src/modelvault/schema.py`). |
+| `bundle_id` | `<repo_id lowercased, "/"→"--">@<first 12 of pinned commit>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Dataset bundles take a `datasets--` prefix (`datasets--saidutta69--fable-5-premium@684cb1f849fe`) since model and dataset namespaces can collide on the Hub. Stable, deterministic, unique per (repo, revision). |
 
 ## `identity`
 
 | Field | Meaning |
 |---|---|
-| `model_name` | Repo name as published (`Qwen3-0.6B`). |
-| `family` | Model family, taken from `config.json` `model_type` when available (`qwen3`). |
+| `model_name` | Repo name as published (`Qwen3-0.6B`), for datasets too — the field name is kept stable across types. |
+| `family` | Model family, taken from `config.json` `model_type` when available (`qwen3`); name-derived fallback otherwise. |
 | `publisher` | Repo owner (`Qwen`). |
 | `version` | Family version parsed from the name/model_type; null when not derivable. |
 | `release_date` | Upstream repo creation time. |
-| `aliases` | Known ids for this model, starting with the source repo id. |
+| `aliases` | Known ids for this artifact, starting with the source repo id. |
 
 ## `source`
 
@@ -67,11 +71,11 @@ Provenance of the download.
 | Field | Meaning |
 |---|---|
 | `file_count`, `total_size_bytes` | Payload totals. |
-| `bundle_hash` | `{algorithm, value, covers}`. SHA-256 over the sorted `"<sha256>  <path>"` lines of the payload — one value that fingerprints the whole payload. Covers `model/` only; bundle-root metadata is mutable by design. |
-| `layout` | `payload_root` (always `model/`) and the list of mutable metadata files. |
+| `bundle_hash` | `{algorithm, value, covers}`. SHA-256 over the sorted `"<sha256>  <path>"` lines of the payload — one value that fingerprints the whole payload. Covers the payload root only; bundle-root metadata is mutable by design. |
+| `layout` | `payload_root` (`model/` for model bundles, `data/` for dataset bundles — readers must take the root from here, writers from the registry) and the list of mutable metadata files. |
 | `files[]` | Per file: `path`, `size`, `sha256`, `blake3` (null if blake3 wasn't installed), `upstream_lfs_sha256` (LFS files), `upstream_git_sha1` (small git-blob files), `verified_against_upstream` (true/false/null = no upstream expectation). |
 
-## `model_metadata`
+## `model_metadata` — model bundles only
 
 Extracted offline from the payload itself (`config.json`,
 `generation_config.json`, `tokenizer_config.json`, safetensors headers — no
@@ -90,7 +94,62 @@ torch required).
 | `training_cutoff` | **curator** — rarely published. |
 | `generation_defaults` | Sampling defaults from `generation_config.json`. |
 
-## `runtime`
+## `dataset_metadata` — dataset bundles only
+
+The declared/measured split is record-don't-fabricate applied to data:
+upstream claims are recorded as *declared*; only facts established from the
+payload itself are *measured*.
+
+| Field | Meaning |
+|---|---|
+| `formats` | Files/bytes per extension, computed from the archived inventory (`{"parquet": {file_count, total_size_bytes}, ...}`), largest first. |
+| `declared` | Upstream claims: `sources` (which of `dataset_infos.json` / the card YAML supplied them), `configs` (per config: `features` verbatim, `splits` with `num_examples`/`num_bytes`, `download_size`, `dataset_size`), `example_count_total` (sum of declared split counts; null when none declared). Null when upstream declares nothing. |
+| `measured` | Row counts read from the payload's parquet metadata via pyarrow (optional extra `modelvault[datasets]`): `status` (`measured`/`partial`/`skipped`), `method`, `row_counts` per file, `total_rows`, `errors` on partial reads. Skipped with a reason — never guessed — when pyarrow is absent or no parquet ships. |
+| `task_categories`, `size_categories`, `languages` | From the dataset card, when declared. |
+
+Worked example (`cornell-movie-review-data/rotten_tomatoes`, features elided):
+
+```json
+"dataset_metadata": {
+  "formats": {
+    "parquet": {"file_count": 3, "total_size_bytes": 881052},
+    "md":      {"file_count": 1, "total_size_bytes": 7457},
+    "(none)":  {"file_count": 1, "total_size_bytes": 1174}
+  },
+  "declared": {
+    "sources": ["card"],
+    "configs": {
+      "default": {
+        "features": [{"name": "text", "dtype": "string"}, {"name": "label", "...": "..."}],
+        "splits": {
+          "train":      {"num_examples": 8530, "num_bytes": 1074810},
+          "validation": {"num_examples": 1066, "num_bytes": 134679},
+          "test":       {"num_examples": 1066, "num_bytes": 135972}
+        },
+        "download_size": 487770,
+        "dataset_size": 1345461
+      }
+    },
+    "example_count_total": 10662
+  },
+  "measured": {
+    "status": "measured",
+    "method": "pyarrow parquet metadata",
+    "row_counts": {"test.parquet": 1066, "train.parquet": 8530, "validation.parquet": 1066},
+    "total_rows": 10662
+  },
+  "task_categories": ["text-classification"],
+  "size_categories": ["1K<n<10K"],
+  "languages": ["en"]
+}
+```
+
+(Without pyarrow, `measured` records the degradation instead of guessing:
+`{"status": "skipped", "reason": "pyarrow not installed (pip install
+modelvault[datasets])"}`. Here declared and measured agree at 10,662 —
+when they disagree, both are kept; the manifest never averages claims.)
+
+## `runtime` — model bundles only
 
 | Field | Meaning |
 |---|---|
@@ -106,20 +165,36 @@ torch required).
 |---|---|
 | `checksum_verification` | Latest run: `at`, `status` (pass/fail), `files_checked`; at archive time also `upstream_mismatches`; on re-verification `missing`/`extra`/`mismatched` path lists and `bundle_hash_match`. |
 | `completeness` | Result of the artifact-type rules: `status` (complete/incomplete), per-rule matches, `missing_required`, `missing_recommended`. |
-| `smoke_tests.tokenizer` | Encode/decode round-trip via `tokenizers` (or transformers fallback): status, engine, token count, `roundtrip_exact`. |
-| `smoke_tests.inference` | Opt-in (`smoke --inference`): greedy generation via transformers — status, prompt, output, new token count. |
+| `smoke_tests.tokenizer` | Model bundles: encode/decode round-trip via `tokenizers` (or transformers fallback): status, engine, token count, `roundtrip_exact`. |
+| `smoke_tests.inference` | Model bundles, opt-in (`smoke --inference`): greedy generation via transformers — status, prompt, output, new token count. |
+| `smoke_tests.structure` | Dataset bundles: stdlib-only structural checks (parquet `PAR1` magic at head and tail, JSONL first-line parse, CSV/TSV dialect sniff) — status, `files_checked`, per-format counts, `failures`. |
 
 Statuses: `pass` / `fail` / `skipped` (dependency or file missing) / `not-run`.
 
 ## `relationships`
 
+Model bundles:
+
 | Field | Meaning |
 |---|---|
 | `base_model`, `finetuned_from` | Declared parent from the model card. |
+| `training_datasets` | Dataset ids the model card declares training on (`card.datasets`, normalized to a list; null when not declared) — the mirror of a dataset bundle's `models_trained_on`. |
 | `quantized_versions`, `gguf_repos` | Downstream repos found at archive time (GGUFs are the `*gguf*` subset). |
 | `finetunes_count`, `adapters_count` | Counts of downstream finetune/adapter repos. |
-| `query_limit` | Cap on the ecosystem queries (100). A count or list length equal to the cap means **at least** that many — renderers show `≥`. |
 | `related_variants`, `successors` | **curator**. |
+
+Dataset bundles:
+
+| Field | Meaning |
+|---|---|
+| `source_datasets` | Upstream datasets this one was derived from, as the card declares them. |
+| `models_trained_on` | Models on the Hub declaring training on this dataset (`dataset:<id>` filter) at archive time. |
+
+Both:
+
+| Field | Meaning |
+|---|---|
+| `query_limit` | Cap on the ecosystem queries (100). A count or list length equal to the cap means **at least** that many — renderers show `≥`. |
 | `ecosystem_snapshot_as_of` | When the ecosystem queries ran. This section is a historical snapshot, not a live index. |
 
 ## `archive`

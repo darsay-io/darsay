@@ -11,8 +11,9 @@ point `modelvault` (argparse, subcommands in `cli.py`).
   `transformers`/`torch` are optional extras — every feature that needs them
   must degrade gracefully (record `skipped` with a reason, never crash).
 - No test suite yet. Changes are validated by running the CLI against a tiny
-  repo (e.g. `sshleifer/tiny-gpt2`) into a scratch `--vault`, plus the checks
-  in the invariants list below.
+  repo (e.g. `sshleifer/tiny-gpt2`; for datasets a small parquet repo like
+  `datasets/cornell-movie-review-data/rotten_tomatoes`) into a scratch
+  `--vault`, plus the checks in the invariants list below.
 
 ## Layout
 
@@ -32,7 +33,7 @@ point `modelvault` (argparse, subcommands in `cli.py`).
   when a model has quantized variants.
   `docs/DESIGN.md` — implementation rationale: why Python, and why bundle
   longevity rests on the formats, not the tool.
-  `docs/DATASETS.md` — design (not yet implemented) for dataset bundles:
+  `docs/DATASETS.md` — dataset bundles (implemented, schema 1.2.0):
   Hub-address refs, per-type payload roots, dataset manifest sections.
   **Update these whenever manifest fields or the export format change**, and
   bump `SCHEMA_VERSION` (`__init__.py`) / `MVB_FORMAT_VERSION` (`export.py`)

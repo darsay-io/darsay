@@ -62,12 +62,12 @@ def iter_payload_files(payload_root: Path):
     return files
 
 
-def bundle_hash(file_records: list[dict]) -> dict:
+def bundle_hash(file_records: list[dict], payload_root: str = "model") -> dict:
     """Deterministic hash over the payload: sha256 of 'sha256  path' lines, sorted by path."""
     lines = [f"{r['sha256']}  {r['path']}" for r in sorted(file_records, key=lambda r: r["path"])]
     digest = hashlib.sha256(("\n".join(lines) + "\n").encode("utf-8")).hexdigest()
     return {
         "algorithm": "sha256-of-sorted-sha256-lines",
         "value": digest,
-        "covers": "model/ payload only; bundle-root metadata files are mutable and excluded",
+        "covers": f"{payload_root.rstrip('/')}/ payload only; bundle-root metadata files are mutable and excluded",
     }

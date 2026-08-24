@@ -132,7 +132,7 @@ def build_licensing_record(spdx_id: str | None, payload_root: Path) -> dict:
     record = {
         "spdx_id": spdx_id,
         "name": info["name"] if info else None,
-        "license_files": [f"model/{f}" for f in license_files],
+        "license_files": [f"{payload_root.name}/{f}" for f in license_files],
         "commercial_use": info["commercial_use"] if info else None,
         "redistribution": info["redistribution"] if info else None,
         "modification": info["modification"] if info else None,

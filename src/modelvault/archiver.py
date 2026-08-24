@@ -1,17 +1,18 @@
-"""Archive a Hugging Face model repo into a reproducible, auditable bundle.
+"""Archive a Hugging Face repo (model or dataset) into a reproducible, auditable bundle.
 
 Bundle layout:
 
-    vault/<publisher>--<name>/<revision12>/
+    vault/<publisher>--<name>/<revision12>/           (datasets--<publisher>--<name>/ for datasets)
         model/            immutable payload: exact snapshot of the upstream repo
+                          (data/ for dataset bundles — the registry's payload_root)
         manifest.json     machine-readable record (schema.py / SCHEMA_VERSION)
         README.md         human-readable summary, regenerable from the manifest
         VERIFICATION.md   latest verification report
         verification.json verification history
         curation.md       curator notes; the only file meant to be hand-edited
 
-The payload under model/ is treated as immutable after archiving; the bundle
-hash covers it alone. Metadata at the bundle root is mutable by design.
+The payload is treated as immutable after archiving; the bundle hash covers it
+alone. Metadata at the bundle root is mutable by design.
 """
 
 from __future__ import annotations
@@ -30,16 +31,59 @@ from huggingface_hub import HfApi, snapshot_download
 from . import SCHEMA_VERSION, __version__
 from .hashing import HAVE_BLAKE3, bundle_hash, hash_file, iter_payload_files
 from .licensing import build_licensing_record
-from .metadata import estimate_runtime, extract_model_metadata
-from .schema import check_completeness
+from .metadata import estimate_runtime, extract_dataset_metadata, extract_model_metadata
+from .schema import ARTIFACT_TYPES, check_completeness, payload_root_for
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
 
 
-def bundle_dir_for(vault: Path, repo_id: str, revision: str) -> Path:
-    return vault / repo_id.replace("/", "--").lower() / revision[:12]
+def parse_repo_ref(ref: str) -> tuple[str, str]:
+    """Parse a Hub address into (repo_type, repo_id).
+
+    Accepts the Hub's own grammar: `owner/name` (model), `datasets/owner/name`
+    (dataset), and either huggingface.co URL form with any trailing path or
+    query stripped. Anything else exits cleanly.
+    """
+    s = ref.strip()
+    is_url = False
+    for prefix in ("https://huggingface.co/", "http://huggingface.co/"):
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+            is_url = True
+            break
+    s = s.split("?", 1)[0].split("#", 1)[0].strip("/")
+    parts = [p for p in s.split("/") if p]
+    repo_type = "model"
+    if parts and parts[0] == "datasets":
+        repo_type = "dataset"
+        parts = parts[1:]
+    if is_url and len(parts) > 2:
+        parts = parts[:2]  # drop a trailing URL path such as /tree/main or /blob/...
+    if len(parts) != 2:
+        raise SystemExit(
+            f"error: cannot parse repo ref {ref!r} — expected owner/name, "
+            "datasets/owner/name, or a huggingface.co URL of either"
+        )
+    return repo_type, "/".join(parts)
+
+
+def hub_url(repo_id: str, repo_type: str = "model") -> str:
+    prefix = "datasets/" if repo_type == "dataset" else ""
+    return f"https://huggingface.co/{prefix}{repo_id}"
+
+
+def bundle_name_for(repo_id: str, repo_type: str = "model") -> str:
+    """Vault directory name. Datasets take a `datasets--` prefix: model and
+    dataset namespaces can collide on the Hub, and the prefix mirrors its URL
+    grammar while preserving the two-level `*/*/manifest.json` vault layout."""
+    name = repo_id.replace("/", "--").lower()
+    return f"datasets--{name}" if repo_type == "dataset" else name
+
+
+def bundle_dir_for(vault: Path, repo_id: str, revision: str, repo_type: str = "model") -> Path:
+    return vault / bundle_name_for(repo_id, repo_type) / revision[:12]
 
 
 def write_manifest(bundle_dir: Path, manifest: dict) -> None:
@@ -78,30 +122,57 @@ def _related_repos(api: HfApi, repo_id: str) -> dict:
     return related
 
 
+def _dataset_related(api: HfApi, repo_id: str) -> dict:
+    """Models that declare training on this dataset, as of archive time (best effort)."""
+    related = {"as_of": utc_now(), "query_limit": 100, "models_trained_on": None}
+    try:
+        models = list(api.list_models(filter=f"dataset:{repo_id}", limit=100))
+        related["models_trained_on"] = sorted(m.id for m in models)
+    except Exception:
+        pass
+    return related
+
+
+def _as_list(value) -> list | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return [value]
+    return list(value) or None
+
+
 def archive_model(
     repo_id: str,
     revision: str | None = None,
     vault: Path = Path("vault"),
     force: bool = False,
+    repo_type: str = "model",
     progress=print,
 ) -> Path:
+    """Archive a Hub repo (model or dataset) as a bundle — one flow for every
+    artifact type, with what varies dispatched via the ARTIFACT_TYPES registry
+    and the per-type blocks below."""
     api = HfApi()
 
-    progress(f"Resolving {repo_id} @ {revision or 'main'} ...")
-    info = api.model_info(repo_id, revision=revision, files_metadata=True)
+    progress(f"Resolving {repo_type} {repo_id} @ {revision or 'main'} ...")
+    if repo_type == "dataset":
+        info = api.dataset_info(repo_id, revision=revision, files_metadata=True)
+    else:
+        info = api.model_info(repo_id, revision=revision, files_metadata=True)
     commit = info.sha
     card = info.card_data.to_dict() if info.card_data else {}
 
-    bundle_dir = bundle_dir_for(vault, repo_id, commit)
-    payload_root = bundle_dir / "model"
+    bundle_dir = bundle_dir_for(vault, repo_id, commit, repo_type)
+    root = payload_root_for(repo_type)
+    payload_dir = bundle_dir / root
     if (bundle_dir / "manifest.json").exists() and not force:
         raise SystemExit(f"Bundle already exists: {bundle_dir} (use --force to re-archive)")
     bundle_dir.mkdir(parents=True, exist_ok=True)
 
-    progress(f"Downloading snapshot {commit[:12]} into {payload_root} ...")
-    snapshot_download(repo_id, revision=commit, local_dir=payload_root)
+    progress(f"Downloading snapshot {commit[:12]} into {payload_dir} ...")
+    snapshot_download(repo_id, revision=commit, local_dir=payload_dir, repo_type=repo_type)
     # Remove hub bookkeeping so the payload is a pristine copy of the repo tree.
-    shutil.rmtree(payload_root / ".cache", ignore_errors=True)
+    shutil.rmtree(payload_dir / ".cache", ignore_errors=True)
 
     # Upstream expectations per file: size, LFS sha256 (large files), git blob sha1 (small files).
     upstream = {}
@@ -115,7 +186,7 @@ def archive_model(
     progress("Hashing payload (sha256%s + upstream cross-check) ..." % ("+blake3" if HAVE_BLAKE3 else ""))
     file_records = []
     upstream_mismatches = []
-    for rel, abs_path in iter_payload_files(payload_root):
+    for rel, abs_path in iter_payload_files(payload_dir):
         hashes = hash_file(abs_path, with_git_sha1=True)
         up = upstream.get(rel, {})
         verified = None
@@ -126,7 +197,7 @@ def archive_model(
         if verified is False:
             upstream_mismatches.append(rel)
         record = {
-            "path": f"model/{rel}",
+            "path": f"{root}/{rel}",
             "size": abs_path.stat().st_size,
             "sha256": hashes["sha256"],
             "blake3": hashes.get("blake3"),
@@ -138,10 +209,18 @@ def archive_model(
 
     inventory_paths = [r["path"] for r in file_records]
     total_size = sum(r["size"] for r in file_records)
-    completeness = check_completeness("model", inventory_paths)
-    model_metadata = extract_model_metadata(payload_root, card)
-    runtime = estimate_runtime(payload_root, model_metadata)
-    licensing = build_licensing_record(card.get("license"), payload_root)
+    completeness = check_completeness(repo_type, inventory_paths)
+    if repo_type == "dataset":
+        model_metadata = runtime = None
+        dataset_metadata = extract_dataset_metadata(payload_dir, card, file_records)
+    else:
+        dataset_metadata = None
+        model_metadata = extract_model_metadata(payload_dir, card)
+        runtime = estimate_runtime(payload_dir, model_metadata)
+    license_id = card.get("license")
+    if isinstance(license_id, list):  # dataset cards may declare a license list
+        license_id = license_id[0] if license_id else None
+    licensing = build_licensing_record(license_id, payload_dir)
 
     # Surface the primary license file at the bundle root for museum visibility.
     for lf in licensing["license_files"]:
@@ -150,33 +229,56 @@ def archive_model(
             shutil.copy2(bundle_dir / lf, bundle_dir / "LICENSE")
             break
 
-    progress("Querying downstream ecosystem (quantizations, finetunes) ...")
-    related = _related_repos(api, repo_id)
+    if repo_type == "dataset":
+        progress("Querying downstream ecosystem (models trained on this dataset) ...")
+        related = _dataset_related(api, repo_id)
+        relationships = {
+            "source_datasets": _as_list(card.get("source_datasets")),
+            "models_trained_on": related["models_trained_on"],
+            "ecosystem_snapshot_as_of": related["as_of"],
+            "query_limit": related["query_limit"],
+        }
+    else:
+        progress("Querying downstream ecosystem (quantizations, finetunes) ...")
+        related = _related_repos(api, repo_id)
+        base_model = card.get("base_model")
+        if isinstance(base_model, list):
+            base_model = base_model[0] if base_model else None
+        relationships = {
+            "base_model": base_model,
+            "finetuned_from": base_model,
+            "training_datasets": _as_list(card.get("datasets")),
+            "quantized_versions": related["quantized_versions"],
+            "gguf_repos": related["gguf_repos"],
+            "finetunes_count": len(related["finetunes"]) if related["finetunes"] is not None else None,
+            "adapters_count": len(related["adapters"]) if related["adapters"] is not None else None,
+            "related_variants": None,
+            "successors": None,
+            "ecosystem_snapshot_as_of": related["as_of"],
+            "query_limit": related["query_limit"],
+        }
 
     publisher, _, name = repo_id.partition("/")
     now = utc_now()
-    bundle_id = f"{repo_id.replace('/', '--').lower()}@{commit[:12]}"
-
-    base_model = card.get("base_model")
-    if isinstance(base_model, list):
-        base_model = base_model[0] if base_model else None
+    bundle_id = f"{bundle_name_for(repo_id, repo_type)}@{commit[:12]}"
+    model_type = model_metadata.get("model_type") if model_metadata else None
 
     manifest = {
         "schema_version": SCHEMA_VERSION,
-        "artifact_type": "model",
+        "artifact_type": repo_type,
         "bundle_id": bundle_id,
         "identity": {
             "model_name": name,
-            "family": model_metadata.get("model_type") or name.split("-")[0].lower(),
+            "family": model_type or name.split("-")[0].lower(),
             "publisher": publisher,
-            "version": _guess_version(name, model_metadata.get("model_type")),
+            "version": _guess_version(name, model_type),
             "release_date": info.created_at.isoformat(timespec="seconds") if info.created_at else None,
             "aliases": [repo_id],
         },
         "source": {
             "origin": "huggingface",
             "repo_id": repo_id,
-            "upstream_url": f"https://huggingface.co/{repo_id}",
+            "upstream_url": hub_url(repo_id, repo_type),
             "revision": commit,
             "revision_ref": revision or "main",
             "last_modified_upstream": info.last_modified.isoformat(timespec="seconds") if info.last_modified else None,
@@ -200,16 +302,18 @@ def archive_model(
         "inventory": {
             "file_count": len(file_records),
             "total_size_bytes": total_size,
-            "bundle_hash": bundle_hash(file_records),
+            "bundle_hash": bundle_hash(file_records, root),
             "layout": {
-                "payload_root": "model/",
+                "payload_root": ARTIFACT_TYPES[repo_type]["payload_root"],
                 "mutable_metadata": ["manifest.json", "README.md", "VERIFICATION.md",
                                      "verification.json", "curation.md", "LICENSE"],
             },
             "files": file_records,
         },
-        "model_metadata": model_metadata,
-        "runtime": runtime,
+        # Per-type sections: model bundles carry model_metadata + runtime,
+        # dataset bundles carry dataset_metadata (spec: docs/DATASETS.md §6).
+        **({"dataset_metadata": dataset_metadata} if repo_type == "dataset"
+           else {"model_metadata": model_metadata, "runtime": runtime}),
         "validation": {
             "checksum_verification": {
                 "at": now,
@@ -218,23 +322,11 @@ def archive_model(
                 "upstream_mismatches": upstream_mismatches,
             },
             "completeness": completeness,
-            "smoke_tests": {
-                "tokenizer": {"status": "not-run"},
-                "inference": {"status": "not-run"},
-            },
+            "smoke_tests": ({"structure": {"status": "not-run"}} if repo_type == "dataset"
+                            else {"tokenizer": {"status": "not-run"},
+                                  "inference": {"status": "not-run"}}),
         },
-        "relationships": {
-            "base_model": base_model,
-            "finetuned_from": base_model,
-            "quantized_versions": related["quantized_versions"],
-            "gguf_repos": related["gguf_repos"],
-            "finetunes_count": len(related["finetunes"]) if related["finetunes"] is not None else None,
-            "adapters_count": len(related["adapters"]) if related["adapters"] is not None else None,
-            "related_variants": None,
-            "successors": None,
-            "ecosystem_snapshot_as_of": related["as_of"],
-            "query_limit": related["query_limit"],
-        },
+        "relationships": relationships,
         "archive": {
             "date_archived": now,
             "archived_by": None,

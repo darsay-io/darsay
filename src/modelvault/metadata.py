@@ -1,7 +1,10 @@
-"""Extract model metadata from the archived payload (config.json, tokenizer files).
+"""Extract model/dataset metadata from the archived payload.
 
 Everything here reads only the downloaded files — no network — so `regen` and
-`verify` can rebuild metadata offline from the archive itself.
+`verify` can rebuild metadata offline from the archive itself. For datasets,
+upstream claims (split sizes from dataset_infos.json / card YAML) are recorded
+as *declared*; only facts established from the payload itself (pyarrow row
+counts) are *measured* — record-don't-fabricate applied to data.
 """
 
 from __future__ import annotations
@@ -78,6 +81,120 @@ def extract_model_metadata(payload_root: Path, card_data: dict | None = None) ->
         }
         or None,
         "weight_shards": weights["shard_count"] if weights else None,
+    }
+
+
+def _declared_dataset_info(infos: dict, card_data: dict) -> dict | None:
+    """Configs/splits/features as upstream declares them. dataset_infos.json is
+    authoritative; the card's `dataset_info` YAML fills in configs it lacks."""
+    sources = []
+    raw_configs: dict[str, dict] = {}
+    if infos:
+        sources.append("dataset_infos.json")
+        for name, info in infos.items():
+            if isinstance(info, dict):
+                raw_configs[name or "default"] = info
+    card_info = card_data.get("dataset_info")
+    if isinstance(card_info, dict):
+        card_info = [card_info]
+    if isinstance(card_info, list):
+        added = False
+        for info in card_info:
+            if isinstance(info, dict):
+                key = info.get("config_name") or "default"
+                if key not in raw_configs:
+                    raw_configs[key] = info
+                    added = True
+        if added:
+            sources.append("card")
+    if not raw_configs:
+        return None
+
+    configs = {}
+    total_examples = 0
+    have_counts = False
+    for name, info in raw_configs.items():
+        splits_in = info.get("splits") or {}
+        if isinstance(splits_in, list):  # card YAML lists splits; dataset_infos.json maps them
+            splits_in = {s.get("name"): s for s in splits_in if isinstance(s, dict)}
+        splits = {}
+        for split_name, s in splits_in.items():
+            if not isinstance(s, dict):
+                continue
+            splits[split_name] = {"num_examples": s.get("num_examples"),
+                                  "num_bytes": s.get("num_bytes")}
+            if s.get("num_examples") is not None:
+                total_examples += s["num_examples"]
+                have_counts = True
+        configs[name] = {
+            "features": info.get("features"),
+            "splits": splits or None,
+            "download_size": info.get("download_size"),
+            "dataset_size": info.get("dataset_size"),
+        }
+    return {
+        "sources": sources,
+        "configs": configs,
+        "example_count_total": total_examples if have_counts else None,
+    }
+
+
+def _measured_row_counts(payload_root: Path) -> dict:
+    """Row counts established from the payload itself. Parquet only, and only
+    when pyarrow is available — otherwise recorded as skipped, never guessed."""
+    parquet_files = sorted(p for p in payload_root.rglob("*.parquet") if p.is_file())
+    if not parquet_files:
+        return {"status": "skipped",
+                "reason": "no parquet files in payload (row counting covers parquet only)"}
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:
+        return {"status": "skipped",
+                "reason": "pyarrow not installed (pip install modelvault[datasets])"}
+    rows = {}
+    errors = {}
+    for p in parquet_files:
+        rel = p.relative_to(payload_root).as_posix()
+        try:
+            rows[rel] = pq.ParquetFile(p).metadata.num_rows
+        except Exception as exc:  # record the failure, never crash the archive
+            errors[rel] = str(exc)
+    out = {
+        "status": "measured" if not errors else "partial",
+        "method": "pyarrow parquet metadata",
+        "row_counts": rows or None,
+        "total_rows": sum(rows.values()) if rows else None,
+    }
+    if errors:
+        out["errors"] = errors
+    return out
+
+
+def extract_dataset_metadata(payload_root: Path, card_data: dict | None = None,
+                             file_records: list[dict] | None = None) -> dict:
+    card_data = card_data or {}
+    infos = _load_json(payload_root / "dataset_infos.json") or {}
+
+    formats: dict[str, dict] = {}
+    for r in file_records or []:
+        ext = Path(r["path"]).suffix.lower().lstrip(".") or "(none)"
+        entry = formats.setdefault(ext, {"file_count": 0, "total_size_bytes": 0})
+        entry["file_count"] += 1
+        entry["total_size_bytes"] += r["size"] or 0
+    formats = dict(sorted(formats.items(), key=lambda kv: (-kv[1]["total_size_bytes"], kv[0])))
+
+    def listed(value):
+        if isinstance(value, str):
+            return [value]
+        return list(value) if value else None
+
+    return {
+        "formats": formats or None,
+        "declared": _declared_dataset_info(infos, card_data),
+        "measured": _measured_row_counts(payload_root),
+        "task_categories": listed(card_data.get("task_categories")),
+        "size_categories": listed(card_data.get("size_categories")),
+        "languages": listed(card_data.get("language")),
     }
 
 

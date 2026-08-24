@@ -311,9 +311,10 @@ def hydrate_bundle(bundle_dir: Path, engine: str | None = None, python: str | No
                    weights: str | None = None, force: bool = False, dry_run: bool = False,
                    progress=print) -> dict:
     from .archiver import load_manifest, utc_now, write_manifest
+    from .schema import payload_root as manifest_payload_root
 
     manifest = load_manifest(bundle_dir)
-    payload_root = bundle_dir / "model"
+    payload_root = bundle_dir / manifest_payload_root(manifest)
     chosen = select_engine(manifest, engine)
     weights_path = select_weights(manifest, chosen, weights)
     requirements = resolve_requirements(chosen, payload_root)
@@ -405,11 +406,14 @@ def run_bundle(bundle_dir: Path, prompt: str | None = None, engine: str | None =
         hydration = hydrate_bundle(bundle_dir, engine=engine, python=python,
                                    weights=weights, progress=progress)
 
+    from .schema import payload_root as manifest_payload_root
+
     env_record = {"python_executable": hydration["env"]["python_executable"]}
     chosen = hydration["engine"]
     prompt = prompt if prompt is not None else DEFAULT_PROMPT
 
-    runner_args = ["--model-dir", str(bundle_dir / "model"), "--prompt", prompt,
+    payload_dir = bundle_dir / manifest_payload_root(load_manifest(bundle_dir))
+    runner_args = ["--model-dir", str(payload_dir), "--prompt", prompt,
                    "--max-new-tokens", str(max_new_tokens), "--device", device]
     if chosen == "transformers":
         runner_args += ["--dtype", dtype]

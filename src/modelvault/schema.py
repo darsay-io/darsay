@@ -1,18 +1,21 @@
-"""Artifact-type registry and completeness rules.
+"""Artifact-type registry, payload roots, and completeness rules.
 
-New artifact types (datasets, standalone GGUF packs, papers, ...) slot in by
-adding a registry entry: what files a complete bundle must contain and which
-are recommended. The manifest carries `artifact_type` so consumers can dispatch.
+New artifact types (standalone GGUF packs, papers, ...) slot in by adding a
+registry entry: where the payload lives, what files a complete bundle must
+contain and which are recommended. The manifest carries `artifact_type` so
+consumers can dispatch; `model` and `dataset` are the two current types.
 """
 
 from __future__ import annotations
 
 from fnmatch import fnmatch
 
-# artifact_type -> completeness rules. Each rule is (label, [glob patterns]);
-# the rule passes when any pattern matches at least one inventory path.
+# artifact_type -> payload root + completeness rules. Each rule is
+# (label, [glob patterns]); the rule passes when any pattern matches at least
+# one inventory path.
 ARTIFACT_TYPES = {
     "model": {
+        "payload_root": "model/",
         "required": [
             ("config", ["model/config.json", "model/*.gguf"]),
             ("weights", ["model/*.safetensors", "model/*.bin", "model/*.gguf", "model/*.pt", "model/*.pth"]),
@@ -25,11 +28,37 @@ ARTIFACT_TYPES = {
             ("tokenizer_config", ["model/tokenizer_config.json"]),
         ],
     },
+    "dataset": {
+        "payload_root": "data/",
+        "required": [
+            # fnmatch '*' crosses '/', so these match nested files too.
+            ("data", ["data/*.parquet", "data/*.jsonl", "data/*.json", "data/*.csv",
+                      "data/*.arrow", "data/*.txt", "data/*.tsv"]),
+        ],
+        "recommended": [
+            ("dataset_card", ["data/README.md", "data/README*.md"]),
+            ("license", ["data/LICENSE*", "data/LICENCE*", "data/COPYING*", "data/license*"]),
+            ("dataset_infos", ["data/dataset_infos.json"]),
+        ],
+    },
 }
 
 # Files the tool itself writes at the bundle root.
 BUNDLE_METADATA_FILES = ["manifest.json", "README.md", "VERIFICATION.md", "verification.json",
                          "curation.md", "exports.json", "hydration.json"]
+
+
+def payload_root_for(artifact_type: str) -> str:
+    """Payload directory name (no trailing slash) for an artifact type — for
+    writers creating a bundle. Readers of existing bundles use payload_root()."""
+    return ARTIFACT_TYPES[artifact_type]["payload_root"].rstrip("/")
+
+
+def payload_root(manifest: dict) -> str:
+    """Payload directory name (no trailing slash) recorded in a manifest.
+    Falls back to "model/" for pre-1.2 manifests that predate the field."""
+    layout = manifest.get("inventory", {}).get("layout") or {}
+    return (layout.get("payload_root") or "model/").rstrip("/")
 
 
 def check_completeness(artifact_type: str, inventory_paths: list[str]) -> dict:

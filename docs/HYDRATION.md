@@ -11,7 +11,10 @@ modelvault run vault/qwen--qwen3-0.6b/c1899de289a0 "2+2=?"    # your prompt
 ```
 
 `run` hydrates automatically when needed. macOS and Linux are the supported
-targets (Windows is untested best-effort).
+targets (Windows is untested best-effort). Hydration applies to model
+bundles: a dataset bundle matches no engine and `hydrate`/`run` exit with the
+"no known engine" message by design — its payload under `data/` is plain
+files any reader opens directly (see [DATASETS.md](DATASETS.md)).
 
 ## Design rules
 

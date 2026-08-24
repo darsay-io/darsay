@@ -1,8 +1,8 @@
 # Dataset bundles — the vault's second artifact type
 
 Design for archiving Hugging Face datasets with the same bundling mechanism
-as models. Status: designed, not implemented. Case study:
-`saidutta69/fable-5-premium` (2026-08).
+as models. Status: **implemented** (schema 1.2.0, modelvault 0.4.0, 2026-08).
+Case study: `saidutta69/fable-5-premium` (2026-08).
 
 ## 1. Why
 
@@ -136,6 +136,14 @@ entry, not designed here.
    both directions; schema 1.2.0; update MANIFEST.md and the README.
 4. Dataset smoke checks; validate end-to-end on a small public dataset,
    then archive `fable-5-premium` (2.3 GiB) as the reference.
+
+All four steps are implemented. End-to-end validation ran on
+`datasets/cornell-movie-review-data/rotten_tomatoes` (869 KiB, 3 parquet
+splits): archive → verify → export ×2 (byte-identical tars) → import →
+smoke → regen, with model bundles proven byte-stable against a pre-change
+baseline; pyarrow-measured rows (10,662) matched the declared count exactly.
+Archiving `fable-5-premium` as the reference dataset bundle awaits the
+curator's download go-ahead.
 
 ## Case study: saidutta69/fable-5-premium
 

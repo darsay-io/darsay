@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "modelvault"
-version = "0.2.0"
+version = "0.4.0"
 description = "Download, archive, and curate full model ecosystems as reproducible, auditable bundles"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -20,6 +20,8 @@ fast-hash = ["blake3"]
 smoke = ["tokenizers"]
 # Full inference smoke test
 inference = ["transformers", "torch"]
+# Measured parquet row counts for dataset bundles (declared counts need nothing)
+datasets = ["pyarrow"]
 
 [project.scripts]
 modelvault = "modelvault.cli:main"

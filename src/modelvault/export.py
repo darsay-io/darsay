@@ -161,13 +161,16 @@ def import_bundle(tar_path: Path, vault: Path, force: bool = False, progress=pri
             raise SystemExit(f"error: marker/manifest bundle_id mismatch: {bundle_id} vs {manifest['bundle_id']}")
 
         progress("Verifying payload against embedded manifest ...")
+        from .schema import payload_root
+
+        payload_name = payload_root(manifest)
         expected = {r["path"]: r["sha256"] for r in manifest["inventory"]["files"]}
         actual = {}
-        for rel, abs_path in iter_payload_files(root / "model"):
-            actual[f"model/{rel}"] = hash_file(abs_path, with_blake3=False)["sha256"]
+        for rel, abs_path in iter_payload_files(root / payload_name):
+            actual[f"{payload_name}/{rel}"] = hash_file(abs_path, with_blake3=False)["sha256"]
         bad = sorted(p for p in expected if actual.get(p) != expected[p])
         extra = sorted(set(actual) - set(expected))
-        recomputed = bundle_hash([{"path": p, "sha256": s} for p, s in actual.items()])
+        recomputed = bundle_hash([{"path": p, "sha256": s} for p, s in actual.items()], payload_name)
         if bad or extra or recomputed["value"] != marker["bundle_hash"]["value"]:
             raise SystemExit(
                 "error: import verification FAILED — bundle not registered "

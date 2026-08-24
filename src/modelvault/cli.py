@@ -1,7 +1,9 @@
 """modelvault CLI.
 
     modelvault estimate Qwen/Qwen3-0.6B         preflight: size, params, disk — no download
+    modelvault estimate datasets/<owner>/<name>  same, for a dataset repo
     modelvault archive Qwen/Qwen3-0.6B          download + hash + manifest + reports
+    modelvault archive datasets/<owner>/<name>  archive a dataset (payload under data/)
     modelvault verify  vault/<bundle>           re-hash and compare against manifest
     modelvault smoke   vault/<bundle> [--inference]
     modelvault list                             all bundles in the vault
@@ -13,6 +15,10 @@
     modelvault run     vault/<bundle> [PROMPT]  hydrate if needed, then generate (offline)
     modelvault dehydrate vault/<bundle>         drop the bundle's hydration record
     modelvault envs [--prune]                   list / clean up shared runtime envs
+
+Repo refs use the Hub's own grammar: `owner/name` is a model,
+`datasets/owner/name` a dataset, and either huggingface.co URL form works.
+Bundle-path commands dispatch on the manifest's artifact_type.
 """
 
 from __future__ import annotations
@@ -38,14 +44,17 @@ def _bundle_dir(path_str: str) -> Path:
 
 
 def cmd_estimate(args) -> int:
+    from .archiver import parse_repo_ref
     from .estimate import estimate_repo, print_estimate
 
+    repo_type, repo_id = parse_repo_ref(args.repo_id)
     est = estimate_repo(
-        args.repo_id,
+        repo_id,
         revision=args.revision,
         vault=_vault_path(args),
         include=args.include,
         variants=args.variants,
+        repo_type=repo_type,
         progress=(lambda *a: None) if args.json else print,
     )
     if args.json:
@@ -56,13 +65,15 @@ def cmd_estimate(args) -> int:
 
 
 def cmd_archive(args) -> int:
-    from .archiver import archive_model
+    from .archiver import archive_model, parse_repo_ref
 
+    repo_type, repo_id = parse_repo_ref(args.repo_id)
     bundle = archive_model(
-        repo_id=args.repo_id,
+        repo_id=repo_id,
         revision=args.revision,
         vault=_vault_path(args),
         force=args.force,
+        repo_type=repo_type,
     )
     print(f"\nBundle ready: {bundle}")
     print(f"  manifest:     {bundle / 'manifest.json'}")
@@ -120,25 +131,32 @@ def cmd_info(args) -> int:
 
     bundle = _bundle_dir(args.bundle)
     m = load_manifest(bundle)
-    meta = m["model_metadata"]
     print(f"{m['bundle_id']}  (schema v{m['schema_version']}, {m['artifact_type']})")
     print(f"  source:     {m['source']['repo_id']} @ {m['source']['revision'][:12]} ({m['source']['origin']})")
     print(f"  license:    {m['licensing']['spdx_id']}  commercial={m['licensing']['commercial_use']}")
-    print(f"  params:     {human_params(meta['parameter_count'])} {meta['precision'] or ''}  ctx={meta['context_length']}")
+    if m["artifact_type"] == "dataset":
+        dm = m["dataset_metadata"]
+        fmts = ", ".join(f"{ext} x{d['file_count']}" for ext, d in (dm.get("formats") or {}).items())
+        declared = (dm.get("declared") or {}).get("example_count_total")
+        print(f"  formats:    {fmts or '?'}  declared examples={f'{declared:,}' if declared is not None else '?'}")
+    else:
+        meta = m["model_metadata"]
+        print(f"  params:     {human_params(meta['parameter_count'])} {meta['precision'] or ''}  ctx={meta['context_length']}")
     print(f"  payload:    {m['inventory']['file_count']} files, {human_size(m['inventory']['total_size_bytes'])}")
     print(f"  integrity:  {m['security']['integrity_status']}  last check {m['archive']['last_integrity_check']}")
     smoke = m["validation"]["smoke_tests"]
-    print(f"  smoke:      tokenizer={smoke['tokenizer']['status']} inference={smoke['inference']['status']}")
-    from .hydrate import load_hydration
+    print("  smoke:      " + " ".join(f"{name}={r['status']}" for name, r in smoke.items()))
+    if m["artifact_type"] != "dataset":
+        from .hydrate import load_hydration
 
-    hyd = load_hydration(bundle)
-    if hyd:
-        last = hyd["runs"][-1] if hyd.get("runs") else None
-        run_note = (f"last run {last['status']} ({last['at'][:10]}, {last.get('tokens_per_second')} tok/s)"
-                    if last else "no runs yet")
-        print(f"  hydration:  {hyd['engine']} in env {hyd['env']['key']} — {run_note}")
-    else:
-        print(f"  hydration:  not hydrated (modelvault hydrate {bundle})")
+        hyd = load_hydration(bundle)
+        if hyd:
+            last = hyd["runs"][-1] if hyd.get("runs") else None
+            run_note = (f"last run {last['status']} ({last['at'][:10]}, {last.get('tokens_per_second')} tok/s)"
+                        if last else "no runs yet")
+            print(f"  hydration:  {hyd['engine']} in env {hyd['env']['key']} — {run_note}")
+        else:
+            print(f"  hydration:  not hydrated (modelvault hydrate {bundle})")
     m["archive"]["last_accessed"] = utc_now()
     write_manifest(bundle, m)
     return 0
@@ -241,7 +259,7 @@ def main(argv=None) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("estimate", help="preflight a repo: size, params, disk headroom — no download")
-    p.add_argument("repo_id", help="e.g. Qwen/Qwen3.8-27B")
+    p.add_argument("repo_id", help="e.g. Qwen/Qwen3.8-27B, datasets/<owner>/<name>, or a huggingface.co URL")
     p.add_argument("--revision", help="branch, tag, or commit (default: main)")
     p.add_argument("--include", action="append", metavar="GLOB",
                    help="count only payload files matching GLOB (repeatable), "
@@ -251,8 +269,8 @@ def main(argv=None) -> int:
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.set_defaults(func=cmd_estimate)
 
-    p = sub.add_parser("archive", help="download and archive a model repo as a bundle")
-    p.add_argument("repo_id", help="e.g. Qwen/Qwen3-0.6B")
+    p = sub.add_parser("archive", help="download and archive a model or dataset repo as a bundle")
+    p.add_argument("repo_id", help="e.g. Qwen/Qwen3-0.6B, datasets/<owner>/<name>, or a huggingface.co URL")
     p.add_argument("--revision", help="branch, tag, or commit (default: main; always pinned to the resolved commit)")
     p.add_argument("--force", action="store_true", help="re-archive over an existing bundle")
     p.set_defaults(func=cmd_archive)

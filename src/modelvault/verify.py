@@ -12,7 +12,7 @@ import json
 from pathlib import Path
 
 from .hashing import bundle_hash, hash_file, iter_payload_files
-from .schema import check_completeness
+from .schema import check_completeness, payload_root
 
 MAX_HISTORY = 50
 
@@ -26,13 +26,14 @@ def verify_bundle(bundle_dir: Path, progress=print) -> dict:
     from .archiver import load_manifest, write_manifest
 
     manifest = load_manifest(bundle_dir)
-    payload_root = bundle_dir / "model"
+    root = payload_root(manifest)
+    payload_dir = bundle_dir / root
     expected = {r["path"]: r for r in manifest["inventory"]["files"]}
 
-    progress(f"Re-hashing {len(expected)} files in {payload_root} ...")
+    progress(f"Re-hashing {len(expected)} files in {payload_dir} ...")
     actual = {}
-    for rel, abs_path in iter_payload_files(payload_root):
-        path = f"model/{rel}"
+    for rel, abs_path in iter_payload_files(payload_dir):
+        path = f"{root}/{rel}"
         actual[path] = {"sha256": hash_file(abs_path, with_blake3=False)["sha256"],
                         "size": abs_path.stat().st_size}
 
@@ -42,7 +43,7 @@ def verify_bundle(bundle_dir: Path, progress=print) -> dict:
         p for p in set(expected) & set(actual) if expected[p]["sha256"] != actual[p]["sha256"]
     )
 
-    recomputed = bundle_hash([{"path": p, "sha256": a["sha256"]} for p, a in actual.items()])
+    recomputed = bundle_hash([{"path": p, "sha256": a["sha256"]} for p, a in actual.items()], root)
     bundle_hash_ok = recomputed["value"] == manifest["inventory"]["bundle_hash"]["value"]
 
     status = "pass" if not (missing or extra or mismatched) else "fail"

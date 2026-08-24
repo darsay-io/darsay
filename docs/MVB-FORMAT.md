@@ -37,6 +37,12 @@ Being first, the marker can be read as a stream before committing to a
 multi-gigabyte unpack: format compatibility, identity, and the expected
 payload hash are known up front.
 
+The container is artifact-type-agnostic: `artifact_type` (`"model"`,
+`"dataset"`, ...) rides in the marker and the embedded manifest, and the
+payload directory inside the tar is whatever the manifest's
+`inventory.layout.payload_root` names (`model/`, `data/`). Dataset bundles
+therefore needed no format bump — a v1.x reader unpacks them unchanged.
+
 ## Determinism
 
 The same bundle state always produces a **byte-identical** tar, so an export
