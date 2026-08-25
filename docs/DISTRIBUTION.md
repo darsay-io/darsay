@@ -39,15 +39,12 @@ pipx install ./darsay-0.6.0-py3-none-any.whl
 the tool gets its own environment, it does not pollute the user's global
 site-packages, and upgrades are one command.
 
-After a PyPI project exists, the same commands drop the git URL:
+After the first tagged release, the same commands drop the git URL:
 
 ```bash
 pipx install darsay
 uvx darsay estimate sshleifer/tiny-gpt2
 ```
-
-PyPI is the follow-up to GitHub, not a prerequisite for usable releases.
-A tagged GitHub source plus a wheel asset is enough.
 
 ### Editable (development)
 
@@ -71,9 +68,11 @@ should attach:
 Do **not** attach vault bundles, `.mvb.tar` files, or hydrated envs.
 Those are archival payloads, not software releases.
 
-The workflow in `.github/workflows/release.yml` builds the wheel and sdist
-on a `v*` tag and uploads them to the GitHub Release. Publishing the same
-files to PyPI is a later step (Trusted Publishing from the same job).
+The workflow in `.github/workflows/release.yml` runs on a `v*` tag. It
+builds the wheel and sdist, attaches them to the GitHub Release, and
+publishes the same files to PyPI via Trusted Publishing (OIDC, no API
+token). The job uses the GitHub Environment `pypi`, which should require
+a reviewer so a tag cannot publish unattended.
 
 ## Self-contained binaries
 
@@ -120,12 +119,10 @@ CPython plus the wheel is convenient for developers, hostile for archivists.
 
 ### What we will ship
 
-1. **Now:** tagged source, wheel, sdist. Consume with `pipx` / `uvx` /
-   `pip`. This is the Python-CLI standard and it is already how
-   `huggingface_hub`, `datasets`, and `transformers` are consumed.
-2. **Next:** the same files on PyPI, so `pipx install darsay` works
-   with no git URL.
-3. **Only if a real audience has no Python:** a PyInstaller **onedir**
+1. **Now:** a `v*` tag. The release workflow publishes the wheel and
+   sdist to GitHub and to PyPI. Consume with `pipx install darsay` /
+   `uvx darsay` / `uv tool install darsay`.
+2. **Only if a real audience has no Python:** a PyInstaller **onedir**
    (not onefile) for Linux x86_64 and macOS arm64 covering
    `estimate` / `archive` / `verify` / `export` / `import` / `list` /
    `info`. Hydrate/run would require `--python` pointing at a system

@@ -48,8 +48,9 @@ bump.
 ## Versioning
 
 Bump **both** `project.version` in `pyproject.toml` and `__version__` in
-`src/darsay/__init__.py`. Add a `CHANGELOG.md` section. Tag the GitHub
-release as `vX.Y.Z` (the `release` workflow attaches the wheel and sdist).
+`src/darsay/__init__.py`. Add a `CHANGELOG.md` section. Tag as `vX.Y.Z`.
+The `release` workflow attaches the wheel and sdist to the GitHub Release
+and publishes them to PyPI (Trusted Publishing, environment `pypi`).
 
 `SCHEMA_VERSION` and `MVB_FORMAT_VERSION` bump independently, on format
 changes only.
