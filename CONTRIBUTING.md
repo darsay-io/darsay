@@ -6,23 +6,22 @@ Python 3.10+ (development uses 3.14). From the repo root:
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -e ".[fast-hash,smoke]"
+.venv/bin/pip install -e ".[fast-hash,smoke,dev]"
 .venv/bin/modelvault --version
+.venv/bin/pytest                    # unit + integration, no network
 ```
 
-There is no test suite yet. Validate a change by running the CLI against a
-tiny Hub repo into a scratch vault — never into the gitignored `vault/`
-you use for real archives:
+The suite is a pyramid: hermetic unit and integration tests (fake `test:`
+provider) on every run, live Hub e2e opt-in. See
+[docs/TESTING.md](docs/TESTING.md).
 
 ```bash
-scratch=$(mktemp -d)
-.venv/bin/modelvault --vault "$scratch" estimate sshleifer/tiny-gpt2
-.venv/bin/modelvault --vault "$scratch" archive sshleifer/tiny-gpt2
-.venv/bin/modelvault --vault "$scratch" verify "$scratch"/sshleifer--tiny-gpt2/*
+.venv/bin/pytest --run-e2e -m e2e   # or MODELVAULT_E2E=1; uses sshleifer/tiny-gpt2
 ```
 
-For dataset changes, a small parquet repo such as
-`datasets/cornell-movie-review-data/rotten_tomatoes` is the equivalent.
+Never archive into the gitignored `vault/` you use for real archives. GitHub
+Actions runs the hermetic suite and the Hub path on every push and pull
+request.
 
 ## Invariants
 

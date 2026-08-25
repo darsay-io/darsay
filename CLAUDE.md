@@ -10,10 +10,10 @@ point `modelvault` (argparse, subcommands in `cli.py`).
 - Core dependency is `huggingface_hub` only (Hugging Face provider); `blake3`, `tokenizers`,
   `transformers`/`torch` are optional extras — every feature that needs them
   must degrade gracefully (record `skipped` with a reason, never crash).
-- No test suite yet. Changes are validated by running the CLI against a tiny
-  repo (e.g. `sshleifer/tiny-gpt2`; for datasets a small parquet repo like
-  `datasets/cornell-movie-review-data/rotten_tomatoes`) into a scratch
-  `--vault`, plus the checks in the invariants list below.
+- Test suite is pytest (`pip install -e ".[dev]"`; `pytest`). Unit +
+  integration are hermetic (fake `test:` provider, no network). Live Hub e2e
+  is opt-in (`pytest --run-e2e` or `MODELVAULT_E2E=1`) and uses
+  `sshleifer/tiny-gpt2`. See `docs/TESTING.md`.
 
 ## Layout
 
@@ -29,6 +29,8 @@ point `modelvault` (argparse, subcommands in `cli.py`).
   `sources.py` (source-ref grammar + provider registry), `providers/`
   (acquisition backends; Hugging Face is the first plugin),
   `cli.py`.
+- `tests/` — pytest pyramid: `unit/`, `integration/` (fake `test:` provider),
+  `e2e/` (live Hub, opt-in). See `docs/TESTING.md`.
 - `docs/MANIFEST.md` — field-by-field manifest schema reference.
   `docs/MVB-FORMAT.md` — single-file export format spec.
   `docs/HYDRATION.md` — bundle→runnable-install design (envs, runner
@@ -47,6 +49,7 @@ point `modelvault` (argparse, subcommands in `cli.py`).
   and why frozen binaries are not the primary install path.
   `docs/SOURCES.md` — acquisition providers; the public source-ref grammar;
   Hugging Face as a plugin.
+  `docs/TESTING.md` — test pyramid (unit / integration / e2e) and CI.
   **Update these whenever manifest fields or the export format change**, and
   bump `SCHEMA_VERSION` (`__init__.py`) / `MVB_FORMAT_VERSION` (`export.py`)
   appropriately (major = breaking).

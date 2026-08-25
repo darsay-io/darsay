@@ -16,6 +16,11 @@ Tool version (`pyproject.toml` / `modelvault.__version__`) is independent of
   attach an sdist + wheel to tagged GitHub Releases.
 - [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md): how to consume releases, and
   why frozen binaries are not the primary install path.
+- Test suite (pytest) as a three-layer pyramid: unit tests, integration tests
+  against an in-process `test:` acquisition provider, and an opt-in Hub e2e
+  path (`sshleifer/tiny-gpt2`). See [docs/TESTING.md](docs/TESTING.md).
+- CI on push and pull request: hermetic tests on Python 3.10/3.12/3.14,
+  live Hub e2e, and the existing wheel/sdist job.
 
 ## [0.6.0] - 2026-08
 

@@ -6,12 +6,16 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
-  package:
-    name: Python ${{ matrix.python-version }}
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -23,78 +27,56 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-
-      - name: Check published versions match
-        run: |
-          python - <<'PY'
-          import re
-          from pathlib import Path
-
-          pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
-          init = Path("src/modelvault/__init__.py").read_text(encoding="utf-8")
-          project = re.search(r'(?m)^version = "([^"]+)"', pyproject)
-          package = re.search(r'(?m)^__version__ = "([^"]+)"', init)
-          if not project or not package:
-              raise SystemExit("could not find version strings")
-          if project.group(1) != package.group(1):
-              raise SystemExit(
-                  f"version mismatch: pyproject.toml={project.group(1)!r} "
-                  f"__init__.py={package.group(1)!r}"
-              )
-          print(f"version {project.group(1)}")
-          PY
+          cache: pip
+          cache-dependency-path: pyproject.toml
 
       - name: Install
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e .
+          python -m pip install -e ".[dev]"
 
-      - name: CLI
+      - name: Unit and integration tests
+        run: |
+          python -m pytest -m "not e2e" \
+            --cov=modelvault \
+            --cov-report=term-missing \
+            --cov-fail-under=65
+
+      - name: CLI smoke
         run: |
           modelvault --version
           modelvault --help
 
-      - name: Source-ref grammar
+  e2e:
+    name: E2E (Hugging Face Hub)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Cache Hub downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-tiny-gpt2-${{ runner.os }}
+          restore-keys: hf-tiny-gpt2-
+
+      - name: Install
         run: |
-          python - <<'PY'
-          from modelvault.sources import parse_source, provider_names
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
 
-          assert provider_names() == ["huggingface"]
-          s = parse_source("Qwen/Qwen3-0.6B")
-          assert s.provider == "huggingface" and s.artifact_type == "model"
-          assert s.canonical == "huggingface:Qwen/Qwen3-0.6B"
-          assert s.bundle_name == "qwen--qwen3-0.6b"
-          d = parse_source("huggingface:datasets/owner/name")
-          assert d.artifact_type == "dataset" and d.locator == "owner/name"
-          assert d.bundle_name == "datasets--owner--name"
-          u = parse_source("https://huggingface.co/Qwen/Qwen3-0.6B/tree/main")
-          assert u.canonical == s.canonical
-          a = parse_source("hf:Qwen/Qwen3-0.6B")
-          assert a.canonical == s.canonical
-          try:
-              parse_source("modelscope:qwen/foo")
-          except SystemExit as exc:
-              assert "unknown source provider" in str(exc)
-          else:
-              raise SystemExit("expected unknown-provider error")
-          print("source refs ok")
-          PY
-
-      - name: Confirm runner scripts ship in the package
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          from modelvault.hydrate import ENGINES
-
-          root = Path(__import__("modelvault").__file__).parent / "runners"
-          missing = [
-              spec["runner"] for spec in ENGINES.values()
-              if not (root / spec["runner"]).is_file()
-          ]
-          if missing:
-              raise SystemExit(f"runner scripts missing from package: {missing}")
-          print("runners:", ", ".join(sorted(p.name for p in root.glob("*.py"))))
-          PY
+      - name: Live Hub path
+        env:
+          HF_HUB_DISABLE_XET: "1"
+          MODELVAULT_E2E: "1"
+        run: python -m pytest -m e2e --run-e2e
+        timeout-minutes: 15
 
   build:
     name: sdist and wheel

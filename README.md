@@ -40,6 +40,8 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[fast-hash,smoke]"   # + blake3, tokenizers
 .venv/bin/pip install -e ".[inference]"    # + transformers/torch for inference smoke test
 .venv/bin/pip install -e ".[datasets]"     # + pyarrow for measured dataset row counts
+.venv/bin/pip install -e ".[dev]"          # pytest
+.venv/bin/pytest                           # unit + integration; see docs/TESTING.md
 ```
 
 The extras only serve the in-process smoke tests; `modelvault run` needs none

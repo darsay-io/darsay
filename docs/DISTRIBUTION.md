@@ -58,7 +58,8 @@ A tagged GitHub source plus a wheel asset is enough.
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -e ".[fast-hash,smoke]"
+.venv/bin/pip install -e ".[fast-hash,smoke,dev]"
+.venv/bin/pytest
 ```
 
 ## GitHub Release contents
