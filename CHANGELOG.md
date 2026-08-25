@@ -9,6 +9,13 @@ Tool version (`pyproject.toml` / `modelvault.__version__`) is independent of
 
 ## [Unreleased]
 
+### Changed
+
+- Documentation: landing README with the project logo, a documentation
+  index at [`docs/README.md`](docs/README.md), and consistent navigation
+  across the docs set.
+- Project URLs now point at `jeremynorris/modelvault`.
+
 ### Added
 
 - Apache-2.0 `LICENSE` and `NOTICE`.

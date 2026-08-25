@@ -1,3 +1,5 @@
+> [Documentation](README.md) · [Project README](../README.md)
+
 # Incremental archiving — idempotent, resumable transfer
 
 **Status: implemented** in v0.5.0, manifest schema 1.4.0 (additive),
@@ -383,3 +385,7 @@ a schema change.
   convergence).
 - [SOURCES.md](SOURCES.md) — acquisition providers; transfer.py does not
   import a hosting-service client.
+
+---
+
+[Documentation index](README.md)

@@ -1,3 +1,5 @@
+> [Documentation](README.md) · [Project README](../README.md)
+
 # Hydration — from archived bundle to running model
 
 `modelvault hydrate` turns an archived bundle into a locally runnable install;
@@ -101,3 +103,7 @@ crashing silently, and never write into the model directory.
 
 Delete the file at any time — nothing else depends on it; the next
 `modelvault run` re-hydrates.
+
+---
+
+[Documentation index](README.md)

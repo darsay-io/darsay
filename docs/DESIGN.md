@@ -1,3 +1,5 @@
+> [Documentation](README.md) · [Project README](../README.md)
+
 # Design rationale — implementation choices
 
 Why modelvault is written in Python, and why the archive's longevity does
@@ -83,3 +85,7 @@ Only when a component appears whose profile is genuinely different — a
 long-running vault server, or a mass-distributed verifier where a static
 binary is the point. Write *that component* in Go/Rust; do not port the
 tool.
+
+---
+
+[Documentation index](README.md)

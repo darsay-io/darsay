@@ -1,3 +1,5 @@
+> [Documentation](README.md) · [Project README](../README.md)
+
 # Source providers
 
 Acquisition is a plugin. The archive format, the vault, and the CLI verbs do
@@ -92,3 +94,7 @@ existing `origin` / `repo_id` / `upstream_url`. `origin` is the provider
 id (still `"huggingface"` for Hub archives). Older manifests without the
 new fields remain valid; readers fall back to `origin` + `repo_id`.
 See [MANIFEST.md](MANIFEST.md).
+
+---
+
+[Documentation index](README.md)

@@ -1,6 +1,8 @@
 # Security
 
-modelvault copies untrusted upstream files (weights, tokenizers, datasets,
+[Documentation](docs/README.md) · [Project README](README.md)
+
+ModelVault copies untrusted upstream files (weights, tokenizers, datasets,
 and whatever else a Hub repo contains) onto local disk and, during
 `hydrate` / `run`, may load them into inference libraries. Treat payload
 bytes as untrusted. A passing `verify` means the bytes match the recorded

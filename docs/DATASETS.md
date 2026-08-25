@@ -1,3 +1,5 @@
+> [Documentation](README.md) · [Project README](../README.md)
+
 # Dataset bundles — the vault's second artifact type
 
 Design for archiving Hugging Face datasets with the same bundling mechanism
@@ -158,3 +160,7 @@ models on the Hub cite it as training data, two of them descendants of
 Qwen3.8-27B. Archive the model, its FP8 satellite, and this dataset, and
 the vault holds a closed, cross-referenced exhibit: the artifact, its
 efficient print, and its food.
+
+---
+
+[Documentation index](README.md)

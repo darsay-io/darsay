@@ -1,3 +1,5 @@
+> [Documentation](README.md) · [Project README](../README.md)
+
 # Testing
 
 modelvault's test suite is a pyramid. Fast hermetic tests are the default;
@@ -85,3 +87,7 @@ The existing `release.yml` workflow is unchanged: it publishes artifacts on
   repo tiny.
 - Optional extras (`blake3`, `tokenizers`, `torch`, `pyarrow`) must degrade
   to a recorded `skipped` — tests should assert that, not require the extra.
+
+---
+
+[Documentation index](README.md)

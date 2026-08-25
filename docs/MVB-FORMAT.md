@@ -1,3 +1,5 @@
+> [Documentation](README.md) · [Project README](../README.md)
+
 # .mvb.tar — single-file bundle format (v1.1)
 
 A modelvault export packs one bundle into one file for offsite storage and
@@ -99,3 +101,7 @@ tar -tf qwen--qwen3-0.6b@c1899de289a0.mvb.tar     # list
 tar -xf qwen--qwen3-0.6b@c1899de289a0.mvb.tar     # unpack
 # integrity: hash model/* and compare with inventory.files[].sha256 in manifest.json
 ```
+
+---
+
+[Documentation index](README.md)

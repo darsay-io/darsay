@@ -54,10 +54,10 @@ datasets = ["pyarrow"]
 dev = ["pytest>=8.0", "pytest-cov>=5.0"]
 
 [project.urls]
-Homepage = "https://github.com/archive-dawn/modelvault"
-Documentation = "https://github.com/archive-dawn/modelvault#readme"
-Issues = "https://github.com/archive-dawn/modelvault/issues"
-Changelog = "https://github.com/archive-dawn/modelvault/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/jeremynorris/modelvault"
+Documentation = "https://github.com/jeremynorris/modelvault/blob/main/docs/README.md"
+Issues = "https://github.com/jeremynorris/modelvault/issues"
+Changelog = "https://github.com/jeremynorris/modelvault/blob/main/CHANGELOG.md"
 
 [project.scripts]
 modelvault = "modelvault.cli:main"

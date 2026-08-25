@@ -1,19 +1,16 @@
+> [Documentation](README.md) · [Project README](../README.md)
+
 # Distribution and releases
 
-How people should install modelvault, what a GitHub Release should contain,
-and when (not) to ship a frozen binary. Decision recorded 2026-08 while
-preparing the GitHub port.
-
-URLs below assume the GitHub repo is `archive-dawn/modelvault`, matching the
-current GitLab group. Update `pyproject.toml` `[project.urls]` if that
-changes.
+How people should install ModelVault, what a GitHub Release contains, and
+when (not) to ship a frozen binary.
 
 ## What to consume
 
-modelvault is a **pure-Python** package (no compiled extensions). One wheel
+ModelVault is a **pure-Python** package (no compiled extensions). One wheel
 installs on every platform that has Python 3.10+:
 
-`modelvault-0.5.0-py3-none-any.whl`
+`modelvault-0.6.0-py3-none-any.whl`
 
 The only runtime dependency is `huggingface_hub`. Optional extras
 (`fast-hash`, `smoke`, `inference`, `datasets`) stay optional. `modelvault
@@ -21,23 +18,21 @@ run` does not need them — hydration builds its own isolated env.
 
 ### Recommended: an isolated CLI
 
-Once the GitHub repo exists:
-
 ```bash
 # one-shot, no install
-uvx --from git+https://github.com/archive-dawn/modelvault@v0.5.0 \
+uvx --from git+https://github.com/jeremynorris/modelvault@v0.6.0 \
     modelvault estimate sshleifer/tiny-gpt2
 
 # install into an isolated tool env
-pipx install git+https://github.com/archive-dawn/modelvault@v0.5.0
+pipx install git+https://github.com/jeremynorris/modelvault@v0.6.0
 # or
-uv tool install git+https://github.com/archive-dawn/modelvault@v0.5.0
+uv tool install git+https://github.com/jeremynorris/modelvault@v0.6.0
 ```
 
 From a downloaded wheel (GitHub Release asset):
 
 ```bash
-pipx install ./modelvault-0.5.0-py3-none-any.whl
+pipx install ./modelvault-0.6.0-py3-none-any.whl
 ```
 
 `pipx` / `uv tool` / `uvx` are the idiomatic way to consume a Python CLI:
@@ -64,7 +59,7 @@ python3 -m venv .venv
 
 ## GitHub Release contents
 
-Each tagged release (`v0.5.0`, matching `pyproject.toml` / `__version__`)
+Each tagged release (`v0.6.0`, matching `pyproject.toml` / `__version__`)
 should attach:
 
 | Asset | Why |
@@ -125,10 +120,9 @@ CPython plus the wheel is convenient for developers, hostile for archivists.
 
 ### What we will ship
 
-1. **Now (GitHub port):** tagged source, wheel, sdist. Consume with
-   `pipx` / `uvx` / `pip`. This is the Python-CLI standard and it is
-   already how `huggingface_hub`, `datasets`, and `transformers` are
-   consumed.
+1. **Now:** tagged source, wheel, sdist. Consume with `pipx` / `uvx` /
+   `pip`. This is the Python-CLI standard and it is already how
+   `huggingface_hub`, `datasets`, and `transformers` are consumed.
 2. **Next:** the same files on PyPI, so `pipx install modelvault` works
    with no git URL.
 3. **Only if a real audience has no Python:** a PyInstaller **onedir**
@@ -150,3 +144,7 @@ Longevity is carried by the bundle formats, not the installer. A wheel, a
 frozen binary, and a hand-written Python script are all replaceable
 readers of the same JSON manifest and uncompressed tar. See
 [DESIGN.md](DESIGN.md).
+
+---
+
+[Documentation index](README.md)

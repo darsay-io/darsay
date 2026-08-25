@@ -1,5 +1,7 @@
 # Contributing
 
+Full documentation lives in [`docs/`](docs/README.md).
+
 ## Setup
 
 Python 3.10+ (development uses 3.14). From the repo root:

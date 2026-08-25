@@ -1,170 +1,234 @@
-# model-vault
+<h1 align="center">
+  <img src="docs/modelvault-logo.png" alt="ModelVault" width="880">
+</h1>
 
-Tools for downloading and archiving **full model ecosystems** as reproducible,
-auditable bundles — museum-grade curation that stays directly usable.
+<p align="center">
+  <strong>Museum-grade archives of full model ecosystems — still directly usable.</strong>
+</p>
 
-`modelvault` pulls a model or dataset from a source (Hugging Face today) at a
-pinned revision, hashes every file (SHA-256, plus BLAKE3 when available),
-cross-checks each file against upstream checksums, captures the license
-verbatim with rights flags, extracts model metadata straight from the payload
-(parameter counts are read from safetensors headers — no torch needed),
-snapshots the downstream ecosystem (quantizations, GGUFs, finetunes), and
-writes it all into a bundle that any Hugging Face-compatible loader can use
-as-is. When you want to hear the archived model speak, `modelvault run <bundle>`
-takes it from cold storage to a local inference — building the environment for
-you — in one command. Large archives are incremental by
-default: budgets and Ctrl-C leave durable Range partials, copied partial
-bundles resume on another machine, and friends can coordinate byte-balanced
-transfer orders and assemble their work offline. Before committing tens of
-gigabytes, `modelvault estimate` prices a source from upstream metadata
-alone — exact sizes, parameter counts, disk headroom, and its quantized
-ecosystem — without downloading a byte.
+<p align="center">
+  <a href="https://github.com/jeremynorris/modelvault/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/jeremynorris/modelvault/ci.yml?style=flat-square&label=CI" alt="CI"></a>
+  <a href="https://github.com/jeremynorris/modelvault/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-38bdf8?style=flat-square" alt="Apache 2.0"></a>
+  <img src="https://img.shields.io/badge/python-3.10%2B-00b4ff?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
+  <img src="https://img.shields.io/badge/version-0.6.0-22d3ee?style=flat-square" alt="Version 0.6.0">
+  <img src="https://img.shields.io/badge/schema-v1.5.0-0ea5e9?style=flat-square" alt="Manifest schema 1.5.0">
+</p>
 
-## Install
+<p align="center">
+  <a href="#quick-start">Quick start</a> ·
+  <a href="#how-it-works">How it works</a> ·
+  <a href="#a-bundle">A bundle</a> ·
+  <a href="#commands">Commands</a> ·
+  <a href="docs/README.md">Documentation</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
 
-Requires Python 3.10+. The package is pure Python — one wheel for every OS.
-Isolated CLI tools (`pipx`, `uvx`) are the intended way to run a release;
-see [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+---
+
+ModelVault pulls a model or dataset from a source (Hugging Face today) at a
+**pinned revision**, hashes every file, cross-checks upstream checksums,
+captures the license verbatim, extracts metadata from the payload itself, and
+writes a bundle that any Hugging Face-compatible loader uses **as-is**.
+
+When you want the archived model to speak:
 
 ```bash
-# from a GitHub tag (after the repo is on GitHub)
-pipx install git+https://github.com/archive-dawn/modelvault@v0.5.0
-uvx --from git+https://github.com/archive-dawn/modelvault@v0.5.0 modelvault --help
+modelvault run vault/qwen--qwen3-0.6b/<rev> "Say hello"
+```
 
-# from a downloaded GitHub Release wheel
-pipx install ./modelvault-0.5.0-py3-none-any.whl
+That command hydrates an isolated environment, runs **offline**, and leaves
+the payload byte-immutable. Before you commit tens of gigabytes,
+`modelvault estimate` prices the source from upstream metadata alone.
 
-# development checkout
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**Estimate first.** Price a 50 GB model from Hub metadata. Nothing downloaded.
+
+</td>
+<td width="50%" valign="top">
+
+**Archive for keeps.** Pinned revision, hashed, license captured, payload immutable.
+
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**Resume anything.** Budgets, Ctrl-C, USB sticks, collaborators with `--shard 1/3`.
+
+</td>
+<td width="50%" valign="top">
+
+**Run offline.** One command. Isolated env. `HF_HUB_OFFLINE=1`. Payload untouched.
+
+</td>
+</tr>
+</table>
+
+## Why it exists
+
+The Hub is a living website, not an archive. Repos get gated, rewritten, and
+deleted. Datasets vanish faster than weights. Published quants — the official
+FP8, the community GGUF people actually ran — cannot be regenerated bit-exact
+from the master. If it matters what the world used, the bytes themselves must
+be kept, with a manifest that records facts and never fabricates them.
+
+A ModelVault bundle is that record: **immutable payload + machine-readable
+manifest + derived views + one curator file**. The tool is replaceable. The
+formats are not.
+
+## Quick start
+
+Requires Python 3.10+. One pure-Python wheel for every OS. Isolated CLI
+tools are the intended way to run a release; see
+[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+
+```bash
+pipx install git+https://github.com/jeremynorris/modelvault@v0.6.0
+# or, one-shot with no install:
+uvx --from git+https://github.com/jeremynorris/modelvault@v0.6.0 modelvault --help
+```
+
+Then:
+
+```bash
+modelvault estimate Qwen/Qwen3-0.6B
+modelvault archive  Qwen/Qwen3-0.6B
+modelvault run      vault/qwen--qwen3-0.6b/<rev> "Say hello"
+```
+
+<details>
+<summary><strong>Development checkout and extras</strong></summary>
+
+```bash
 python3 -m venv .venv
-.venv/bin/pip install -e .                 # core: huggingface_hub only
+.venv/bin/pip install -e .                      # core: huggingface_hub only
 .venv/bin/pip install -e ".[fast-hash,smoke]"   # + blake3, tokenizers
-.venv/bin/pip install -e ".[inference]"    # + transformers/torch for inference smoke test
-.venv/bin/pip install -e ".[datasets]"     # + pyarrow for measured dataset row counts
-.venv/bin/pip install -e ".[dev]"          # pytest
-.venv/bin/pytest                           # unit + integration; see docs/TESTING.md
+.venv/bin/pip install -e ".[inference]"         # + transformers/torch for in-process smoke
+.venv/bin/pip install -e ".[datasets]"          # + pyarrow for measured dataset row counts
+.venv/bin/pip install -e ".[dev]"               # pytest
+.venv/bin/pytest                                # unit + integration; see docs/TESTING.md
 ```
 
-The extras only serve the in-process smoke tests; `modelvault run` needs none
-of them — hydration builds its own isolated env per engine (see below).
+The extras only serve in-process smoke tests. `modelvault run` needs none of
+them — hydration builds its own isolated env per engine.
 
-## Usage
-
-```bash
-modelvault estimate Qwen/Qwen3.8-27B --variants   # preflight: size, params, disk, quantized ecosystem — no download
-modelvault estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'   # price one quant of a pack repo
-modelvault estimate datasets/saidutta69/fable-5-premium   # datasets use the Hub's own address grammar
-modelvault archive Qwen/Qwen3-0.6B          # download + hash + manifest + reports
-modelvault archive datasets/saidutta69/fable-5-premium    # dataset bundle: payload under data/
-modelvault archive Qwen/Qwen3.8-27B --max-gb 10           # pause cleanly; rerun to resume
-modelvault archive Qwen/Qwen3.8-27B --dry-run             # verified/partial/missing plan
-modelvault archive Qwen/Qwen3.8-27B --shard 1/3 --max-gb 20  # participant 1 of 3
-modelvault --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle>
-modelvault verify vault/qwen--qwen3-0.6b/<rev>    # re-hash, detect tampering
-modelvault smoke  vault/qwen--qwen3-0.6b/<rev> [--inference]
-modelvault list                             # inventory of the whole vault
-modelvault info   vault/qwen--qwen3-0.6b/<rev>
-modelvault regen  vault/qwen--qwen3-0.6b/<rev>    # rebuild README after editing curation.md
-modelvault export vault/qwen--qwen3-0.6b/<rev> -o /backups   # single-file .mvb.tar
-modelvault import /backups/qwen--qwen3-0.6b@<rev>.mvb.tar    # unpack + verify + register
-
-modelvault run     vault/qwen--qwen3-0.6b/<rev> "Say hello"  # hydrate if needed + offline inference
-modelvault hydrate vault/qwen--qwen3-0.6b/<rev> [--dry-run]  # just build/reuse the runnable env
-modelvault envs [--prune]                   # list shared runtime envs / delete unreferenced ones
-modelvault dehydrate vault/qwen--qwen3-0.6b/<rev>            # drop a bundle's hydration record
-```
+</details>
 
 The vault root defaults to `./vault` (override with `--vault` or
-`$MODELVAULT_HOME`). Bundles are gitignored — they are large binary payloads
-that live on disk or in your backup tier, not in this repo. Source refs are
-provider-qualified — `huggingface:Qwen/Qwen3-0.6B`,
-`huggingface:datasets/owner/name`. Unprefixed `owner/name` /
-`datasets/owner/name` and huggingface.co URLs are Hugging Face shorthand so
-existing commands keep working. Bundle-path commands need nothing, they
-dispatch on the manifest's `artifact_type`. Adding another host is a source
-provider, not a new CLI: [docs/SOURCES.md](docs/SOURCES.md).
+`$MODELVAULT_HOME`). Bundles are gitignored — they live on disk or in your
+backup tier, not in this repo.
 
-## Bundle layout
+## How it works
+
+```mermaid
+flowchart LR
+  S["Source<br/>huggingface:owner/name"] --> E["estimate"]
+  E --> A["archive"]
+  A --> B["Bundle"]
+  B --> V["verify"]
+  B --> R["run"]
+  B --> X["export .mvb.tar"]
+  X --> I["import"]
+```
+
+1. **Estimate** — read-only preflight. Exact sizes, parameter counts, disk
+   headroom, quantized ecosystem. Nothing downloaded.
+2. **Archive** — pin a revision, transfer bytes (resumable, budgeted,
+   cooperative), hash, verify against upstream, write the manifest.
+3. **Keep** — the payload never changes again. Metadata at the bundle root
+   is mutable by design.
+4. **Use** — point any HF-compatible loader at `<bundle>/model`, or
+   `modelvault run` for one-command offline inference. `export` packs a
+   deterministic `.mvb.tar` for offsite storage.
+
+## A bundle
 
 ```
 vault/qwen--qwen3-0.6b/<revision12>/
 ├── model/              # immutable payload: pristine snapshot of the upstream repo
-├── manifest.json       # machine-readable record (the source of truth)
+├── manifest.json       # machine-readable record — the source of truth
 ├── README.md           # human-readable summary, generated from the manifest
 ├── VERIFICATION.md     # latest verification report
 ├── verification.json   # verification history (last 50 runs)
 ├── curation.md         # curator's notes — the only hand-edited file
-├── exports.json        # log of single-file exports (appears after first export)
-├── hydration.json      # runnable-env record + run history (appears after first hydrate)
-├── transfer.json       # disposable resumable-transfer ledger + detailed history
-├── transfer.lock       # transient per-bundle writer lock (only during archive/assemble)
+├── exports.json        # log of single-file exports (after first export)
+├── hydration.json      # runnable-env record + run history (after first hydrate)
+├── transfer.json       # disposable resumable-transfer ledger
+├── transfer.lock       # transient writer lock (only during archive/assemble)
 └── LICENSE             # upstream license text, surfaced at the root
 ```
 
-The payload under `model/` is **immutable after archiving**; the bundle hash
-covers it alone. Metadata at the bundle root is mutable by design, so
-verification runs, curation notes, and access timestamps never disturb the
-archived artifact. To use the model, point `transformers` (or any HF-compatible
-loader) at `<bundle>/model` — no unpacking or conversion needed.
+The payload under `model/` (or `data/` for datasets) is **immutable after
+archiving**; the bundle hash covers it alone. To use a model, point
+`transformers` at `<bundle>/model` — no unpacking, no conversion.
 
-## Incremental, relocatable, and cooperative transfers
-
-The first `archive` run pins one immutable commit and writes its expected file
-set to `transfer.json`. Every later run reconciles that set against local
-bytes, trusts already verified files, hashes and adopts unrecorded complete
-files, resumes bundle-local `.incomplete` files with HTTP Range, and only
-registers `manifest.json` after every expected file is verified. `--max-gb`,
-`--max-bytes`, and `--max-minutes` stop cleanly with exit code 10; `--rehash`
-rechecks trusted ledger entries; `--jobs` controls the small-file pool.
-
-Partial bundles are self-contained and relocatable. Copy the entire
-`<repo-slug>/<revision12>/` directory—including the payload `.cache`—under a
-different vault and rerun the same `archive` command. The pin is unchanged,
-completed files are adopted, the longest Range partial continues, and an
-inherited lock is safely recognized as a copied lock.
-
-For cooperative acquisition, collaborators use `--shard N/T`: `1/3`, `2/3`,
-and `3/3` deterministically prioritize different byte-balanced whole-file
-lanes, but each still proceeds through all lanes and can finish the identical
-bundle alone. `modelvault --vault DEST assemble PARTIAL...` validates that all
-inputs have the same full pin and expected inventory, clone-copies complete
-files, re-hashes them, and keeps the longest matching partial—all offline.
-File-granular coordination works especially well for sharded weights; one
-monolithic weight file cannot be divided into independent starting regions.
-Full design, ledger shape, and failure semantics:
-[docs/INCREMENTAL.md](docs/INCREMENTAL.md).
-
-## What the manifest records
+<details>
+<summary><strong>What the manifest records</strong></summary>
 
 | Section | Contents |
 |---|---|
-| `identity` | model name, family, publisher, version, release date, bundle id |
-| `source` | origin, repo id, pinned commit, transfer session/byte accounting, downloader tool versions, local mirrors, signatures, upstream popularity + tags at archive time |
-| `licensing` | SPDX id, license files, commercial-use / redistribution / modification / attribution flags, patent grant, trademark terms, manual-review flag |
-| `inventory` | per-file size + SHA-256 (+BLAKE3), upstream LFS/git checksums with match status, deterministic bundle hash, expected layout |
-| `model_metadata` | parameter count (by dtype, read from safetensors headers), architecture, context length, precision/quantization, tokenizer class + vocab + special tokens + chat template, languages, training cutoff |
-| `runtime` | supported engines (from shipped formats), estimated min RAM/VRAM, tested hardware (measured entries written by `modelvault run`), OS support, CUDA/ROCm notes, CPU inference |
-| `validation` | checksum verification, completeness against artifact-type rules, tokenizer + inference smoke tests |
-| `relationships` | base/parent model, finetuned-from, known quantizations + GGUF repos + finetune counts (snapshot at archive time) |
-| `archive` | date archived, location, host, storage tier, backup status, replicas, last integrity check, last access |
-| `security` | integrity status, unexpected-change flags (modified/missing/extra files), trust level, review notes |
-| `curation` | historical significance, capabilities, limitations, successors, personal notes (via `curation.md`) |
+| `identity` | name, family, publisher, version, release date, bundle id |
+| `source` | provider, address, pinned commit, transfer accounting, mirrors, signatures, popularity + tags at archive time |
+| `licensing` | SPDX id, license files, commercial / redistribution / modification / attribution flags, patent grant, trademark terms |
+| `inventory` | per-file size + SHA-256 (+BLAKE3), upstream checksum match, deterministic bundle hash |
+| `model_metadata` | parameter count by dtype (from safetensors headers — no torch), architecture, context, tokenizer, languages |
+| `runtime` | engines from shipped formats, estimated min RAM/VRAM, measured hardware from `modelvault run` |
+| `validation` | checksum verification, completeness, tokenizer + inference smoke tests |
+| `relationships` | parents, finetunes, known quantizations + GGUF repos (snapshot at archive time) |
+| `archive` | date, host, storage tier, backups, last integrity check |
+| `security` | integrity status, unexpected-change flags, trust level |
+| `curation` | historical significance, capabilities, limitations, notes (via `curation.md`) |
 
-`schema_version` is recorded in every manifest; `verification.json` keeps an
-auditable history of every integrity check. Full field-by-field reference:
-[docs/MANIFEST.md](docs/MANIFEST.md).
+`schema_version` is recorded in every manifest. Full field-by-field
+reference: [docs/MANIFEST.md](docs/MANIFEST.md).
 
-## Estimating before you archive
+</details>
 
-A 27B model is a 50+ GB commitment; `modelvault estimate` prices it first.
-It is a read-only preflight against the Hub API — nothing downloaded, nothing
-written: the pinned revision's exact file inventory, parameter counts by dtype
-(published in the Hub's safetensors metadata), the engines the payload will
-support, a completeness pre-check against the artifact-type rules, and a disk
-verdict for the target vault. The command exits non-zero when free space is
-insufficient, so it doubles as a guard in scripts. Upstream numbers are
-reported as facts; derived figures (min RAM, download scratch) are labeled
-estimates — the manifest's record-don't-fabricate rule applies even to a
-command that writes nothing.
+## Commands
+
+```bash
+modelvault estimate Qwen/Qwen3.8-27B --variants          # preflight: size, params, disk, quants
+modelvault estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
+modelvault estimate datasets/saidutta69/fable-5-premium  # Hub dataset address grammar
+modelvault archive  Qwen/Qwen3-0.6B                      # download + hash + manifest
+modelvault archive  datasets/saidutta69/fable-5-premium  # dataset bundle: payload under data/
+modelvault archive  Qwen/Qwen3.8-27B --max-gb 10         # pause cleanly; rerun to resume
+modelvault archive  Qwen/Qwen3.8-27B --dry-run           # verified / partial / missing plan
+modelvault archive  Qwen/Qwen3.8-27B --shard 1/3 --max-gb 20
+modelvault --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle>
+modelvault verify   vault/qwen--qwen3-0.6b/<rev>
+modelvault smoke    vault/qwen--qwen3-0.6b/<rev> [--inference]
+modelvault list
+modelvault info     vault/qwen--qwen3-0.6b/<rev>
+modelvault regen    vault/qwen--qwen3-0.6b/<rev>         # rebuild README after editing curation.md
+modelvault export   vault/qwen--qwen3-0.6b/<rev> -o /backups
+modelvault import   /backups/qwen--qwen3-0.6b@<rev>.mvb.tar
+
+modelvault run      vault/qwen--qwen3-0.6b/<rev> "Say hello"
+modelvault hydrate  vault/qwen--qwen3-0.6b/<rev> [--dry-run]
+modelvault envs [--prune]
+modelvault dehydrate vault/qwen--qwen3-0.6b/<rev>
+```
+
+Source refs are provider-qualified — `huggingface:Qwen/Qwen3-0.6B`,
+`huggingface:datasets/owner/name`. Unprefixed `owner/name` /
+`datasets/owner/name` and huggingface.co URLs are Hugging Face shorthand.
+Bundle-path commands dispatch on the manifest's `artifact_type`. Adding
+another host is a source provider, not a new CLI:
+[docs/SOURCES.md](docs/SOURCES.md).
+
+## Estimate before you archive
+
+A 27B model is a 50+ GB commitment. `estimate` is a read-only preflight
+against the Hub API — nothing downloaded, nothing written. It reports the
+pinned revision's exact inventory, parameter counts by dtype, the engines
+the payload will support, a completeness check, and a disk verdict. It
+exits non-zero when free space is insufficient, so it doubles as a guard
+in scripts. Upstream numbers are facts; derived figures (min RAM, download
+scratch) are labeled estimates.
 
 ```
 $ modelvault estimate Qwen/Qwen3.8-27B
@@ -184,69 +248,66 @@ Qwen/Qwen3.8-27B @ main -> 1d4bf0f2ff60
 To archive: modelvault archive Qwen/Qwen3.8-27B
 ```
 
-`--variants` additionally lists the model's quantized ecosystem (via the
-Hub's `base_model:quantized` relation), sized for the most-downloaded repos
-with the query caps recorded in the output. `--include GLOB` prices a subset
-of a repo — e.g. the single Q4_K_M file (15.3 GiB) inside a 439.7 GiB GGUF
-pack — and warns that `archive` itself has no subset mode yet. `--json`
-emits the full machine-readable estimate.
+`--variants` lists the quantized ecosystem (Hub `base_model:quantized`
+relation), with query caps recorded in the output. `--include GLOB` prices
+a subset of a repo — e.g. one Q4_K_M file inside a 439.7 GiB GGUF pack.
+`--json` emits the full machine-readable estimate.
+
+## Incremental, relocatable, cooperative transfers
+
+The first `archive` pins one immutable commit and writes the expected file
+set to `transfer.json`. Every later run reconciles that set against local
+bytes, trusts already verified files, hashes and adopts unrecorded complete
+files, resumes bundle-local `.incomplete` files with HTTP Range, and only
+registers `manifest.json` after every expected file is verified.
+
+`--max-gb`, `--max-bytes`, and `--max-minutes` stop cleanly with **exit
+code 10**. `--jobs` controls the small-file pool. `--rehash` rechecks
+trusted ledger entries.
+
+Partial bundles are self-contained and relocatable. Copy the entire
+`<repo-slug>/<revision12>/` directory — including the payload `.cache` —
+under a different vault and rerun the same `archive` command. The pin is
+unchanged; completed files are adopted; the longest Range partial continues.
+
+Collaborators use `--shard N/T`: `1/3`, `2/3`, and `3/3` deterministically
+prioritize different byte-balanced whole-file lanes, but each can still
+finish the identical bundle alone. `modelvault --vault DEST assemble
+PARTIAL...` merges matching partials **offline**.
+
+Full design, ledger shape, and failure semantics:
+[docs/INCREMENTAL.md](docs/INCREMENTAL.md).
 
 ## Quantized models: fidelity first
 
-When a model ships in many precisions, the canonical bundle is the
-**highest-fidelity upstream release**, archived byte-exact — the master is
-the negative, quants are prints. Published quants that matter historically
-(the official FP8, the community-standard GGUF) are archived as ordinary
-**satellite bundles**: most are calibration-based (AWQ/GPTQ, imatrix GGUFs,
-curated FP8 layer maps) and can never be regenerated bit-exact from the
-master, so if it matters what people actually ran, the bytes themselves must
-be kept. Everything else — running the model smaller on your own hardware —
-is disposable hydration-time derivation, never archival. The full policy,
-with the Qwen3.8-27B case study and the proposed `archive --include` /
-`hydrate --quantize` mechanics: [docs/QUANTIZATION.md](docs/QUANTIZATION.md).
+The canonical bundle is the **highest-fidelity upstream release**, archived
+byte-exact — the master is the negative, quants are prints. Published quants
+that matter historically (the official FP8, the community-standard GGUF)
+are archived as ordinary **satellite bundles**: most are calibration-based
+and can never be regenerated bit-exact from the master.
+
+Everything else — running the model smaller on your own hardware — is
+disposable hydration-time derivation, never archival. Full policy:
+[docs/QUANTIZATION.md](docs/QUANTIZATION.md).
 
 ## Dataset bundles
 
-Datasets are the vault's second artifact type — models are functions of data,
-and datasets are *more* endangered than weights (DMCA'd, gated retroactively,
-quietly rewritten, rarely mirrored). One sentence covers the difference:
-datasets are addressed as `datasets/owner/name` and their payload lives in
-`data/`; everything else is identical. Bundle directories take a `datasets--`
-prefix, the manifest carries `dataset_metadata` (formats from the inventory;
-configs, splits, and example counts recorded as **declared** upstream claims,
-with **measured** parquet row counts only when pyarrow is installed —
-`modelvault[datasets]`) and a two-sided relationship graph: dataset bundles
-record `models_trained_on`, model bundles record `training_datasets`.
-`smoke` runs stdlib-only structural checks (parquet magic bytes, JSONL
-first-line parse, CSV dialect sniff); `hydrate`/`run` don't apply — a dataset
-bundle has no engine, and any reader can be pointed at `data/` directly.
+Datasets are the vault's second artifact type. Models are functions of
+data, and datasets are *more* endangered than weights. One sentence covers
+the difference: datasets are addressed as `datasets/owner/name` and their
+payload lives in `data/`; everything else is identical.
 
-`estimate` prices a dataset exactly like a model, printing a formats
-breakdown where a model shows parameters:
+Bundle directories take a `datasets--` prefix. The manifest carries
+`dataset_metadata` (formats from the inventory; configs, splits, and
+example counts as **declared** upstream claims; **measured** parquet row
+counts only when pyarrow is installed). Dataset bundles record
+`models_trained_on`; model bundles record `training_datasets`.
 
-```
-$ modelvault estimate datasets/saidutta69/fable-5-premium
-
-datasets/saidutta69/fable-5-premium @ main -> 684cb1f849fe
-  license mit
-  formats:      jsonl 1.5 GiB in 6, parquet 702.2 MiB in 6, png 49.0 KiB in 1, py 15.3 KiB in 1, json 3.9 KiB in 2, md 3.0 KiB in 1, (none) 2.8 KiB in 1
-  payload:      18 files, 2.2 GiB
-                data 2.2 GiB in 14 files (largest 689.4 MiB: openai_chat/train.jsonl)
-                support 70.0 KiB in 4 files
-  engines:      none (dataset bundle — hydrate/run not applicable)
-  completeness: complete
-  estimated:    download scratch +689.4 MiB (largest file in flight)
-  bundle:       vault/datasets--saidutta69--fable-5-premium/684cb1f849fe  (new)
-  disk:         needs ~2.8 GiB, free 997.5 GiB — OK
-
-To archive: modelvault archive datasets/saidutta69/fable-5-premium
-```
-
-Using an archived dataset needs no unpacking or conversion — the payload is
-the upstream repo's own files:
+`hydrate` / `run` do not apply — a dataset has no engine. Any reader points
+at `data/` directly:
 
 ```python
-import pyarrow.parquet as pq   # or pandas, polars, datasets — plain files either way
+import pyarrow.parquet as pq
 
 path = "vault/datasets--cornell-movie-review-data--rotten_tomatoes/aa13bc287fa6/data"
 table = pq.read_table(f"{path}/train.parquet")     # 8,530 rows, offline
@@ -254,90 +315,92 @@ table = pq.read_table(f"{path}/train.parquet")     # 8,530 rows, offline
 
 Design and rationale: [docs/DATASETS.md](docs/DATASETS.md).
 
-## Verification model
+## Verification
 
 - **At archive time** every file is checked against upstream expectations:
-  LFS files against their upstream SHA-256, small files against their git blob
-  SHA-1 (computed locally). Result: `verified-against-upstream`.
+  LFS files against their upstream SHA-256, small files against their git
+  blob SHA-1. Result: `verified-against-upstream`.
 - **`modelvault verify`** re-hashes the payload and diffs it against the
-  manifest: modified, missing, and extra files are flagged in
-  `security.unexpected_changes`, integrity status flips to `compromised`, and
-  the command exits non-zero — suitable for cron.
-- The **bundle hash** (SHA-256 over the sorted per-file hash lines) gives a
-  single value that fingerprints the entire payload.
+  manifest. Modified, missing, and extra files flip integrity to
+  `compromised` and the command exits non-zero — suitable for cron.
+- The **bundle hash** (SHA-256 over the sorted per-file hash lines)
+  fingerprints the entire payload.
 
-## Single-file exports (.mvb.tar)
+`import` fully re-hashes a payload **before** a bundle enters the vault.
+Failures register nothing and exit non-zero.
+
+## Single-file exports (`.mvb.tar`)
 
 `modelvault export` packs a whole bundle into one **deterministic tar**:
-entries sorted (a `.mvb.json` marker first, carrying the format version,
-bundle id, and bundle hash), tar metadata normalized (mtime = the bundle's
-archive date, no owners), no compression — model weights are essentially
-incompressible and a plain tar stays inspectable with standard tools. The
-same bundle state always exports byte-identically, so the export file has one
-stable SHA-256 suitable for an offsite catalog. Export events (timestamp,
-path, tar hash) are logged to the bundle's `exports.json`, which is excluded
-from the tar precisely so it can't break determinism.
+entries sorted (a `.mvb.json` marker first), tar metadata normalized, no
+compression — weights are incompressible and a plain tar stays inspectable
+with standard tools. The same bundle state always exports byte-identically,
+so the file has one stable SHA-256 for an offsite catalog.
 
 `modelvault import` streams the marker, checks format compatibility, unpacks
-to a staging directory (safe extraction filter), re-hashes the entire payload
-against the embedded manifest and marker bundle hash, and only then registers
-the bundle in the vault — a corrupted archive is refused with a non-zero exit
-and nothing written. The import provenance (source file, its SHA-256, when)
-is recorded in the imported manifest under `archive.imported`. Full container
-spec, including manual recovery without the tool:
+to staging, re-hashes against the embedded manifest, and only then
+registers. Manual recovery without the tool is documented:
 [docs/MVB-FORMAT.md](docs/MVB-FORMAT.md).
 
-## Running archived models (hydration)
+## Running archived models
 
-`modelvault run <bundle> ["prompt"]` goes from bundle to generated tokens in
-one command (macOS and Linux). Under the hood it *hydrates* first: picks an
-engine from what the payload ships (safetensors → `transformers`,
-GGUF → `llama-cpp`), builds a dedicated virtualenv **outside the bundle**
-under `<vault>/.runtime/envs/` — content-keyed so bundles with the same needs
-share one env — and probes it against the payload. Inference then runs fully
-**offline** (`HF_HUB_OFFLINE=1`): a passing run is evidence the archived
-payload alone is sufficient, with nothing quietly fetched at load time.
+`modelvault run <bundle> ["prompt"]` goes from bundle to generated tokens
+in one command (macOS and Linux). It hydrates first: picks an engine from
+what the payload ships (safetensors → `transformers`, GGUF → `llama-cpp`),
+builds a dedicated virtualenv **outside the bundle** under
+`<vault>/.runtime/envs/` — content-keyed, so matching bundles share one env —
+and probes it against the payload.
 
-The chat template is applied when the tokenizer ships one (`--raw` for plain
-completion); decoding is greedy for reproducibility (`--sample --seed N` for
-the model's own sampling defaults). Everything is recorded, nothing
-fabricated: the exact interpreter, installer, and resolved package versions
-go to the bundle's `hydration.json` along with the last 20 runs, and each
-successful run writes a measured `runtime.tested_hardware` entry (host, chip,
-device, engine versions, tokens/sec) into the manifest. The payload stays
-byte-immutable throughout — `verify` passes before and after. Envs are
-disposable: `modelvault envs --prune` reclaims the disk, and the next `run`
-rebuilds. Design details: [docs/HYDRATION.md](docs/HYDRATION.md).
+Inference then runs fully **offline** (`HF_HUB_OFFLINE=1`). A passing run
+is evidence the archived payload alone is sufficient. Envs are disposable:
+`modelvault envs --prune` reclaims the disk; the next `run` rebuilds.
 
-## Extending to new artifact types and engines
+Design details: [docs/HYDRATION.md](docs/HYDRATION.md).
 
-The design is registry-based so new artifact types slot in later. A bundle's
-`artifact_type` drives the payload root and completeness rules from
-`ARTIFACT_TYPES` in `src/modelvault/schema.py` — add an entry (e.g.
-`gguf-pack`, `paper`) with its payload root and required/recommended file
-patterns, plus an extractor if it has structured metadata, and the
-verify/export/report machinery works unchanged; the `dataset` type was added
-exactly this way.
-Inference runtimes work the same way: `ENGINES` in `src/modelvault/hydrate.py`
-maps detection globs to pip requirements and a standalone runner script, so an
-MLX, vLLM, or ONNX engine is a registry entry plus a runner, with no special
-cases elsewhere.
+## Extending
 
-## Design notes
+New artifact types go in the `ARTIFACT_TYPES` registry
+(`src/modelvault/schema.py`) — add an entry with its payload root and
+completeness rules, and verify / export / report work unchanged. The
+`dataset` type was added exactly this way.
 
-modelvault is deliberately Python: the hydration runners live inside the
-torch/transformers ecosystem, the Hugging Face *provider* uses
+New inference runtimes go in `ENGINES` (`src/modelvault/hydrate.py`) — a
+detection glob, pip requirements, and a standalone runner script. MLX,
+vLLM, or ONNX is a registry entry, not a special case.
+
+New acquisition hosts go in `SourceProvider` (`src/modelvault/providers/`).
+Hugging Face is the first plugin, not the product:
+[docs/SOURCES.md](docs/SOURCES.md).
+
+## Documentation
+
+| | |
+|---|---|
+| [**Documentation home**](docs/README.md) | Map of every document, versions, reading order |
+| [Manifest schema](docs/MANIFEST.md) | Field-by-field `manifest.json` reference (v1.5.0) |
+| [MVB format](docs/MVB-FORMAT.md) | Deterministic `.mvb.tar` + manual recovery |
+| [Hydration](docs/HYDRATION.md) | Bundle → runnable env → offline inference |
+| [Incremental transfer](docs/INCREMENTAL.md) | Pin, reconcile, budget, shard, assemble |
+| [Datasets](docs/DATASETS.md) | Second artifact type: payload under `data/` |
+| [Sources](docs/SOURCES.md) | Provider grammar; Hugging Face as a plugin |
+| [Quantization](docs/QUANTIZATION.md) | What is archival vs derived |
+| [Design](docs/DESIGN.md) | Why Python; why longevity lives in the formats |
+| [Distribution](docs/DISTRIBUTION.md) | Wheels, pipx/uvx, and why not frozen binaries |
+| [Testing](docs/TESTING.md) | Unit / integration / opt-in Hub e2e |
+
+## Design
+
+ModelVault is deliberately Python: hydration runners live inside the
+torch / transformers ecosystem, the Hugging Face *provider* uses
 `huggingface_hub` as the reference client for that host's snapshot
-semantics, and the workload is IO-bound glue where a compiled rewrite would
-buy seconds on a tens-of-minutes job. Acquisition is a plugin — Hugging Face
-is the first backend, not the product. Longevity is carried by the
-**formats**, not the tool — plain-JSON manifests and plain-tar exports, each
-documented for manual recovery without modelvault — so the bundles outlive
-whatever software reads them next. Full rationale, accepted costs, and the
-revisit criteria: [docs/DESIGN.md](docs/DESIGN.md). Source providers:
-[docs/SOURCES.md](docs/SOURCES.md). How to consume GitHub releases, and why
-this project does not ship frozen binaries as the primary artifact:
-[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+semantics, and the workload is IO-bound glue. A compiled rewrite would buy
+seconds on a tens-of-minutes job.
+
+Longevity is carried by the **formats**, not the tool — plain-JSON
+manifests and plain-tar exports, each documented for recovery without
+ModelVault — so the bundles outlive whatever software reads them next.
+
+Full rationale: [docs/DESIGN.md](docs/DESIGN.md).
 
 ## License
 

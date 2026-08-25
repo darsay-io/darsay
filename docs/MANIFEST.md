@@ -1,3 +1,5 @@
+> [Documentation](README.md) · [Project README](../README.md)
+
 # manifest.json — schema reference (v1.5.0)
 
 `manifest.json` is the machine-readable source of truth for a bundle. This
@@ -243,3 +245,7 @@ Structured mirror of the curator's notes: `historical_significance`,
 `curation.md` — the free-form file that `modelvault regen` folds into the
 bundle README. Prose belongs in `curation.md`; use the structured fields when
 downstream tooling needs to query them.
+
+---
+
+[Documentation index](README.md)
