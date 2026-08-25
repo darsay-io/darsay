@@ -24,6 +24,9 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
   [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) install from
   [PyPI](https://pypi.org/project/darsay/)
   (`pipx install darsay` / `uvx darsay` / `uv tool install darsay`).
+  A personal Homebrew tap lives at
+  [`jeremynorris/homebrew-darsay`](https://github.com/jeremynorris/homebrew-darsay)
+  (`brew install jeremynorris/darsay/darsay`); this is not homebrew/core.
 - Project URLs now point at `jeremynorris/darsay`.
 
 ### Added

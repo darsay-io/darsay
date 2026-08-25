@@ -120,6 +120,18 @@ them — hydration builds its own isolated env per engine.
 
 </details>
 
+<details>
+<summary><strong>Homebrew tap</strong></summary>
+
+A personal tap, **not** homebrew/core. Unqualified `brew install darsay`
+will not find it.
+
+```bash
+brew install jeremynorris/darsay/darsay
+```
+
+</details>
+
 The vault root defaults to `./vault` (override with `--vault` or
 `$DARSAY_HOME`). Bundles are gitignored — they live on disk or in your
 backup tier, not in this repo.
@@ -388,7 +400,7 @@ Hugging Face is the first plugin, not the product:
 | [Sources](docs/SOURCES.md) | Provider grammar; Hugging Face as a plugin |
 | [Quantization](docs/QUANTIZATION.md) | What is archival vs derived |
 | [Design](docs/DESIGN.md) | Why Python; why longevity lives in the formats |
-| [Distribution](docs/DISTRIBUTION.md) | PyPI, pipx/uvx, and why not frozen binaries |
+| [Distribution](docs/DISTRIBUTION.md) | PyPI, pipx/uvx, Homebrew tap, and why not frozen binaries |
 | [Testing](docs/TESTING.md) | Unit / integration / opt-in Hub e2e |
 
 ## Design

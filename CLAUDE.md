@@ -47,7 +47,7 @@ point `darsay` (argparse, subcommands in `cli.py`).
   v0.5.0/schema 1.4.0): idempotent resumable transfer — pin →
   reconcile → plan → transfer → register, `transfer.json` ledger, session
   budgets, local-source adoption.
-  `docs/DISTRIBUTION.md` — how releases are consumed (PyPI / pipx / uvx)
+  `docs/DISTRIBUTION.md` — how releases are consumed (PyPI / pipx / uvx, personal Homebrew tap)
   and why frozen binaries are not the primary install path.
   `docs/SOURCES.md` — acquisition providers; the public source-ref grammar;
   Hugging Face as a plugin.

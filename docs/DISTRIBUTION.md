@@ -33,6 +33,19 @@ site-packages, and upgrades are one command (`pipx upgrade darsay`,
 
 ### Other sources
 
+Homebrew **tap** (not [homebrew/core](https://github.com/Homebrew/homebrew-core)).
+`brew install darsay` will not find it. This is a personal tap until the
+project is old enough and notable enough for a core formula — do not open
+that PR yet.
+
+```bash
+brew install jeremynorris/darsay/darsay
+```
+
+The formula is in [`jeremynorris/homebrew-darsay`](https://github.com/jeremynorris/homebrew-darsay).
+It installs the PyPI sdist into an isolated venv (same idea as pipx).
+Hydrate/run still need a real interpreter.
+
 From a downloaded wheel (GitHub Release asset):
 
 ```bash
