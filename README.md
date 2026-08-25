@@ -3,25 +3,38 @@
 Tools for downloading and archiving **full model ecosystems** as reproducible,
 auditable bundles — museum-grade curation that stays directly usable.
 
-`modelvault` pulls a model repo from Hugging Face at a pinned revision, hashes
-every file (SHA-256, plus BLAKE3 when available), cross-checks each file
-against upstream LFS/git checksums, captures the license verbatim with rights
-flags, extracts model metadata straight from the payload (parameter counts are
-read from safetensors headers — no torch needed), snapshots the downstream
-ecosystem (quantizations, GGUFs, finetunes), and writes it all into a bundle
-that any Hugging Face-compatible loader can use as-is. When you want to hear
-the archived model speak, `modelvault run <bundle>` takes it from cold storage
-to a local inference — building the environment for you — in one command.
-Large archives are incremental by default: budgets and Ctrl-C leave durable
-Range partials, copied partial bundles resume on another machine, and friends
-can coordinate byte-balanced transfer orders and assemble their work offline.
-Before committing tens of gigabytes, `modelvault estimate` prices a repo from
-Hub metadata alone — exact sizes, parameter counts, disk headroom, and its
-quantized ecosystem — without downloading a byte.
+`modelvault` pulls a model or dataset from a source (Hugging Face today) at a
+pinned revision, hashes every file (SHA-256, plus BLAKE3 when available),
+cross-checks each file against upstream checksums, captures the license
+verbatim with rights flags, extracts model metadata straight from the payload
+(parameter counts are read from safetensors headers — no torch needed),
+snapshots the downstream ecosystem (quantizations, GGUFs, finetunes), and
+writes it all into a bundle that any Hugging Face-compatible loader can use
+as-is. When you want to hear the archived model speak, `modelvault run <bundle>`
+takes it from cold storage to a local inference — building the environment for
+you — in one command. Large archives are incremental by
+default: budgets and Ctrl-C leave durable Range partials, copied partial
+bundles resume on another machine, and friends can coordinate byte-balanced
+transfer orders and assemble their work offline. Before committing tens of
+gigabytes, `modelvault estimate` prices a source from upstream metadata
+alone — exact sizes, parameter counts, disk headroom, and its quantized
+ecosystem — without downloading a byte.
 
 ## Install
 
+Requires Python 3.10+. The package is pure Python — one wheel for every OS.
+Isolated CLI tools (`pipx`, `uvx`) are the intended way to run a release;
+see [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+
 ```bash
+# from a GitHub tag (after the repo is on GitHub)
+pipx install git+https://github.com/archive-dawn/modelvault@v0.5.0
+uvx --from git+https://github.com/archive-dawn/modelvault@v0.5.0 modelvault --help
+
+# from a downloaded GitHub Release wheel
+pipx install ./modelvault-0.5.0-py3-none-any.whl
+
+# development checkout
 python3 -m venv .venv
 .venv/bin/pip install -e .                 # core: huggingface_hub only
 .venv/bin/pip install -e ".[fast-hash,smoke]"   # + blake3, tokenizers
@@ -60,10 +73,13 @@ modelvault dehydrate vault/qwen--qwen3-0.6b/<rev>            # drop a bundle's h
 
 The vault root defaults to `./vault` (override with `--vault` or
 `$MODELVAULT_HOME`). Bundles are gitignored — they are large binary payloads
-that live on disk or in your backup tier, not in this repo. Repo refs use the
-Hub's own grammar — `owner/name` is a model, `datasets/owner/name` a dataset,
-and either huggingface.co URL pastes straight from the browser; bundle-path
-commands need nothing, they dispatch on the manifest's `artifact_type`.
+that live on disk or in your backup tier, not in this repo. Source refs are
+provider-qualified — `huggingface:Qwen/Qwen3-0.6B`,
+`huggingface:datasets/owner/name`. Unprefixed `owner/name` /
+`datasets/owner/name` and huggingface.co URLs are Hugging Face shorthand so
+existing commands keep working. Bundle-path commands need nothing, they
+dispatch on the manifest's `artifact_type`. Adding another host is a source
+provider, not a new CLI: [docs/SOURCES.md](docs/SOURCES.md).
 
 ## Bundle layout
 
@@ -308,11 +324,21 @@ cases elsewhere.
 ## Design notes
 
 modelvault is deliberately Python: the hydration runners live inside the
-torch/transformers ecosystem, `huggingface_hub` is the reference client for
-the snapshot semantics an archive must get exactly right, and the workload is
-IO-bound glue where a compiled rewrite would buy seconds on a
-tens-of-minutes job. Longevity is carried by the **formats**, not the tool —
-plain-JSON manifests and plain-tar exports, each documented for manual
-recovery without modelvault — so the bundles outlive whatever software reads
-them next. Full rationale, accepted costs, and the revisit criteria:
-[docs/DESIGN.md](docs/DESIGN.md).
+torch/transformers ecosystem, the Hugging Face *provider* uses
+`huggingface_hub` as the reference client for that host's snapshot
+semantics, and the workload is IO-bound glue where a compiled rewrite would
+buy seconds on a tens-of-minutes job. Acquisition is a plugin — Hugging Face
+is the first backend, not the product. Longevity is carried by the
+**formats**, not the tool — plain-JSON manifests and plain-tar exports, each
+documented for manual recovery without modelvault — so the bundles outlive
+whatever software reads them next. Full rationale, accepted costs, and the
+revisit criteria: [docs/DESIGN.md](docs/DESIGN.md). Source providers:
+[docs/SOURCES.md](docs/SOURCES.md). How to consume GitHub releases, and why
+this project does not ship frozen binaries as the primary artifact:
+[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+
+## License
+
+Apache License 2.0. See [LICENSE](LICENSE). Bundles record *upstream* model
+and dataset licenses separately in `manifest.json`; those do not change the
+license of this tool.

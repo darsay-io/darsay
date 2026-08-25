@@ -1,8 +1,10 @@
-"""Durable, resumable transfer state for Hub archive operations.
+"""Durable, resumable transfer state for archive operations.
 
 The payload bytes are authoritative. ``transfer.json`` is an atomic ledger
 that avoids hashing already-verified files on every run, but reconciliation
 can rebuild it from the pinned upstream inventory and the bytes on disk.
+Download transport is provided by the source provider; this module owns
+pin/reconcile/plan/verify bookkeeping.
 """
 
 from __future__ import annotations
@@ -20,8 +22,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-
-from huggingface_hub import hf_hub_download
 
 from .hashing import hash_file, iter_payload_files
 
@@ -102,19 +102,6 @@ def _utc_now() -> str:
     from .archiver import utc_now
 
     return utc_now()
-
-
-def _json_value(value):
-    """Return a JSON-safe copy of Hub metadata without inventing values."""
-    if isinstance(value, datetime):
-        return value.isoformat(timespec="seconds")
-    if isinstance(value, dict):
-        return {str(k): _json_value(v) for k, v in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_value(v) for v in value]
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return value
-    return str(value)
 
 
 def ledger_path(bundle_dir: Path) -> Path:
@@ -255,24 +242,24 @@ def transfer_lock(bundle_dir: Path, progress=print):
 
 def find_resume(
     vault: Path,
-    repo_id: str,
-    repo_type: str,
+    source,
     revision: str | None,
     payload_root: str,
 ) -> tuple[Path, dict | None] | None:
-    """Find an in-progress bundle before making a Hub metadata call.
+    """Find an in-progress bundle before making a provider metadata call.
 
     A lone payload directory (or corrupt ledger) is also returned so the
-    caller can re-pin the commit prefix encoded by its bundle directory and
+    caller can re-pin the revision prefix encoded by its bundle directory and
     reconcile the bytes. Multiple candidates require explicit cleanup rather
     than guessing which immutable revision the user meant.
     """
-    from .archiver import bundle_name_for
+    from .sources import SourceRef, get_provider
 
-    parent = vault / bundle_name_for(repo_id, repo_type)
+    assert isinstance(source, SourceRef)
+    parent = vault / source.bundle_name
     if not parent.is_dir():
         return None
-    requested = revision or "main"
+    requested = revision or get_provider(source.provider).default_revision
     matches: list[tuple[Path, dict]] = []
     orphans: list[Path] = []
     for child in sorted(p for p in parent.iterdir() if p.is_dir()):
@@ -285,7 +272,7 @@ def find_resume(
             except LedgerError:
                 orphans.append(child)
                 continue
-            if ledger["repo_id"] != repo_id or ledger["repo_type"] != repo_type:
+            if ledger["repo_id"] != source.locator or ledger["repo_type"] != source.artifact_type:
                 continue
             if ledger["revision_ref"] == requested or ledger["revision"] == requested:
                 matches.append((child, ledger))
@@ -297,51 +284,41 @@ def find_resume(
         return matches[0]
     if len(matches) > 1:
         raise SystemExit(
-            f"error: multiple in-progress archives match {repo_id} @ {requested}: "
+            f"error: multiple in-progress archives match {source.canonical} @ {requested}: "
             + ", ".join(str(path) for path, _ in matches)
         )
     if len(orphans) == 1:
         return orphans[0], None
     if len(orphans) > 1:
         raise SystemExit(
-            f"error: multiple ledger-less partial archives exist for {repo_id}; "
+            f"error: multiple ledger-less partial archives exist for {source.canonical}; "
             "specify a revision or resolve them manually: " + ", ".join(map(str, orphans))
         )
     return None
 
 
-def new_ledger(repo_id: str, repo_type: str, revision_ref: str, info) -> dict:
+def new_ledger(snapshot) -> dict:
     expected = []
-    for sibling in info.siblings or []:
+    for spec in snapshot.files:
         expected.append({
-            "path": sibling.rfilename,
-            "size": sibling.size,
-            "lfs_sha256": sibling.lfs.sha256 if sibling.lfs else None,
-            "git_sha1": sibling.blob_id if not sibling.lfs else None,
+            "path": spec.path,
+            "size": spec.size,
+            "lfs_sha256": spec.sha256,
+            "git_sha1": spec.git_sha1,
         })
     expected.sort(key=lambda item: item["path"])
-    card = info.card_data.to_dict() if info.card_data else {}
+    source = snapshot.source
     return {
         "transfer_version": TRANSFER_VERSION,
-        "repo_id": repo_id,
-        "repo_type": repo_type,
-        "revision": info.sha,
-        "revision_ref": revision_ref,
+        "provider": source.provider,
+        "address": source.canonical,
+        "repo_id": source.locator,
+        "repo_type": source.artifact_type,
+        "revision": snapshot.revision,
+        "revision_ref": snapshot.revision_ref,
         "pinned_at": _utc_now(),
         "expected": expected,
-        "metadata": {
-            "card_data": _json_value(card),
-            "tags": list(info.tags or []),
-            "gated": getattr(info, "gated", None) or False,
-            "created_at": (
-                info.created_at.isoformat(timespec="seconds") if info.created_at else None
-            ),
-            "last_modified": (
-                info.last_modified.isoformat(timespec="seconds") if info.last_modified else None
-            ),
-            "downloads": getattr(info, "downloads", None),
-            "likes": getattr(info, "likes", None),
-        },
+        "metadata": snapshot.metadata,
         "files": {},
         "sessions": [],
         "events": [],
@@ -418,33 +395,12 @@ def _discard_payload_file(path: Path, payload_dir: Path) -> None:
         parent = parent.parent
 
 
-def _partial_bytes(payload_dir: Path, expected: dict) -> int:
-    """Best-effort byte count for Hub local-dir incomplete files.
+def _partial_bytes(payload_dir: Path, expected: dict, ledger: dict | None = None) -> int:
+    """Best-effort byte count for provider incomplete files."""
+    from .sources import get_provider
 
-    This is also used by ``modelvault list``, so computing the path must not
-    create Hub bookkeeping directories as ``get_local_download_paths`` does.
-    """
-    etag = expected.get("lfs_sha256") or expected.get("git_sha1")
-    if not etag:
-        return 0
-    download_root = payload_dir / ".cache" / "huggingface" / "download"
-    if not download_root.is_dir():
-        return 0
-    try:
-        from huggingface_hub._local_folder import _short_hash
-
-        relative = PurePosixPath(expected["path"])
-        metadata_path = download_root.joinpath(*relative.parts).with_name(
-            f"{relative.name}.metadata"
-        )
-        path = metadata_path.parent / f"{_short_hash(metadata_path.name)}.{etag}.incomplete"
-        return path.stat().st_size if path.is_file() else 0
-    except ImportError:
-        # Compatibility fallback if Hub changes the private short-hash helper.
-        matches = list(download_root.rglob(f"*.{etag}.incomplete"))
-        return matches[0].stat().st_size if len(matches) == 1 else 0
-    except (OSError, ValueError):
-        return 0
+    provider = get_provider((ledger or {}).get("provider") or "huggingface")
+    return provider.partial_bytes(payload_dir, expected)
 
 
 def reconcile(
@@ -559,7 +515,7 @@ def transfer_plan(payload_dir: Path, ledger: dict) -> dict:
             counts["verified"] += 1
             bytes_by_state["verified"] += size
             continue
-        partial = min(_partial_bytes(payload_dir, expected), size) if size else 0
+        partial = min(_partial_bytes(payload_dir, expected, ledger), size) if size else 0
         if partial:
             counts["partial"] += 1
             bytes_by_state["partial"] += partial
@@ -682,7 +638,7 @@ def print_shard_plan(ledger: dict, shard: tuple[int, int], progress=print) -> No
 
 
 class NetworkCounter:
-    """Receive actual network-byte callbacks from huggingface_hub progress."""
+    """Receive actual network-byte callbacks from a provider's progress wrapper."""
 
     def __init__(self, session: dict, stop_controller: StopController | None = None):
         self.session = session
@@ -694,8 +650,8 @@ class NetworkCounter:
         with self.lock:
             self.session["bytes_network"] += max(0, int(amount))
             if self.stop_controller is not None:
-                # huggingface_hub reports a chunk immediately before writing it.
-                # Defer the first stop until the following callback so the
+                # Providers typically report a chunk immediately before writing
+                # it. Defer the first stop until the following callback so the
                 # triggering chunk is durably banked in the incomplete file.
                 if self.pending_stop is not None:
                     if not defer_only:
@@ -705,135 +661,6 @@ class NetworkCounter:
                     self.stop_controller.check(self.session)
                 except CleanStop as stop:
                     self.pending_stop = stop
-
-
-def _tqdm_class(counter: NetworkCounter):
-    from tqdm.auto import tqdm
-
-    class TransferTqdm(tqdm):
-        def __init__(self, *args, **kwargs):
-            name = str(kwargs.get("name") or "")
-            desc = str(kwargs.get("desc") or "")
-            self._modelvault_xet = name.startswith("huggingface_hub.xet_get") or (
-                "reconstructing file" in desc
-            )
-            super().__init__(*args, **kwargs)
-
-        def update_transfer(self, amount=1):
-            counter.add(amount, defer_only=self._modelvault_xet)
-            if self._modelvault_xet and counter.pending_stop is not None:
-                # Python exceptions raised by a Rust progress callback are
-                # reported as unraisable and do not stop Xet. Abort its global
-                # session explicitly; the caller translates the resulting
-                # transport exception back to the pending clean stop.
-                from huggingface_hub.utils._xet import abort_xet_session
-
-                abort_xet_session()
-
-        def set_transfer_postfix_str(self, *args, **kwargs):
-            # Xet routes its actual network-byte counter through this class in
-            # addition to the ordinary reconstruction progress bar.
-            return None
-
-    return TransferTqdm
-
-
-@contextmanager
-def _resumable_hub_transport(payload_dir: Path):
-    """Restore safe same-bundle partial resume around ``hf_hub_download``.
-
-    huggingface_hub 1.18 switched to process-unique temporary files and
-    intentionally stopped preserving cross-call partials. modelvault has a
-    stronger per-bundle lock, so a stable local-dir incomplete file is safe
-    here. The Hub client still owns metadata, HTTP Range requests, retries,
-    Xet, and the final move; this wrapper only restores its former temp-file
-    lifetime while the modelvault lock is held.
-    """
-    import huggingface_hub.constants as hub_constants
-    import huggingface_hub.file_download as file_download
-    try:
-        from huggingface_hub.utils._xet import abort_xet_session
-    except ImportError:
-        # Older supported Hub clients do not keep a process-global Xet
-        # session; assigning HF_XET_CACHE below is sufficient for them.
-        def abort_xet_session():
-            return None
-
-    original = file_download._download_to_tmp_and_move
-    original_xet_cache = hub_constants.HF_XET_CACHE
-    old_xet_cache_env = os.environ.get("HF_XET_CACHE")
-    original_xet_disabled = hub_constants.HF_HUB_DISABLE_XET
-    old_xet_disabled_env = os.environ.get("HF_HUB_DISABLE_XET")
-    local_xet_cache = payload_dir / ".cache" / "huggingface" / "xet"
-
-    # Current hf_xet aborts discard an in-flight reconstruction rather than
-    # leaving a durable cross-process partial. Select the Hub client's HTTP
-    # path so budgets, SIGINT, and filesystem copies always retain byte-level
-    # progress. Keep Xet's cache local as a defensive fallback for older Hub
-    # clients that might not honor the disable flag.
-    abort_xet_session()
-    os.environ["HF_XET_CACHE"] = str(local_xet_cache)
-    hub_constants.HF_XET_CACHE = local_xet_cache
-    os.environ["HF_HUB_DISABLE_XET"] = "1"
-    hub_constants.HF_HUB_DISABLE_XET = True
-
-    def resumable_download(
-        incomplete_path,
-        destination_path,
-        url_to_download,
-        headers,
-        expected_size,
-        filename,
-        force_download,
-        etag,
-        xet_file_data,
-        tqdm_class=None,
-    ):
-        if destination_path.exists() and not force_download:
-            return
-        if incomplete_path.exists() and force_download:
-            incomplete_path.unlink(missing_ok=True)
-        with incomplete_path.open("ab") as handle:
-            resume_size = handle.tell()
-            if expected_size is not None:
-                file_download._check_disk_space(expected_size, incomplete_path.parent)
-                file_download._check_disk_space(expected_size, destination_path.parent)
-            if xet_file_data is not None and file_download.is_xet_available():
-                file_download.xet_get(
-                    incomplete_path=incomplete_path,
-                    xet_file_data=xet_file_data,
-                    headers=headers,
-                    expected_size=expected_size,
-                    displayed_filename=filename,
-                    tqdm_class=tqdm_class,
-                )
-            else:
-                file_download.http_get(
-                    url_to_download,
-                    handle,
-                    resume_size=resume_size,
-                    headers=headers,
-                    expected_size=expected_size,
-                    tqdm_class=tqdm_class,
-                )
-        file_download._chmod_and_move(incomplete_path, destination_path)
-
-    file_download._download_to_tmp_and_move = resumable_download
-    try:
-        yield
-    finally:
-        file_download._download_to_tmp_and_move = original
-        abort_xet_session()
-        hub_constants.HF_XET_CACHE = original_xet_cache
-        hub_constants.HF_HUB_DISABLE_XET = original_xet_disabled
-        if old_xet_cache_env is None:
-            os.environ.pop("HF_XET_CACHE", None)
-        else:
-            os.environ["HF_XET_CACHE"] = old_xet_cache_env
-        if old_xet_disabled_env is None:
-            os.environ.pop("HF_HUB_DISABLE_XET", None)
-        else:
-            os.environ["HF_HUB_DISABLE_XET"] = old_xet_disabled_env
 
 
 def _download_one(
@@ -892,17 +719,22 @@ def _download_one(
         })
         _discard_payload_file(path, payload_dir)
 
+    from .sources import get_provider, source_from_ledger
+
+    provider = get_provider(ledger.get("provider") or "huggingface")
+    source = source_from_ledger(ledger)
+    tqdm_class = provider.progress_wrapper(counter)
+
     for retry in range(2):
         attempts += 1
         try:
-            hf_hub_download(
-                repo_id=ledger["repo_id"],
-                filename=relative,
-                revision=ledger["revision"],
-                local_dir=payload_dir,
-                repo_type=ledger["repo_type"],
-                force_download=retry > 0,
-                tqdm_class=_tqdm_class(counter),
+            provider.download_file(
+                source,
+                ledger["revision"],
+                relative,
+                payload_dir,
+                force=retry > 0,
+                tqdm_class=tqdm_class,
             )
         except BaseException:
             if counter.pending_stop is not None:
@@ -1080,11 +912,14 @@ def transfer_all(
     shard: tuple[int, int] | None = None,
 ) -> dict:
     """Fetch and immediately verify every remaining file at the pinned commit."""
+    from .sources import get_provider
+
     counter = NetworkCounter(session, stop_controller)
     local_sources = local_source_index(bundle_dir, ledger)
     groups = transfer_groups(ledger["expected"], shard)
+    provider = get_provider(ledger.get("provider") or "huggingface")
 
-    with _resumable_hub_transport(payload_dir):
+    with provider.transfer_session(payload_dir):
         for lane, assigned in groups:
             remaining = [
                 expected for expected in assigned
@@ -1130,26 +965,35 @@ def transfer_all(
 
 
 def _same_transfer_set(left: dict, right: dict) -> bool:
-    return all(left.get(key) == right.get(key) for key in (
+    if not all(left.get(key) == right.get(key) for key in (
         "transfer_version",
         "repo_id",
         "repo_type",
         "revision",
         "expected",
-    ))
+    )):
+        return False
+    aliases = {"huggingface", "hf"}
+    left_p = left.get("provider") or "huggingface"
+    right_p = right.get("provider") or "huggingface"
+    if left_p in aliases:
+        left_p = "huggingface"
+    if right_p in aliases:
+        right_p = "huggingface"
+    return left_p == right_p
 
 
 def _merge_transfer_caches(
     source_payloads: list[Path],
     destination_payload: Path,
 ) -> tuple[int, int]:
-    """Merge portable Hub caches with one copy of each longest byte partial."""
-    destination_cache = destination_payload / ".cache" / "huggingface"
+    """Merge portable provider caches with one copy of each longest byte partial."""
+    destination_cache = destination_payload / ".cache"
     copied_files = 0
     copied_partial_bytes = 0
     candidates: dict[Path, Path] = {}
     for source_payload in source_payloads:
-        source_cache = source_payload / ".cache" / "huggingface"
+        source_cache = source_payload / ".cache"
         if not source_cache.is_dir():
             continue
         for source in sorted(source_cache.rglob("*")):
@@ -1188,6 +1032,7 @@ def assemble_partials(
 
     from .archiver import bundle_dir_for
     from .schema import payload_root_for
+    from .sources import source_from_ledger
 
     if not partials:
         raise SystemExit("error: assemble needs at least one partial bundle")
@@ -1210,9 +1055,8 @@ def assemble_partials(
 
     destination = bundle_dir_for(
         vault,
-        seed["repo_id"],
+        source_from_ledger(seed),
         seed["revision"],
-        seed["repo_type"],
     )
     root = payload_root_for(seed["repo_type"])
     destination_payload = destination / root

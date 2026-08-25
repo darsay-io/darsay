@@ -4,4 +4,6 @@ vault/
 .venv/
 __pycache__/
 *.egg-info/
+dist/
+build/
 .DS_Store

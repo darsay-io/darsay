@@ -67,16 +67,31 @@ def _header_table_close(lines: list[str], lic: dict, inv: dict, arc: dict, sec: 
 # never reads like a vanilla derivation of its base model.
 ALIGNMENT_MODIFICATION_TAGS = ("abliterated", "uncensored")
 
+_DOWNLOADER_SKIP = {"tool", "version", "python", "platform", "provider"}
+
+
+def _downloader_clients(downloader: dict) -> str:
+    parts = []
+    hub = downloader.get("huggingface_hub")
+    if hub:
+        parts.append(f"huggingface_hub {hub}")
+    for key, value in downloader.items():
+        if key in _DOWNLOADER_SKIP or key == "huggingface_hub" or value is None:
+            continue
+        parts.append(f"{key} {value}")
+    return (", ".join(parts) + ", ") if parts else ""
+
 
 def _source_lines(src: dict) -> list[str]:
     lines = [
         "",
         "## Source & provenance",
         "",
-        f"- Origin: [{src['repo_id']}]({src['upstream_url']}) on {src['origin']}",
+        f"- Origin: [{src.get('address') or src['repo_id']}]({src['upstream_url']}) "
+        f"via {src.get('provider') or src['origin']}",
         f"- Pinned revision: `{src['revision']}` (ref `{src['revision_ref']}`, last modified upstream {src['last_modified_upstream'] or '?'})",
         f"- Downloaded: {src['download_timestamp']} by {src['downloader']['tool']} v{src['downloader']['version']} "
-        f"(huggingface_hub {src['downloader']['huggingface_hub']}, Python {src['downloader']['python']})",
+        f"({_downloader_clients(src['downloader'])}Python {src['downloader']['python']})",
         f"- Signatures: {src['signatures'] or 'none provided upstream'}",
     ]
     access = src.get("access") or {}
@@ -295,7 +310,7 @@ def _render_model_readme(bundle_dir: Path, m: dict) -> str:
         f"modelvault verify {bundle_path}",
         "",
         "# Re-create an identical bundle from upstream (bit-for-bit payload)",
-        f"modelvault archive {src['repo_id']} --revision {src['revision']}",
+        f"modelvault archive {src.get('address') or src['repo_id']} --revision {src['revision']}",
         "```",
     ]
 
@@ -434,7 +449,7 @@ def _render_dataset_readme(bundle_dir: Path, m: dict) -> str:
         f"modelvault verify {bundle_path}",
         "",
         "# Re-create an identical bundle from upstream (bit-for-bit payload)",
-        f"modelvault archive datasets/{src['repo_id']} --revision {src['revision']}",
+        f"modelvault archive {src.get('address') or ('datasets/' + src['repo_id'])} --revision {src['revision']}",
         "```",
     ]
 

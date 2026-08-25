@@ -16,14 +16,17 @@ dependency — quantize recipes mean bitsandbytes load flags,
 `mlx_lm.convert`, `convert_hf_to_gguf.py`, all Python-side (see
 [QUANTIZATION.md](QUANTIZATION.md)).
 
-**`huggingface_hub` is the reference client.** The riskiest code an
-archival tool could own is a hand-rolled reimplementation of snapshot
-semantics — revision pinning, LFS vs git-blob hashing, gated-repo auth,
-sibling metadata — because a silent bug there corrupts the core claim
-("byte-exact copy of upstream"). Python gets the canonical, maintained
-implementation, and the metadata surface `estimate` and `archive` lean on
+**Acquisition is a provider plugin; Hugging Face is the first one.**
+The riskiest code an archival tool could own is a hand-rolled
+reimplementation of snapshot semantics — revision pinning, LFS vs git-blob
+hashing, gated-repo auth, sibling metadata — because a silent bug there
+corrupts the core claim ("byte-exact copy of upstream"). The Hugging Face
+provider uses `huggingface_hub` as the reference client for that host, and
+the metadata surface `estimate` and `archive` lean on
 (`files_metadata`, `safetensors.parameters`, `base_model:quantized`
-relations) comes with it for free.
+relations) comes with it for free. The public API is a source ref
+(`huggingface:Qwen/Qwen3-0.6B`); a second host is another `SourceProvider`,
+not a new CLI. See [SOURCES.md](SOURCES.md).
 
 **Performance is not the bottleneck.** The workload is network download and
 disk IO, then hashing. `hashlib` releases the GIL and runs OpenSSL's
@@ -44,8 +47,10 @@ lines of CLI.
 - The tool needs a Python to run, and hydration needs an interpreter to
   build env interpreters (`$MODELVAULT_PYTHON` / `--python`; `uv`, when
   present, can fetch interpreters itself).
-- Distribution is `pip install`, not a single static binary. See below for
-  why that does not threaten the archive.
+- Distribution is a pure-Python wheel (`pipx` / `uvx` / `pip`), not a
+  single static binary. Frozen executables are possible but a poor
+  primary path for this CLI — see [DISTRIBUTION.md](DISTRIBUTION.md).
+  That choice does not threaten the archive.
 
 ## Longevity: formats outlive tools
 

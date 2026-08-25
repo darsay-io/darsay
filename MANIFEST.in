@@ -1,0 +1,6 @@
+include LICENSE
+include NOTICE
+include CHANGELOG.md
+include CONTRIBUTING.md
+include SECURITY.md
+graft docs

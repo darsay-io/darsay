@@ -4,6 +4,9 @@ New artifact types (standalone GGUF packs, papers, ...) slot in by adding a
 registry entry: where the payload lives, what files a complete bundle must
 contain and which are recommended. The manifest carries `artifact_type` so
 consumers can dispatch; `model` and `dataset` are the two current types.
+
+Acquisition backends are a separate registry (`sources.SourceProvider`);
+see docs/SOURCES.md. Do not special-case a hosting service here.
 """
 
 from __future__ import annotations

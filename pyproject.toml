@@ -1,14 +1,41 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "modelvault"
-version = "0.5.0"
+version = "0.6.0"
 description = "Download, archive, and curate full model ecosystems as reproducible, auditable bundles"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "Jeremy Norris" }]
+keywords = [
+    "huggingface",
+    "archive",
+    "models",
+    "datasets",
+    "reproducibility",
+    "curation",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: System :: Archiving",
+]
 dependencies = [
     # 1.23 exposes separate network-byte progress for honest transfer budgets.
     "huggingface_hub>=1.23",
@@ -23,6 +50,12 @@ smoke = ["tokenizers"]
 inference = ["transformers", "torch"]
 # Measured parquet row counts for dataset bundles (declared counts need nothing)
 datasets = ["pyarrow"]
+
+[project.urls]
+Homepage = "https://github.com/archive-dawn/modelvault"
+Documentation = "https://github.com/archive-dawn/modelvault#readme"
+Issues = "https://github.com/archive-dawn/modelvault/issues"
+Changelog = "https://github.com/archive-dawn/modelvault/blob/main/CHANGELOG.md"
 
 [project.scripts]
 modelvault = "modelvault.cli:main"

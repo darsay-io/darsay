@@ -1,0 +1,131 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    name: Python ${{ matrix.python-version }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.12", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Check published versions match
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+
+          pyproject = Path("pyproject.toml").read_text(encoding="utf-8")
+          init = Path("src/modelvault/__init__.py").read_text(encoding="utf-8")
+          project = re.search(r'(?m)^version = "([^"]+)"', pyproject)
+          package = re.search(r'(?m)^__version__ = "([^"]+)"', init)
+          if not project or not package:
+              raise SystemExit("could not find version strings")
+          if project.group(1) != package.group(1):
+              raise SystemExit(
+                  f"version mismatch: pyproject.toml={project.group(1)!r} "
+                  f"__init__.py={package.group(1)!r}"
+              )
+          print(f"version {project.group(1)}")
+          PY
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+
+      - name: CLI
+        run: |
+          modelvault --version
+          modelvault --help
+
+      - name: Source-ref grammar
+        run: |
+          python - <<'PY'
+          from modelvault.sources import parse_source, provider_names
+
+          assert provider_names() == ["huggingface"]
+          s = parse_source("Qwen/Qwen3-0.6B")
+          assert s.provider == "huggingface" and s.artifact_type == "model"
+          assert s.canonical == "huggingface:Qwen/Qwen3-0.6B"
+          assert s.bundle_name == "qwen--qwen3-0.6b"
+          d = parse_source("huggingface:datasets/owner/name")
+          assert d.artifact_type == "dataset" and d.locator == "owner/name"
+          assert d.bundle_name == "datasets--owner--name"
+          u = parse_source("https://huggingface.co/Qwen/Qwen3-0.6B/tree/main")
+          assert u.canonical == s.canonical
+          a = parse_source("hf:Qwen/Qwen3-0.6B")
+          assert a.canonical == s.canonical
+          try:
+              parse_source("modelscope:qwen/foo")
+          except SystemExit as exc:
+              assert "unknown source provider" in str(exc)
+          else:
+              raise SystemExit("expected unknown-provider error")
+          print("source refs ok")
+          PY
+
+      - name: Confirm runner scripts ship in the package
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from modelvault.hydrate import ENGINES
+
+          root = Path(__import__("modelvault").__file__).parent / "runners"
+          missing = [
+              spec["runner"] for spec in ENGINES.values()
+              if not (root / spec["runner"]).is_file()
+          ]
+          if missing:
+              raise SystemExit(f"runner scripts missing from package: {missing}")
+          print("runners:", ", ".join(sorted(p.name for p in root.glob("*.py"))))
+          PY
+
+  build:
+    name: sdist and wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build
+        run: |
+          python -m pip install --upgrade pip build twine
+          python -m build
+          python -m twine check dist/*
+
+      - name: Install from wheel in a clean env
+        run: |
+          python -m venv /tmp/wheel-env
+          /tmp/wheel-env/bin/pip install dist/*.whl
+          /tmp/wheel-env/bin/modelvault --version
+          /tmp/wheel-env/bin/python - <<'PY'
+          from pathlib import Path
+          import modelvault
+          from modelvault.hydrate import ENGINES
+
+          root = Path(modelvault.__file__).parent / "runners"
+          missing = [spec["runner"] for spec in ENGINES.values()
+                     if not (root / spec["runner"]).is_file()]
+          if missing:
+              raise SystemExit(f"wheel is missing runners: {missing}")
+          print("wheel ok:", Path(modelvault.__file__).parent)
+          PY

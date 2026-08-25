@@ -24,7 +24,8 @@ verify-before-register, generated-vs-hand-edited, registry extensibility,
 disposable hydration. None mentions "model". A user who can archive a model
 learns datasets from one sentence:
 
-> *Datasets are addressed as `datasets/owner/name` and their payload lives
+> *Datasets are addressed as `huggingface:datasets/owner/name` (or the
+> Hugging Face shorthand `datasets/owner/name`) and their payload lives
 > in `data/`; everything else is identical.*
 
 That sentence is the design's budget. Anything exceeding it is rejected.
@@ -42,20 +43,21 @@ Everything that varies by artifact type becomes a property of the
 | ecosystem snapshot | quantized/finetunes/adapters of it | models trained **on** it |
 | engines | transformers, llama-cpp | none (hydration degrades gracefully) |
 
-## 4. Addressing: the Hub's own grammar, zero new surface
+## 4. Addressing: one source-ref grammar, zero new verbs
 
-No new verbs, no `--type` flag. Every repo-taking command accepts what the
-Hub itself writes:
+No new verbs, no `--type` flag. Every source-taking command accepts a
+provider-qualified ref; Hugging Face shorthand and paste-from-browser URLs
+still work:
 
-    modelvault estimate datasets/saidutta69/fable-5-premium
+    modelvault estimate huggingface:datasets/saidutta69/fable-5-premium
     modelvault archive  datasets/saidutta69/fable-5-premium
     modelvault archive  https://huggingface.co/datasets/saidutta69/fable-5-premium
 
-One parser (`parse_repo_ref`) maps `owner/name` → model,
-`datasets/owner/name` → dataset, and either full URL form to the same —
-paste-from-browser just works. Bundle-path commands (`verify`, `info`,
-`export`, …) need nothing: they dispatch on the manifest's `artifact_type`,
-which is why that field has existed since schema 1.0.
+`parse_source` dispatches on the provider; the Hugging Face plugin maps
+`owner/name` → model and `datasets/owner/name` → dataset. Bundle-path
+commands (`verify`, `info`, `export`, …) need nothing: they dispatch on the
+manifest's `artifact_type`, which is why that field has existed since
+schema 1.0. See [SOURCES.md](SOURCES.md).
 
 ## 5. Naming and layout
 
@@ -123,15 +125,16 @@ entry, not designed here.
   payload or repo — record nothing, or record explicitly attributed claims.
 - **Croissant metadata snapshot** (`/api/datasets/<id>/croissant`): cheap
   and standards-based; a candidate `source` addition later, not core.
-- **Non-Hub origins** (Zenodo, academic torrents): `source.origin` was
-  built for it, but each origin needs its own resolver — later.
+- **Non-Hugging-Face origins** (Zenodo, academic torrents, ModelScope):
+  the provider registry in [SOURCES.md](SOURCES.md) is the slot; each host
+  is a `SourceProvider`, not a new command.
 
 ## 9. Implementation plan
 
 1. Payload-root parameterization (registry + manifest-honoring readers) —
    touches the ~10 audited sites; model bundles byte-identical before/after.
-2. `parse_repo_ref` + `repo_type` plumbing through `estimate`/`archive`
-   (`dataset_info`/`snapshot_download(repo_type="dataset")`).
+2. Source-ref plumbing through `estimate`/`archive` (Hugging Face provider
+   uses `dataset_info` / `repo_type="dataset"`).
 3. `dataset` registry entry, `dataset_metadata` extractor, relationships
    both directions; schema 1.2.0; update MANIFEST.md and the README.
 4. Dataset smoke checks; validate end-to-end on a small public dataset,

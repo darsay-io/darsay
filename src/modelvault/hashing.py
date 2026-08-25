@@ -54,7 +54,7 @@ def iter_payload_files(payload_root: Path):
         if not p.is_file():
             continue
         rel = p.relative_to(payload_root)
-        # snapshot_download bookkeeping; not part of the model itself
+        # provider transfer caches; not part of the payload
         if rel.parts and rel.parts[0] == ".cache":
             continue
         files.append((rel.as_posix(), p))

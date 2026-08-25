@@ -7,7 +7,7 @@ point `modelvault` (argparse, subcommands in `cli.py`).
 ## Environment
 
 - Python 3.14 venv at `.venv` (`.venv/bin/modelvault`, `.venv/bin/python`).
-- Core dependency is `huggingface_hub` only; `blake3`, `tokenizers`,
+- Core dependency is `huggingface_hub` only (Hugging Face provider); `blake3`, `tokenizers`,
   `transformers`/`torch` are optional extras — every feature that needs them
   must degrade gracefully (record `skipped` with a reason, never crash).
 - No test suite yet. Changes are validated by running the CLI against a tiny
@@ -20,12 +20,14 @@ point `modelvault` (argparse, subcommands in `cli.py`).
 - `src/modelvault/` — `archiver.py` (download + manifest assembly),
   `transfer.py` (pin ledger, reconciliation, resumable/budgeted per-file
   transfer, cooperative lanes/assembly, sibling-blob reuse),
-  `estimate.py` (read-only preflight: sizes/params/disk from Hub metadata),
+  `estimate.py` (read-only preflight: sizes/params/disk from source metadata),
   `verify.py`, `smoke.py`, `export.py` (.mvb.tar), `readme_gen.py`,
   `metadata.py`, `licensing.py`, `hashing.py`, `safetensors_meta.py`,
   `schema.py` (artifact-type registry), `hydrate.py` (ENGINES registry, env
   management, `hydrate`/`run`), `runners/` (standalone per-engine scripts run
   inside hydrated envs — stdlib + engine only, no modelvault imports),
+  `sources.py` (source-ref grammar + provider registry), `providers/`
+  (acquisition backends; Hugging Face is the first plugin),
   `cli.py`.
 - `docs/MANIFEST.md` — field-by-field manifest schema reference.
   `docs/MVB-FORMAT.md` — single-file export format spec.
@@ -41,6 +43,10 @@ point `modelvault` (argparse, subcommands in `cli.py`).
   v0.5.0/schema 1.4.0): idempotent resumable transfer — pin →
   reconcile → plan → transfer → register, `transfer.json` ledger, session
   budgets, local-source adoption.
+  `docs/DISTRIBUTION.md` — how releases are consumed (wheel / pipx / uvx)
+  and why frozen binaries are not the primary install path.
+  `docs/SOURCES.md` — acquisition providers; the public source-ref grammar;
+  Hugging Face as a plugin.
   **Update these whenever manifest fields or the export format change**, and
   bump `SCHEMA_VERSION` (`__init__.py`) / `MVB_FORMAT_VERSION` (`export.py`)
   appropriately (major = breaking).
@@ -72,8 +78,10 @@ point `modelvault` (argparse, subcommands in `cli.py`).
   (`regen`); `curation.md` is the curator's file and must never be
   overwritten once it exists.
 - **Extensibility:** new artifact types are added via the `ARTIFACT_TYPES`
-  registry in `schema.py`, and new inference runtimes via the `ENGINES`
-  registry in `hydrate.py` — not by special-casing elsewhere.
+  registry in `schema.py`, new inference runtimes via the `ENGINES`
+  registry in `hydrate.py`, and new acquisition hosts via `SourceProvider`
+  in `providers/` (registered in `sources.py`) — not by special-casing
+  elsewhere.
 - **Hydration is disposable:** envs live outside bundles (under
   `<vault>/.runtime/`, shared and content-keyed); deleting `hydration.json`
   or any env must never lose archival data. Inference runs are offline

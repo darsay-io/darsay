@@ -377,6 +377,9 @@ a schema change.
 - [QUANTIZATION.md](QUANTIZATION.md) — deciding *what* to archive; its
   proposed `archive --include` subsets compose with this design (the
   expected set is filtered before planning, recorded as `source.subset`).
-- [DESIGN.md](DESIGN.md) — why huggingface_hub stays the transport
-  (`hf_hub_download` owns authentication/Range/retry mechanics; this design owns
-  state, verification, and convergence).
+- [DESIGN.md](DESIGN.md) — why the Hugging Face provider keeps
+  `huggingface_hub` as transport (`hf_hub_download` owns
+  authentication/Range/retry; this design owns state, verification, and
+  convergence).
+- [SOURCES.md](SOURCES.md) — acquisition providers; transfer.py does not
+  import a hosting-service client.

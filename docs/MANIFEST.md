@@ -1,4 +1,4 @@
-# manifest.json — schema reference (v1.4.0)
+# manifest.json — schema reference (v1.5.0)
 
 `manifest.json` is the machine-readable source of truth for a bundle. This
 document describes every field so a bundle remains interpretable without the
@@ -21,9 +21,9 @@ Conventions:
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | Version of this schema (`"1.4.0"`; 1.1 defined `runtime.tested_hardware`; 1.2 added datasets; 1.3 added gate and structured-lineage provenance; 1.4 added incremental-transfer accounting and local-source provenance — all additive). |
+| `schema_version` | Version of this schema (`"1.5.0"`; 1.1 defined `runtime.tested_hardware`; 1.2 added datasets; 1.3 added gate and structured-lineage provenance; 1.4 added incremental-transfer accounting and local-source provenance; 1.5 added `source.provider` / `source.address` — all additive). |
 | `artifact_type` | Registry key driving completeness rules and the payload root (`"model"` or `"dataset"`; future: GGUF packs, papers — see `src/modelvault/schema.py`). |
-| `bundle_id` | `<repo_id lowercased, "/"→"--">@<first 12 of pinned commit>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Dataset bundles take a `datasets--` prefix (`datasets--saidutta69--fable-5-premium@684cb1f849fe`) since model and dataset namespaces can collide on the Hub. Stable, deterministic, unique per (repo, revision). |
+| `bundle_id` | `<bundle directory name>@<first 12 of pinned revision>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Hugging Face dataset bundles take a `datasets--` prefix (`datasets--saidutta69--fable-5-premium@684cb1f849fe`) since model and dataset namespaces can collide on that host. Other providers include their id in the directory name. Stable, deterministic, unique per (source, revision). |
 
 ## `identity`
 
@@ -42,14 +42,16 @@ Provenance of the download.
 
 | Field | Meaning |
 |---|---|
-| `origin` | Hosting service (`huggingface`). |
-| `repo_id`, `upstream_url` | Where it came from. |
+| `origin` | Provider id (`huggingface`). Same value as `provider`; kept so pre-1.5 readers still see a hosting service. |
+| `provider` | Acquisition plugin id (`huggingface`). Added in 1.5.0. |
+| `address` | Canonical source ref (`huggingface:Qwen/Qwen3-0.6B`, `huggingface:datasets/owner/name`). Added in 1.5.0. |
+| `repo_id`, `upstream_url` | Provider-native locator and its web URL. |
 | `revision` | Full commit hash the download is pinned to. Re-archiving this revision reproduces the payload bit-for-bit. |
 | `revision_ref` | The ref that was requested (`main`, a tag, or a hash). |
 | `last_modified_upstream` | Upstream's last-commit time at archive time. |
 | `download_timestamp` | When the transfer completed and the bundle was registered. |
 | `transfer` | Durable summary of incremental acquisition: `sessions`, `started`, `completed`, actual `bytes_network`, `bytes_adopted`, `bytes_local_sources`, and `retries`. One uninterrupted archive has `sessions: 1`; totals may span budgeted, resumed, or offline-assembly runs. |
-| `downloader` | Tool name/version, `huggingface_hub` version, Python version, platform — enough to reconstruct the download environment. |
+| `downloader` | Tool name/version, `provider`, Python version, platform, plus the provider's client library versions (`huggingface_hub` for the Hugging Face plugin) — enough to reconstruct the download environment. |
 | `mirrors_used` | Stable `local:<bundle_id>` references when registered sibling bundles supplied matching LFS blobs (empty list otherwise). Every local copy is independently re-hashed before attribution. |
 | `signatures` | Upstream cryptographic signatures, when provided (null otherwise — Hugging Face repos generally ship none). |
 | `access` | `{gated, notes}`. `gated` is the Hub gate status at archive time: `"auto"` (agree → instant access, contact info shared with the authors), `"manual"` (authors approve each request), or `false`. The gate agreement text lives in Hub repo settings, **not** in the repo tree, so it is not part of the snapshot — `notes` records that. Gates are enforced server-side on file downloads; an archive of a gated repo means the archiving account had accepted the terms. |

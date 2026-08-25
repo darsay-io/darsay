@@ -1,9 +1,9 @@
 """modelvault CLI.
 
-    modelvault estimate Qwen/Qwen3-0.6B         preflight: size, params, disk — no download
-    modelvault estimate datasets/<owner>/<name>  same, for a dataset repo
-    modelvault archive Qwen/Qwen3-0.6B          download + hash + manifest + reports
-    modelvault archive datasets/<owner>/<name>  archive a dataset (payload under data/)
+    modelvault estimate huggingface:Qwen/Qwen3-0.6B   preflight: size, params, disk — no download
+    modelvault estimate datasets/<owner>/<name>       Hugging Face shorthand; same for a dataset
+    modelvault archive huggingface:Qwen/Qwen3-0.6B    download + hash + manifest + reports
+    modelvault archive datasets/<owner>/<name>        archive a dataset (payload under data/)
     modelvault verify  vault/<bundle>           re-hash and compare against manifest
     modelvault smoke   vault/<bundle> [--inference]
     modelvault list                             all bundles in the vault
@@ -17,8 +17,9 @@
     modelvault dehydrate vault/<bundle>         drop the bundle's hydration record
     modelvault envs [--prune]                   list / clean up shared runtime envs
 
-Repo refs use the Hub's own grammar: `owner/name` is a model,
-`datasets/owner/name` a dataset, and either huggingface.co URL form works.
+Source refs are provider-qualified (`huggingface:Qwen/Qwen3-0.6B`,
+`huggingface:datasets/<owner>/<name>`). Unprefixed `owner/name`,
+`datasets/owner/name`, and huggingface.co URLs are Hugging Face shorthand.
 Bundle-path commands dispatch on the manifest's artifact_type.
 """
 
@@ -97,17 +98,14 @@ def _shard_key(value: str) -> tuple[int, int]:
 
 
 def cmd_estimate(args) -> int:
-    from .archiver import parse_repo_ref
-    from .estimate import estimate_repo, print_estimate
+    from .estimate import estimate, print_estimate
 
-    repo_type, repo_id = parse_repo_ref(args.repo_id)
-    est = estimate_repo(
-        repo_id,
+    est = estimate(
+        args.source,
         revision=args.revision,
         vault=_vault_path(args),
         include=args.include,
         variants=args.variants,
-        repo_type=repo_type,
         progress=(lambda *a: None) if args.json else print,
     )
     if args.json:
@@ -118,18 +116,16 @@ def cmd_estimate(args) -> int:
 
 
 def cmd_archive(args) -> int:
-    from .archiver import archive_model, parse_repo_ref
+    from .archiver import archive
     from .transfer import PartialTransfer
 
-    repo_type, repo_id = parse_repo_ref(args.repo_id)
     max_bytes = int(args.max_gb * 1024**3) if args.max_gb is not None else args.max_bytes
     try:
-        bundle = archive_model(
-            repo_id=repo_id,
+        bundle = archive(
+            args.source,
             revision=args.revision,
             vault=_vault_path(args),
             force=args.force,
-            repo_type=repo_type,
             dry_run=args.dry_run,
             max_bytes=max_bytes,
             max_minutes=args.max_minutes,
@@ -240,7 +236,8 @@ def cmd_info(args) -> int:
     bundle = _bundle_dir(args.bundle)
     m = load_manifest(bundle)
     print(f"{m['bundle_id']}  (schema v{m['schema_version']}, {m['artifact_type']})")
-    print(f"  source:     {m['source']['repo_id']} @ {m['source']['revision'][:12]} ({m['source']['origin']})")
+    src = m["source"]
+    print(f"  source:     {src.get('address') or src['repo_id']} @ {src['revision'][:12]} ({src.get('provider') or src['origin']})")
     print(f"  license:    {m['licensing']['spdx_id']}  commercial={m['licensing']['commercial_use']}")
     if m["artifact_type"] == "dataset":
         dm = m["dataset_metadata"]
@@ -293,7 +290,8 @@ def cmd_assemble(args) -> int:
         _vault_path(args),
     )
     ledger = json.loads((bundle / "transfer.json").read_text(encoding="utf-8"))
-    prefix = "datasets/" if ledger["repo_type"] == "dataset" else ""
+    from .sources import source_from_ledger
+    address = ledger.get("address") or source_from_ledger(ledger).canonical
     print(f"\nCombined partial bundle: {bundle}")
     if plan["complete"]:
         print("All payload files are present and verified; run archive once to register the bundle:")
@@ -301,7 +299,7 @@ def cmd_assemble(args) -> int:
         print("Continue the combined transfer with:")
     print(
         f"  modelvault --vault {shlex.quote(str(_vault_path(args)))} "
-        f"archive {shlex.quote(prefix + ledger['repo_id'])}"
+        f"archive {shlex.quote(address)}"
     )
     return 0
 
@@ -387,8 +385,8 @@ def main(argv=None) -> int:
     parser.add_argument("--vault", help="vault root (default: $MODELVAULT_HOME or ./vault)")
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("estimate", help="preflight a repo: size, params, disk headroom — no download")
-    p.add_argument("repo_id", help="e.g. Qwen/Qwen3.8-27B, datasets/<owner>/<name>, or a huggingface.co URL")
+    p = sub.add_parser("estimate", help="preflight a source: size, params, disk headroom — no download")
+    p.add_argument("source", help="e.g. huggingface:Qwen/Qwen3.8-27B, datasets/<owner>/<name>, or a huggingface.co URL")
     p.add_argument("--revision", help="branch, tag, or commit (default: main)")
     p.add_argument("--include", action="append", metavar="GLOB",
                    help="count only payload files matching GLOB (repeatable), "
@@ -398,8 +396,8 @@ def main(argv=None) -> int:
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.set_defaults(func=cmd_estimate)
 
-    p = sub.add_parser("archive", help="download and archive a model or dataset repo as a bundle")
-    p.add_argument("repo_id", help="e.g. Qwen/Qwen3-0.6B, datasets/<owner>/<name>, or a huggingface.co URL")
+    p = sub.add_parser("archive", help="download and archive a model or dataset as a bundle")
+    p.add_argument("source", help="e.g. huggingface:Qwen/Qwen3-0.6B, datasets/<owner>/<name>, or a huggingface.co URL")
     p.add_argument("--revision", help="branch, tag, or commit (default: main; always pinned to the resolved commit)")
     p.add_argument("--force", action="store_true", help="re-archive over an existing bundle")
     p.add_argument("--dry-run", action="store_true",
