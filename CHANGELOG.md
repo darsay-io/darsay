@@ -20,7 +20,10 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
   format versions are unchanged.
 - Documentation: landing README with the project logo, a documentation
   index at [`docs/README.md`](docs/README.md), and consistent navigation
-  across the docs set.
+  across the docs set. Quick start and
+  [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) install from
+  [PyPI](https://pypi.org/project/darsay/)
+  (`pipx install darsay` / `uvx darsay` / `uv tool install darsay`).
 - Project URLs now point at `jeremynorris/darsay`.
 
 ### Added

@@ -7,8 +7,9 @@ when (not) to ship a frozen binary.
 
 ## What to consume
 
-darsay is a **pure-Python** package (no compiled extensions). One wheel
-installs on every platform that has Python 3.10+:
+darsay is published to [PyPI](https://pypi.org/project/darsay/) as a
+**pure-Python** package (no compiled extensions). One wheel installs on
+every platform that has Python 3.10+:
 
 `darsay-0.6.0-py3-none-any.whl`
 
@@ -16,18 +17,21 @@ The only runtime dependency is `huggingface_hub`. Optional extras
 (`fast-hash`, `smoke`, `inference`, `datasets`) stay optional. `darsay
 run` does not need them — hydration builds its own isolated env.
 
-### Recommended: an isolated CLI
+### Recommended: PyPI, as an isolated CLI
 
 ```bash
+pipx install darsay
+uv tool install darsay
 # one-shot, no install
-uvx --from git+https://github.com/jeremynorris/darsay@v0.6.0 \
-    darsay estimate sshleifer/tiny-gpt2
-
-# install into an isolated tool env
-pipx install git+https://github.com/jeremynorris/darsay@v0.6.0
-# or
-uv tool install git+https://github.com/jeremynorris/darsay@v0.6.0
+uvx darsay estimate sshleifer/tiny-gpt2
 ```
+
+`pipx` / `uv tool` / `uvx` are the idiomatic way to consume a Python CLI:
+the tool gets its own environment, it does not pollute the user's global
+site-packages, and upgrades are one command (`pipx upgrade darsay`,
+`uv tool upgrade darsay`).
+
+### Other sources
 
 From a downloaded wheel (GitHub Release asset):
 
@@ -35,15 +39,12 @@ From a downloaded wheel (GitHub Release asset):
 pipx install ./darsay-0.6.0-py3-none-any.whl
 ```
 
-`pipx` / `uv tool` / `uvx` are the idiomatic way to consume a Python CLI:
-the tool gets its own environment, it does not pollute the user's global
-site-packages, and upgrades are one command.
-
-After the first tagged release, the same commands drop the git URL:
+From a git tag or an unreleased commit (not the primary path):
 
 ```bash
-pipx install darsay
-uvx darsay estimate sshleifer/tiny-gpt2
+pipx install git+https://github.com/jeremynorris/darsay@v0.6.0
+uvx --from git+https://github.com/jeremynorris/darsay@v0.6.0 \
+    darsay estimate sshleifer/tiny-gpt2
 ```
 
 ### Editable (development)

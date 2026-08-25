@@ -7,14 +7,15 @@
 </p>
 
 <p align="center">
+  <a href="https://pypi.org/project/darsay/"><img src="https://img.shields.io/pypi/v/darsay?style=flat-square&color=22d3ee" alt="PyPI"></a>
   <a href="https://github.com/jeremynorris/darsay/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/jeremynorris/darsay/ci.yml?style=flat-square&label=CI" alt="CI"></a>
   <a href="https://github.com/jeremynorris/darsay/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-38bdf8?style=flat-square" alt="Apache 2.0"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-00b4ff?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/version-0.6.0-22d3ee?style=flat-square" alt="Version 0.6.0">
   <img src="https://img.shields.io/badge/schema-v1.5.0-0ea5e9?style=flat-square" alt="Manifest schema 1.5.0">
 </p>
 
 <p align="center">
+  <a href="https://pypi.org/project/darsay/">PyPI</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#how-it-works">How it works</a> ·
   <a href="#a-bundle">A bundle</a> ·
@@ -81,14 +82,16 @@ formats are not.
 
 ## Quick start
 
-Requires Python 3.10+. One pure-Python wheel for every OS. Isolated CLI
-tools are the intended way to run a release; see
+Requires Python 3.10+. Install from [PyPI](https://pypi.org/project/darsay/).
+Isolated CLI tools are the intended way to run a release; see
 [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
 
 ```bash
-pipx install git+https://github.com/jeremynorris/darsay@v0.6.0
+pipx install darsay
 # or, one-shot with no install:
-uvx --from git+https://github.com/jeremynorris/darsay@v0.6.0 darsay --help
+uvx darsay --help
+# or:
+uv tool install darsay
 ```
 
 Then:
@@ -385,7 +388,7 @@ Hugging Face is the first plugin, not the product:
 | [Sources](docs/SOURCES.md) | Provider grammar; Hugging Face as a plugin |
 | [Quantization](docs/QUANTIZATION.md) | What is archival vs derived |
 | [Design](docs/DESIGN.md) | Why Python; why longevity lives in the formats |
-| [Distribution](docs/DISTRIBUTION.md) | Wheels, pipx/uvx, and why not frozen binaries |
+| [Distribution](docs/DISTRIBUTION.md) | PyPI, pipx/uvx, and why not frozen binaries |
 | [Testing](docs/TESTING.md) | Unit / integration / opt-in Hub e2e |
 
 ## Design

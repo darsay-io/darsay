@@ -65,7 +65,7 @@ the CLI is gone, as long as these are followed.
 | Document | When to open it |
 |---|---|
 | [**Design**](DESIGN.md) | Why Python. Why longevity is in the formats, not a frozen binary. |
-| [**Distribution**](DISTRIBUTION.md) | pipx / uvx / wheel. Why frozen executables are not the primary path. |
+| [**Distribution**](DISTRIBUTION.md) | PyPI, pipx / uvx / wheel. Why frozen executables are not the primary path. |
 | [**Testing**](TESTING.md) | Unit / integration / opt-in Hub e2e. What the suite is there to keep. |
 
 ## Invariants
