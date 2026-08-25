@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from modelvault.estimate import _format_breakdown
+from darsay.estimate import _format_breakdown
 
 
 def test_format_breakdown_sorts_by_size():

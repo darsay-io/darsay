@@ -153,7 +153,7 @@ def _measured_row_counts(payload_root: Path) -> dict:
         import pyarrow.parquet as pq
     except ImportError:
         return {"status": "skipped",
-                "reason": "pyarrow not installed (pip install modelvault[datasets])"}
+                "reason": "pyarrow not installed (pip install darsay[datasets])"}
     rows = {}
     errors = {}
     for p in parquet_files:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from modelvault.hydrate import dehydrate_bundle, hydrate_bundle, list_envs, prune_envs
+from darsay.hydrate import dehydrate_bundle, hydrate_bundle, list_envs, prune_envs
 from tests.conftest import silent
 from tests.integration.conftest import archive_quiet
 from tests.payloads import model_files
@@ -12,7 +12,7 @@ def test_hydrate_dry_run_creates_nothing(vault, test_provider, monkeypatch, tmp_
     test_provider.add_repo("acme/toy", model_files())
     bundle = archive_quiet("test:acme/toy", vault=vault)
     runtime = tmp_path / "runtime"
-    monkeypatch.setenv("MODELVAULT_RUNTIME", str(runtime))
+    monkeypatch.setenv("DARSAY_RUNTIME", str(runtime))
     record = hydrate_bundle(bundle, dry_run=True, progress=silent)
     assert record["dry_run"] is True
     assert record["engine"] == "transformers"
@@ -57,7 +57,7 @@ def test_prune_envs_only_removes_unreferenced(vault, tmp_path, monkeypatch):
         )
     )
     (env_dir / "dummy").write_bytes(b"x" * 10)
-    monkeypatch.setenv("MODELVAULT_RUNTIME", str(runtime))
+    monkeypatch.setenv("DARSAY_RUNTIME", str(runtime))
     envs = list_envs(vault, progress=silent)
     assert envs[0]["used_by"] == []
     freed = prune_envs(vault, progress=silent)

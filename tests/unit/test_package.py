@@ -3,9 +3,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from modelvault import SCHEMA_VERSION, __version__
-from modelvault.export import MVB_FORMAT_VERSION
-from modelvault.hydrate import ENGINES
+from darsay import SCHEMA_VERSION, __version__
+from darsay.export import MVB_FORMAT_VERSION
+from darsay.hydrate import ENGINES
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -30,9 +30,9 @@ def test_mvb_format_version_has_major():
 
 
 def test_runner_scripts_are_packaged():
-    import modelvault
+    import darsay
 
-    root = Path(modelvault.__file__).parent / "runners"
+    root = Path(darsay.__file__).parent / "runners"
     missing = [spec["runner"] for spec in ENGINES.values() if not (root / spec["runner"]).is_file()]
     assert missing == []
 

@@ -7,16 +7,16 @@
 archive) — this document is about *how the bytes get here* when "what" is
 tens of gigabytes to terabytes.
 
-`modelvault archive` is now an operation you can interrupt at any
+`darsay archive` is now an operation you can interrupt at any
 moment, re-run any number of times, and spread across days of budgeted
 sessions — and every run does the minimum network work required to converge
 on the same verified bundle:
 
 ```bash
-modelvault archive Qwen/Qwen3.8-27B --max-gb 10     # tonight: first 10 GB
-modelvault archive Qwen/Qwen3.8-27B --max-gb 10     # tomorrow: next 10 GB
-modelvault archive Qwen/Qwen3.8-27B --dry-run       # what's left? (rsync -n)
-modelvault archive Qwen/Qwen3.8-27B                 # finish, verify, register
+darsay archive Qwen/Qwen3.8-27B --max-gb 10     # tonight: first 10 GB
+darsay archive Qwen/Qwen3.8-27B --max-gb 10     # tomorrow: next 10 GB
+darsay archive Qwen/Qwen3.8-27B --dry-run       # what's left? (rsync -n)
+darsay archive Qwen/Qwen3.8-27B                 # finish, verify, register
 ```
 
 No new resume subcommand or mode: **idempotent convergence is the default
@@ -65,7 +65,7 @@ around that one line.
    right there — not in a giant pass at the end (hashing 500 GB is itself
    hours, and end-of-archive verification checks week-old bytes). The
    recorded hash is reused for manifest assembly; post-registration rot is
-   `modelvault verify`'s job, exactly as today.
+   `darsay verify`'s job, exactly as today.
 4. **Never fetch a byte you can prove you have.** Verified files are never
    re-downloaded. Present-but-unrecorded files are hashed and *adopted* if
    they match. Partial files resume with Range requests from the byte where
@@ -129,7 +129,7 @@ upstream mismatch and set aside — it never silently blocks the rest of the
 transfer. Small files (< 8 MiB) may fetch through a bounded worker pool
 (`--jobs`, default 4 — dataset bundles with thousands of parquet shards
 need this); large files download sequentially, one saturating stream at a
-time. modelvault deliberately selects `hf_hub_download`'s HTTP path even
+time. darsay deliberately selects `hf_hub_download`'s HTTP path even
 when `hf_xet` is installed: current Xet aborts discard in-flight
 reconstruction state, while HTTP Range leaves a durable `.incomplete` file
 that survives budgets, SIGINT, process restarts, and filesystem copies. The
@@ -162,7 +162,7 @@ wrappers can loop; `1` — error.
 
 ```bash
 # unattended completion over nightly cron: rerun until exit 0
-modelvault archive Qwen/Qwen3.8-27B --max-minutes 240 || [ $? -eq 10 ]
+darsay archive Qwen/Qwen3.8-27B --max-minutes 240 || [ $? -eq 10 ]
 ```
 
 ## 4. `transfer.json` — the transfer ledger
@@ -219,7 +219,7 @@ payload `.cache` and `transfer.json`—under another vault's same two-level
 
 ```bash
 cp -a /Volumes/USB/qwen--qwen3-0.6b/c1899de289a0 /srv/vault/qwen--qwen3-0.6b/
-modelvault --vault /srv/vault archive Qwen/Qwen3-0.6B
+darsay --vault /srv/vault archive Qwen/Qwen3-0.6B
 ```
 
 The copied lock, if any, is recognized as belonging to the original physical
@@ -263,9 +263,9 @@ N fetches lane N first, then cycles through every other lane. For three people:
 
 ```bash
 # Alice, Bob, and Carol use the same repo/revision and budget, but distinct starts.
-modelvault archive Qwen/Qwen3.8-27B --shard 1/3 --max-gb 20
-modelvault archive Qwen/Qwen3.8-27B --shard 2/3 --max-gb 20
-modelvault archive Qwen/Qwen3.8-27B --shard 3/3 --max-gb 20
+darsay archive Qwen/Qwen3.8-27B --shard 1/3 --max-gb 20
+darsay archive Qwen/Qwen3.8-27B --shard 2/3 --max-gb 20
+darsay archive Qwen/Qwen3.8-27B --shard 3/3 --max-gb 20
 ```
 
 The plan prints the chosen lane's file count, byte size, percentage, and full
@@ -276,8 +276,8 @@ starting thirds without a different Range protocol.
 Matching partials can then be combined with no network access:
 
 ```bash
-modelvault --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle> /usb/carol/<bundle>
-modelvault --vault ./combined archive Qwen/Qwen3.8-27B
+darsay --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle> /usb/carol/<bundle>
+darsay --vault ./combined archive Qwen/Qwen3.8-27B
 ```
 
 `assemble` requires identical repo/type/pin/expected inventories before it
@@ -302,7 +302,7 @@ with zero payload network bytes.
 Budgets are approximate and checked at received-chunk boundaries: active
 small-file workers and the chunk that crosses a cap may overshoot it. The
 in-flight file is left as a
-resumable partial, counted toward the next session. `modelvault list` grows
+resumable partial, counted toward the next session. `darsay list` grows
 an in-progress row for bundles with a ledger but no manifest —
 `archiving: 61% (34.1/55.6 GB, 9/15 files verified)` — so the vault's
 overall state is visible without running anything.
@@ -355,7 +355,7 @@ a schema change.
 
 - `huggingface_hub` 1.18 replaced stable local-dir incomplete names with
   process-unique temporary files and removes them on failure. Because
-  modelvault holds a stronger per-bundle lock, its transport compatibility
+  darsay holds a stronger per-bundle lock, its transport compatibility
   wrapper restores a stable bundle-local incomplete file, then delegates the
   actual HTTP Range/retry work to the Hub client's `http_get`. Core now
   requires `huggingface_hub>=1.23`, which also reports actual network bytes

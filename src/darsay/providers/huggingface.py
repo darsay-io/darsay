@@ -1,6 +1,6 @@
 """Hugging Face Hub acquisition backend.
 
-The public CLI does not mention this module. ``modelvault archive <source>``
+The public CLI does not mention this module. ``darsay archive <source>``
 dispatches here when the source is a Hub URL, a ``huggingface:`` / ``hf:``
 ref, or the unprefixed Hub shorthand (``owner/name``, ``datasets/owner/name``).
 """
@@ -231,11 +231,11 @@ class HuggingFaceProvider(SourceProvider):
         """Restore safe same-bundle partial resume around ``hf_hub_download``.
 
         huggingface_hub 1.18 switched to process-unique temporary files and
-        intentionally stopped preserving cross-call partials. modelvault has a
+        intentionally stopped preserving cross-call partials. darsay has a
         stronger per-bundle lock, so a stable local-dir incomplete file is safe
         here. The Hub client still owns metadata, HTTP Range requests, retries,
         Xet, and the final move; this wrapper only restores its former temp-file
-        lifetime while the modelvault lock is held.
+        lifetime while the darsay lock is held.
         """
         import os
 
@@ -325,14 +325,14 @@ class HuggingFaceProvider(SourceProvider):
             def __init__(self, *args, **kwargs):
                 name = str(kwargs.get("name") or "")
                 desc = str(kwargs.get("desc") or "")
-                self._modelvault_xet = name.startswith("huggingface_hub.xet_get") or (
+                self._darsay_xet = name.startswith("huggingface_hub.xet_get") or (
                     "reconstructing file" in desc
                 )
                 super().__init__(*args, **kwargs)
 
             def update_transfer(self, amount=1):
-                counter.add(amount, defer_only=self._modelvault_xet)
-                if self._modelvault_xet and counter.pending_stop is not None:
+                counter.add(amount, defer_only=self._darsay_xet)
+                if self._darsay_xet and counter.pending_stop is not None:
                     from huggingface_hub.utils._xet import abort_xet_session
 
                     abort_xet_session()
@@ -467,7 +467,7 @@ class HuggingFaceProvider(SourceProvider):
     def partial_bytes(self, payload_dir: Path, expected: dict) -> int:
         """Best-effort byte count for Hub local-dir incomplete files.
 
-        Used by transfer plan / ``modelvault list``, so computing the path
+        Used by transfer plan / ``darsay list``, so computing the path
         must not create Hub bookkeeping directories as
         ``get_local_download_paths`` does.
         """
@@ -503,7 +503,7 @@ class HuggingFaceProvider(SourceProvider):
         return (
             f"error: {source.artifact_type} {source.locator} is gated on {self.label} "
             "and this account has not been granted access. The gate is enforced "
-            "server-side; modelvault does not bypass it.\n"
+            "server-side; darsay does not bypass it.\n"
             f"Visit {source.url} to review and accept the author's terms, "
             "authenticate with `hf auth login`, then re-run.\n"
             f"{closing}"

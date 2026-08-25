@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from modelvault.safetensors_meta import read_header, summarize_safetensors
+from darsay.safetensors_meta import read_header, summarize_safetensors
 from tests.payloads import make_safetensors
 
 

@@ -77,7 +77,7 @@ def export_bundle(bundle_dir: Path, output_dir: Path, progress=print) -> Path:
         "bundle_hash": manifest["inventory"]["bundle_hash"],
         "payload_file_count": manifest["inventory"]["file_count"],
         "payload_size_bytes": manifest["inventory"]["total_size_bytes"],
-        "written_by": {"tool": "modelvault"},
+        "written_by": {"tool": "darsay"},
     }
     marker_bytes = (json.dumps(marker, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
@@ -119,7 +119,7 @@ def _read_marker(tar_path: Path) -> dict:
     with tarfile.open(tar_path, "r") as tar:
         first = tar.next()
         if first is None or Path(first.name).name != MARKER_NAME:
-            raise SystemExit(f"error: {tar_path} is not a modelvault export (missing leading {MARKER_NAME})")
+            raise SystemExit(f"error: {tar_path} is not a darsay export (missing leading {MARKER_NAME})")
         marker = json.load(tar.extractfile(first))
     major = str(marker.get("mvb_format_version", "")).split(".")[0]
     if major != MVB_FORMAT_VERSION.split(".")[0]:

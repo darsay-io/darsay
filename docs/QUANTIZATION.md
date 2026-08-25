@@ -2,7 +2,7 @@
 
 # Quantization policy — what gets archived, what gets derived
 
-How modelvault treats a model that ships in many precisions: which artifact
+How darsay treats a model that ships in many precisions: which artifact
 is the canonical bundle, when a quantized repo deserves archiving in its own
 right, and how "I want to run it at 4 bits" is served without archiving
 anything extra.
@@ -65,13 +65,13 @@ unit; see `--include` below).
 
 ## 4. Mechanics
 
-### Implemented: preflight sizing (`modelvault estimate`)
+### Implemented: preflight sizing (`darsay estimate`)
 
 Read-only against the Hub API — no download, nothing written:
 
-    modelvault estimate Qwen/Qwen3.8-27B                 # size/params/disk for the master
-    modelvault estimate Qwen/Qwen3.8-27B --variants      # + quantized ecosystem, sized
-    modelvault estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'   # one quant of a pack
+    darsay estimate Qwen/Qwen3.8-27B                 # size/params/disk for the master
+    darsay estimate Qwen/Qwen3.8-27B --variants      # + quantized ecosystem, sized
+    darsay estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'   # one quant of a pack
 
 Exact numbers (file sizes, param counts by dtype) come from upstream
 metadata; derived numbers (RAM x1.2, download scratch) are labeled

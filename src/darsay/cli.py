@@ -1,21 +1,21 @@
-"""modelvault CLI.
+"""darsay — the genesis machine of archives.
 
-    modelvault estimate huggingface:Qwen/Qwen3-0.6B   preflight: size, params, disk — no download
-    modelvault estimate datasets/<owner>/<name>       Hugging Face shorthand; same for a dataset
-    modelvault archive huggingface:Qwen/Qwen3-0.6B    download + hash + manifest + reports
-    modelvault archive datasets/<owner>/<name>        archive a dataset (payload under data/)
-    modelvault verify  vault/<bundle>           re-hash and compare against manifest
-    modelvault smoke   vault/<bundle> [--inference]
-    modelvault list                             all bundles in the vault
-    modelvault info    vault/<bundle>           quick manifest summary
-    modelvault regen   vault/<bundle>           rebuild README.md after editing curation.md
-    modelvault export  vault/<bundle> [-o DIR]  pack into a single deterministic .mvb.tar
-    modelvault import  <file.mvb.tar>           unpack + verify into the vault
-    modelvault assemble <partial> [<partial>…]  combine matching partials offline
-    modelvault hydrate vault/<bundle>           build a runnable env for the bundle
-    modelvault run     vault/<bundle> [PROMPT]  hydrate if needed, then generate (offline)
-    modelvault dehydrate vault/<bundle>         drop the bundle's hydration record
-    modelvault envs [--prune]                   list / clean up shared runtime envs
+    darsay estimate huggingface:Qwen/Qwen3-0.6B   preflight: size, params, disk — no download
+    darsay estimate datasets/<owner>/<name>       Hugging Face shorthand; same for a dataset
+    darsay archive huggingface:Qwen/Qwen3-0.6B    download + hash + manifest + reports
+    darsay archive datasets/<owner>/<name>        archive a dataset (payload under data/)
+    darsay verify  vault/<bundle>           re-hash and compare against manifest
+    darsay smoke   vault/<bundle> [--inference]
+    darsay list                             all bundles in the vault
+    darsay info    vault/<bundle>           quick manifest summary
+    darsay regen   vault/<bundle>           rebuild README.md after editing curation.md
+    darsay export  vault/<bundle> [-o DIR]  pack into a single deterministic .mvb.tar
+    darsay import  <file.mvb.tar>           unpack + verify into the vault
+    darsay assemble <partial> [<partial>…]  combine matching partials offline
+    darsay hydrate vault/<bundle>           build a runnable env for the bundle
+    darsay run     vault/<bundle> [PROMPT]  hydrate if needed, then generate (offline)
+    darsay dehydrate vault/<bundle>         drop the bundle's hydration record
+    darsay envs [--prune]                   list / clean up shared runtime envs
 
 Source refs are provider-qualified (`huggingface:Qwen/Qwen3-0.6B`,
 `huggingface:datasets/<owner>/<name>`). Unprefixed `owner/name`,
@@ -37,13 +37,13 @@ from . import __version__
 
 
 def _vault_path(args) -> Path:
-    return Path(args.vault or os.environ.get("MODELVAULT_HOME") or "vault")
+    return Path(args.vault or os.environ.get("DARSAY_HOME") or "vault")
 
 
 def _bundle_dir(path_str: str) -> Path:
     bundle = Path(path_str)
     if not (bundle / "manifest.json").is_file():
-        sys.exit(f"error: no manifest.json in {bundle} — not a modelvault bundle")
+        sys.exit(f"error: no manifest.json in {bundle} — not a darsay bundle")
     return bundle
 
 
@@ -144,7 +144,7 @@ def cmd_archive(args) -> int:
     print(f"  manifest:     {bundle / 'manifest.json'}")
     print(f"  readme:       {bundle / 'README.md'}")
     print(f"  verification: {bundle / 'VERIFICATION.md'}")
-    print(f"  curation:     {bundle / 'curation.md'}  <- edit this, then `modelvault regen`")
+    print(f"  curation:     {bundle / 'curation.md'}  <- edit this, then `darsay regen`")
     return 0
 
 
@@ -261,7 +261,7 @@ def cmd_info(args) -> int:
                         if last else "no runs yet")
             print(f"  hydration:  {hyd['engine']} in env {hyd['env']['key']} — {run_note}")
         else:
-            print(f"  hydration:  not hydrated (modelvault hydrate {bundle})")
+            print(f"  hydration:  not hydrated (darsay hydrate {bundle})")
     m["archive"]["last_accessed"] = utc_now()
     write_manifest(bundle, m)
     return 0
@@ -298,7 +298,7 @@ def cmd_assemble(args) -> int:
     else:
         print("Continue the combined transfer with:")
     print(
-        f"  modelvault --vault {shlex.quote(str(_vault_path(args)))} "
+        f"  darsay --vault {shlex.quote(str(_vault_path(args)))} "
         f"archive {shlex.quote(address)}"
     )
     return 0
@@ -358,7 +358,7 @@ def cmd_envs(args) -> int:
         return 0
     envs = list_envs(vault)
     if not envs:
-        print(f"No runtime envs under {vault}/.runtime/envs/ (or $MODELVAULT_RUNTIME)")
+        print(f"No runtime envs under {vault}/.runtime/envs/ (or $DARSAY_RUNTIME)")
         return 0
     for env in envs:
         used = ", ".join(env["used_by"]) or "UNREFERENCED (candidate for --prune)"
@@ -379,10 +379,10 @@ def cmd_regen(args) -> int:
 
 
 def main(argv=None) -> int:
-    parser = argparse.ArgumentParser(prog="modelvault", description=__doc__,
+    parser = argparse.ArgumentParser(prog="darsay", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--version", action="version", version=f"modelvault {__version__}")
-    parser.add_argument("--vault", help="vault root (default: $MODELVAULT_HOME or ./vault)")
+    parser.add_argument("--version", action="version", version=f"darsay {__version__}")
+    parser.add_argument("--vault", help="vault root (default: $DARSAY_HOME or ./vault)")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("estimate", help="preflight a source: size, params, disk headroom — no download")
@@ -440,7 +440,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("hydrate", help="build (or reuse) a runnable local env for a bundle")
     p.add_argument("bundle")
     p.add_argument("--engine", help="runtime engine (default: auto-detect from the payload)")
-    p.add_argument("--python", help="interpreter for the env (default: $MODELVAULT_PYTHON or this python)")
+    p.add_argument("--python", help="interpreter for the env (default: $DARSAY_PYTHON or this python)")
     p.add_argument("--weights", help="payload weights file for single-file engines, e.g. model/foo.gguf")
     p.add_argument("--force", action="store_true", help="rebuild the env even if it exists")
     p.add_argument("--dry-run", action="store_true", help="show the plan without touching anything")

@@ -2,9 +2,9 @@
 
 # .mvb.tar — single-file bundle format (v1.1)
 
-A modelvault export packs one bundle into one file for offsite storage and
+A darsay export packs one bundle into one file for offsite storage and
 transfer. The format is a plain tar, deliberately boring: any standard tar
-tool can list and unpack it decades from now, with or without modelvault.
+tool can list and unpack it decades from now, with or without darsay.
 
 ## Container
 
@@ -33,7 +33,7 @@ tool can list and unpack it decades from now, with or without modelvault.
   "bundle_hash": {"algorithm": "sha256-of-sorted-sha256-lines", "value": "…", "covers": "…"},
   "payload_file_count": 10,
   "payload_size_bytes": 1519114970,
-  "written_by": {"tool": "modelvault"}
+  "written_by": {"tool": "darsay"}
 }
 ```
 
@@ -76,7 +76,7 @@ Three independent layers:
 | Record | `schema_version` in the embedded manifest | Interpreted per [MANIFEST.md](MANIFEST.md). |
 | Content | the pinned commit in `bundle_id` | Different upstream revisions are different bundles. |
 
-## Import procedure (what `modelvault import` guarantees)
+## Import procedure (what `darsay import` guarantees)
 
 1. Stream the first entry; refuse anything whose leading entry is not a
    compatible `.mvb.json` marker.
@@ -94,7 +94,7 @@ Three independent layers:
 A corrupted archive — even a single flipped byte anywhere in the weights — is
 therefore refused at import time, before the bundle can enter the vault.
 
-## Manual recovery without modelvault
+## Manual recovery without darsay
 
 ```bash
 tar -tf qwen--qwen3-0.6b@c1899de289a0.mvb.tar     # list

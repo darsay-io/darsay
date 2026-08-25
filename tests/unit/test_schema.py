@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from modelvault.schema import (
+from darsay.schema import (
     ARTIFACT_TYPES,
     check_completeness,
     payload_root,

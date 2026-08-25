@@ -3,7 +3,7 @@
 A source provider is one hosting service that can pin a revision, list files,
 and fetch bytes. Hugging Face is the first implementation; adding another is
 a new class in this package plus one line in ``sources._ensure_providers``.
-The public CLI (``modelvault archive <source>``) does not change.
+The public CLI (``darsay archive <source>``) does not change.
 """
 
 from __future__ import annotations

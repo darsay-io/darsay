@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 
-from modelvault.archiver import load_manifest
-from modelvault.hashing import hash_file
-from modelvault.readme_gen import write_bundle_readme
+from darsay.archiver import load_manifest
+from darsay.hashing import hash_file
+from darsay.readme_gen import write_bundle_readme
 from tests.integration.conftest import archive_quiet
 from tests.payloads import model_files
 
@@ -18,7 +18,7 @@ def test_payload_immutability_across_tool_writes(vault, test_provider):
         for p in (bundle / "model").rglob("*")
         if p.is_file()
     }
-    from modelvault.verify import verify_bundle
+    from darsay.verify import verify_bundle
     from tests.conftest import silent
 
     verify_bundle(bundle, progress=silent)

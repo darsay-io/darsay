@@ -2,7 +2,7 @@
 
 # Design rationale — implementation choices
 
-Why modelvault is written in Python, and why the archive's longevity does
+Why darsay is written in Python, and why the archive's longevity does
 not depend on that choice. Decision reviewed 2026-08 at v0.3.0 (~2,600
 lines, one runtime dependency); revisit criteria at the end.
 
@@ -47,7 +47,7 @@ lines of CLI.
 ## Accepted costs
 
 - The tool needs a Python to run, and hydration needs an interpreter to
-  build env interpreters (`$MODELVAULT_PYTHON` / `--python`; `uv`, when
+  build env interpreters (`$DARSAY_PYTHON` / `--python`; `uv`, when
   present, can fetch interpreters itself).
 - Distribution is a pure-Python wheel (`pipx` / `uvx` / `pip`), not a
   single static binary. Frozen executables are possible but a poor
@@ -62,7 +62,7 @@ is deliberately carried by the artifacts, not the software:
 - the manifest is plain JSON, documented field-by-field
   ([MANIFEST.md](MANIFEST.md));
 - the export is a plain uncompressed tar with a documented layout and a
-  manual-recovery procedure that needs no modelvault
+  manual-recovery procedure that needs no darsay
   ([MVB-FORMAT.md](MVB-FORMAT.md));
 - the payload is a pristine upstream snapshot any HF-compatible loader uses
   directly.

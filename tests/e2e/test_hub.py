@@ -1,4 +1,4 @@
-"""Live Hugging Face Hub path. Opt-in: ``pytest --run-e2e`` or ``MODELVAULT_E2E=1``.
+"""Live Hugging Face Hub path. Opt-in: ``pytest --run-e2e`` or ``DARSAY_E2E=1``.
 
 Uses ``sshleifer/tiny-gpt2`` — the project's documented scratch repo — so the
 run is small (a few megabytes) and still exercises estimate → archive →
@@ -7,11 +7,11 @@ verify → export → import against a real provider.
 
 from __future__ import annotations
 
-from modelvault.archiver import load_manifest
-from modelvault.cli import main
-from modelvault.export import export_bundle, import_bundle
-from modelvault.hashing import hash_file
-from modelvault.verify import verify_bundle
+from darsay.archiver import load_manifest
+from darsay.cli import main
+from darsay.export import export_bundle, import_bundle
+from darsay.hashing import hash_file
+from darsay.verify import verify_bundle
 from tests.conftest import silent
 
 TINY = "sshleifer/tiny-gpt2"

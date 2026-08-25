@@ -6,7 +6,7 @@ import tarfile
 
 import pytest
 
-from modelvault.export import (
+from darsay.export import (
     EXPORT_EXCLUDE,
     MARKER_NAME,
     MVB_FORMAT_VERSION,

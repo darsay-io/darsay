@@ -1,14 +1,14 @@
 <h1 align="center">
-  <img src="docs/modelvault-logo.png" alt="ModelVault" width="880">
+  <img src="docs/darsay-logo.png" alt="darsay" width="880">
 </h1>
 
 <p align="center">
-  <strong>Museum-grade archives of full model ecosystems — still directly usable.</strong>
+  <strong>the genesis machine of archives</strong>
 </p>
 
 <p align="center">
-  <a href="https://github.com/jeremynorris/modelvault/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/jeremynorris/modelvault/ci.yml?style=flat-square&label=CI" alt="CI"></a>
-  <a href="https://github.com/jeremynorris/modelvault/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-38bdf8?style=flat-square" alt="Apache 2.0"></a>
+  <a href="https://github.com/jeremynorris/darsay/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/jeremynorris/darsay/ci.yml?style=flat-square&label=CI" alt="CI"></a>
+  <a href="https://github.com/jeremynorris/darsay/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-38bdf8?style=flat-square" alt="Apache 2.0"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-00b4ff?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/version-0.6.0-22d3ee?style=flat-square" alt="Version 0.6.0">
   <img src="https://img.shields.io/badge/schema-v1.5.0-0ea5e9?style=flat-square" alt="Manifest schema 1.5.0">
@@ -25,7 +25,7 @@
 
 ---
 
-ModelVault pulls a model or dataset from a source (Hugging Face today) at a
+darsay pulls a model or dataset from a source (Hugging Face today) at a
 **pinned revision**, hashes every file, cross-checks upstream checksums,
 captures the license verbatim, extracts metadata from the payload itself, and
 writes a bundle that any Hugging Face-compatible loader uses **as-is**.
@@ -33,12 +33,12 @@ writes a bundle that any Hugging Face-compatible loader uses **as-is**.
 When you want the archived model to speak:
 
 ```bash
-modelvault run vault/qwen--qwen3-0.6b/<rev> "Say hello"
+darsay run vault/qwen--qwen3-0.6b/<rev> "Say hello"
 ```
 
 That command hydrates an isolated environment, runs **offline**, and leaves
 the payload byte-immutable. Before you commit tens of gigabytes,
-`modelvault estimate` prices the source from upstream metadata alone.
+`darsay estimate` prices the source from upstream metadata alone.
 
 <table>
 <tr>
@@ -75,7 +75,7 @@ FP8, the community GGUF people actually ran — cannot be regenerated bit-exact
 from the master. If it matters what the world used, the bytes themselves must
 be kept, with a manifest that records facts and never fabricates them.
 
-A ModelVault bundle is that record: **immutable payload + machine-readable
+A darsay bundle is that record: **immutable payload + machine-readable
 manifest + derived views + one curator file**. The tool is replaceable. The
 formats are not.
 
@@ -86,17 +86,17 @@ tools are the intended way to run a release; see
 [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
 
 ```bash
-pipx install git+https://github.com/jeremynorris/modelvault@v0.6.0
+pipx install git+https://github.com/jeremynorris/darsay@v0.6.0
 # or, one-shot with no install:
-uvx --from git+https://github.com/jeremynorris/modelvault@v0.6.0 modelvault --help
+uvx --from git+https://github.com/jeremynorris/darsay@v0.6.0 darsay --help
 ```
 
 Then:
 
 ```bash
-modelvault estimate Qwen/Qwen3-0.6B
-modelvault archive  Qwen/Qwen3-0.6B
-modelvault run      vault/qwen--qwen3-0.6b/<rev> "Say hello"
+darsay estimate Qwen/Qwen3-0.6B
+darsay archive  Qwen/Qwen3-0.6B
+darsay run      vault/qwen--qwen3-0.6b/<rev> "Say hello"
 ```
 
 <details>
@@ -112,13 +112,13 @@ python3 -m venv .venv
 .venv/bin/pytest                                # unit + integration; see docs/TESTING.md
 ```
 
-The extras only serve in-process smoke tests. `modelvault run` needs none of
+The extras only serve in-process smoke tests. `darsay run` needs none of
 them — hydration builds its own isolated env per engine.
 
 </details>
 
 The vault root defaults to `./vault` (override with `--vault` or
-`$MODELVAULT_HOME`). Bundles are gitignored — they live on disk or in your
+`$DARSAY_HOME`). Bundles are gitignored — they live on disk or in your
 backup tier, not in this repo.
 
 ## How it works
@@ -141,7 +141,7 @@ flowchart LR
 3. **Keep** — the payload never changes again. Metadata at the bundle root
    is mutable by design.
 4. **Use** — point any HF-compatible loader at `<bundle>/model`, or
-   `modelvault run` for one-command offline inference. `export` packs a
+   `darsay run` for one-command offline inference. `export` packs a
    deterministic `.mvb.tar` for offsite storage.
 
 ## A bundle
@@ -175,7 +175,7 @@ archiving**; the bundle hash covers it alone. To use a model, point
 | `licensing` | SPDX id, license files, commercial / redistribution / modification / attribution flags, patent grant, trademark terms |
 | `inventory` | per-file size + SHA-256 (+BLAKE3), upstream checksum match, deterministic bundle hash |
 | `model_metadata` | parameter count by dtype (from safetensors headers — no torch), architecture, context, tokenizer, languages |
-| `runtime` | engines from shipped formats, estimated min RAM/VRAM, measured hardware from `modelvault run` |
+| `runtime` | engines from shipped formats, estimated min RAM/VRAM, measured hardware from `darsay run` |
 | `validation` | checksum verification, completeness, tokenizer + inference smoke tests |
 | `relationships` | parents, finetunes, known quantizations + GGUF repos (snapshot at archive time) |
 | `archive` | date, host, storage tier, backups, last integrity check |
@@ -190,27 +190,27 @@ reference: [docs/MANIFEST.md](docs/MANIFEST.md).
 ## Commands
 
 ```bash
-modelvault estimate Qwen/Qwen3.8-27B --variants          # preflight: size, params, disk, quants
-modelvault estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
-modelvault estimate datasets/saidutta69/fable-5-premium  # Hub dataset address grammar
-modelvault archive  Qwen/Qwen3-0.6B                      # download + hash + manifest
-modelvault archive  datasets/saidutta69/fable-5-premium  # dataset bundle: payload under data/
-modelvault archive  Qwen/Qwen3.8-27B --max-gb 10         # pause cleanly; rerun to resume
-modelvault archive  Qwen/Qwen3.8-27B --dry-run           # verified / partial / missing plan
-modelvault archive  Qwen/Qwen3.8-27B --shard 1/3 --max-gb 20
-modelvault --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle>
-modelvault verify   vault/qwen--qwen3-0.6b/<rev>
-modelvault smoke    vault/qwen--qwen3-0.6b/<rev> [--inference]
-modelvault list
-modelvault info     vault/qwen--qwen3-0.6b/<rev>
-modelvault regen    vault/qwen--qwen3-0.6b/<rev>         # rebuild README after editing curation.md
-modelvault export   vault/qwen--qwen3-0.6b/<rev> -o /backups
-modelvault import   /backups/qwen--qwen3-0.6b@<rev>.mvb.tar
+darsay estimate Qwen/Qwen3.8-27B --variants          # preflight: size, params, disk, quants
+darsay estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
+darsay estimate datasets/saidutta69/fable-5-premium  # Hub dataset address grammar
+darsay archive  Qwen/Qwen3-0.6B                      # download + hash + manifest
+darsay archive  datasets/saidutta69/fable-5-premium  # dataset bundle: payload under data/
+darsay archive  Qwen/Qwen3.8-27B --max-gb 10         # pause cleanly; rerun to resume
+darsay archive  Qwen/Qwen3.8-27B --dry-run           # verified / partial / missing plan
+darsay archive  Qwen/Qwen3.8-27B --shard 1/3 --max-gb 20
+darsay --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle>
+darsay verify   vault/qwen--qwen3-0.6b/<rev>
+darsay smoke    vault/qwen--qwen3-0.6b/<rev> [--inference]
+darsay list
+darsay info     vault/qwen--qwen3-0.6b/<rev>
+darsay regen    vault/qwen--qwen3-0.6b/<rev>         # rebuild README after editing curation.md
+darsay export   vault/qwen--qwen3-0.6b/<rev> -o /backups
+darsay import   /backups/qwen--qwen3-0.6b@<rev>.mvb.tar
 
-modelvault run      vault/qwen--qwen3-0.6b/<rev> "Say hello"
-modelvault hydrate  vault/qwen--qwen3-0.6b/<rev> [--dry-run]
-modelvault envs [--prune]
-modelvault dehydrate vault/qwen--qwen3-0.6b/<rev>
+darsay run      vault/qwen--qwen3-0.6b/<rev> "Say hello"
+darsay hydrate  vault/qwen--qwen3-0.6b/<rev> [--dry-run]
+darsay envs [--prune]
+darsay dehydrate vault/qwen--qwen3-0.6b/<rev>
 ```
 
 Source refs are provider-qualified — `huggingface:Qwen/Qwen3-0.6B`,
@@ -231,7 +231,7 @@ in scripts. Upstream numbers are facts; derived figures (min RAM, download
 scratch) are labeled estimates.
 
 ```
-$ modelvault estimate Qwen/Qwen3.8-27B
+$ darsay estimate Qwen/Qwen3.8-27B
 
 Qwen/Qwen3.8-27B @ main -> 1d4bf0f2ff60
   image-text-to-text | license apache-2.0
@@ -245,7 +245,7 @@ Qwen/Qwen3.8-27B @ main -> 1d4bf0f2ff60
   bundle:       vault/qwen--qwen3.8-27b/1d4bf0f2ff60  (new)
   disk:         needs ~55.5 GiB, free 1022.6 GiB — OK
 
-To archive: modelvault archive Qwen/Qwen3.8-27B
+To archive: darsay archive Qwen/Qwen3.8-27B
 ```
 
 `--variants` lists the quantized ecosystem (Hub `base_model:quantized`
@@ -272,7 +272,7 @@ unchanged; completed files are adopted; the longest Range partial continues.
 
 Collaborators use `--shard N/T`: `1/3`, `2/3`, and `3/3` deterministically
 prioritize different byte-balanced whole-file lanes, but each can still
-finish the identical bundle alone. `modelvault --vault DEST assemble
+finish the identical bundle alone. `darsay --vault DEST assemble
 PARTIAL...` merges matching partials **offline**.
 
 Full design, ledger shape, and failure semantics:
@@ -320,7 +320,7 @@ Design and rationale: [docs/DATASETS.md](docs/DATASETS.md).
 - **At archive time** every file is checked against upstream expectations:
   LFS files against their upstream SHA-256, small files against their git
   blob SHA-1. Result: `verified-against-upstream`.
-- **`modelvault verify`** re-hashes the payload and diffs it against the
+- **`darsay verify`** re-hashes the payload and diffs it against the
   manifest. Modified, missing, and extra files flip integrity to
   `compromised` and the command exits non-zero — suitable for cron.
 - The **bundle hash** (SHA-256 over the sorted per-file hash lines)
@@ -331,20 +331,20 @@ Failures register nothing and exit non-zero.
 
 ## Single-file exports (`.mvb.tar`)
 
-`modelvault export` packs a whole bundle into one **deterministic tar**:
+`darsay export` packs a whole bundle into one **deterministic tar**:
 entries sorted (a `.mvb.json` marker first), tar metadata normalized, no
 compression — weights are incompressible and a plain tar stays inspectable
 with standard tools. The same bundle state always exports byte-identically,
 so the file has one stable SHA-256 for an offsite catalog.
 
-`modelvault import` streams the marker, checks format compatibility, unpacks
+`darsay import` streams the marker, checks format compatibility, unpacks
 to staging, re-hashes against the embedded manifest, and only then
 registers. Manual recovery without the tool is documented:
 [docs/MVB-FORMAT.md](docs/MVB-FORMAT.md).
 
 ## Running archived models
 
-`modelvault run <bundle> ["prompt"]` goes from bundle to generated tokens
+`darsay run <bundle> ["prompt"]` goes from bundle to generated tokens
 in one command (macOS and Linux). It hydrates first: picks an engine from
 what the payload ships (safetensors → `transformers`, GGUF → `llama-cpp`),
 builds a dedicated virtualenv **outside the bundle** under
@@ -353,22 +353,22 @@ and probes it against the payload.
 
 Inference then runs fully **offline** (`HF_HUB_OFFLINE=1`). A passing run
 is evidence the archived payload alone is sufficient. Envs are disposable:
-`modelvault envs --prune` reclaims the disk; the next `run` rebuilds.
+`darsay envs --prune` reclaims the disk; the next `run` rebuilds.
 
 Design details: [docs/HYDRATION.md](docs/HYDRATION.md).
 
 ## Extending
 
 New artifact types go in the `ARTIFACT_TYPES` registry
-(`src/modelvault/schema.py`) — add an entry with its payload root and
+(`src/darsay/schema.py`) — add an entry with its payload root and
 completeness rules, and verify / export / report work unchanged. The
 `dataset` type was added exactly this way.
 
-New inference runtimes go in `ENGINES` (`src/modelvault/hydrate.py`) — a
+New inference runtimes go in `ENGINES` (`src/darsay/hydrate.py`) — a
 detection glob, pip requirements, and a standalone runner script. MLX,
 vLLM, or ONNX is a registry entry, not a special case.
 
-New acquisition hosts go in `SourceProvider` (`src/modelvault/providers/`).
+New acquisition hosts go in `SourceProvider` (`src/darsay/providers/`).
 Hugging Face is the first plugin, not the product:
 [docs/SOURCES.md](docs/SOURCES.md).
 
@@ -390,7 +390,7 @@ Hugging Face is the first plugin, not the product:
 
 ## Design
 
-ModelVault is deliberately Python: hydration runners live inside the
+darsay is deliberately Python: hydration runners live inside the
 torch / transformers ecosystem, the Hugging Face *provider* uses
 `huggingface_hub` as the reference client for that host's snapshot
 semantics, and the workload is IO-bound glue. A compiled rewrite would buy
@@ -398,7 +398,7 @@ seconds on a tens-of-minutes job.
 
 Longevity is carried by the **formats**, not the tool — plain-JSON
 manifests and plain-tar exports, each documented for recovery without
-ModelVault — so the bundles outlive whatever software reads them next.
+darsay — so the bundles outlive whatever software reads them next.
 
 Full rationale: [docs/DESIGN.md](docs/DESIGN.md).
 

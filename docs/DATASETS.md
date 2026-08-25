@@ -3,7 +3,7 @@
 # Dataset bundles — the vault's second artifact type
 
 Design for archiving Hugging Face datasets with the same bundling mechanism
-as models. Status: **implemented** (schema 1.2.0, modelvault 0.4.0, 2026-08).
+as models. Status: **implemented** (schema 1.2.0, darsay 0.4.0, 2026-08).
 Case study: `saidutta69/fable-5-premium` (2026-08).
 
 ## 1. Why
@@ -51,9 +51,9 @@ No new verbs, no `--type` flag. Every source-taking command accepts a
 provider-qualified ref; Hugging Face shorthand and paste-from-browser URLs
 still work:
 
-    modelvault estimate huggingface:datasets/saidutta69/fable-5-premium
-    modelvault archive  datasets/saidutta69/fable-5-premium
-    modelvault archive  https://huggingface.co/datasets/saidutta69/fable-5-premium
+    darsay estimate huggingface:datasets/saidutta69/fable-5-premium
+    darsay archive  datasets/saidutta69/fable-5-premium
+    darsay archive  https://huggingface.co/datasets/saidutta69/fable-5-premium
 
 `parse_source` dispatches on the provider; the Hugging Face plugin maps
 `owner/name` → model and `datasets/owner/name` → dataset. Bundle-path

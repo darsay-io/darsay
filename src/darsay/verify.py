@@ -142,7 +142,7 @@ def _write_verification_md(bundle_dir: Path, manifest: dict, report: dict, run_c
     lines += [
         "",
         "---",
-        "Re-run with: `modelvault verify " + str(bundle_dir) + "`",
+        "Re-run with: `darsay verify " + str(bundle_dir) + "`",
         "",
     ]
     (bundle_dir / "VERIFICATION.md").write_text("\n".join(lines), encoding="utf-8")

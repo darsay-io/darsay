@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hashlib
 
-from modelvault.hashing import bundle_hash, hash_file, iter_payload_files
+from darsay.hashing import bundle_hash, hash_file, iter_payload_files
 
 
 def test_hash_file_sha256(tmp_path):
@@ -27,7 +27,7 @@ def test_hash_file_git_sha1(tmp_path):
 def test_hash_file_blake3_optional(tmp_path):
     path = tmp_path / "blob.bin"
     path.write_bytes(b"x")
-    from modelvault.hashing import HAVE_BLAKE3
+    from darsay.hashing import HAVE_BLAKE3
 
     got = hash_file(path, with_blake3=True)
     if HAVE_BLAKE3:

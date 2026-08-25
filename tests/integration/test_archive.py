@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import pytest
 
-from modelvault import SCHEMA_VERSION
-from modelvault.archiver import load_manifest
-from modelvault.estimate import estimate
+from darsay import SCHEMA_VERSION
+from darsay.archiver import load_manifest
+from darsay.estimate import estimate
 from tests.conftest import silent
 from tests.integration.conftest import archive_quiet
 from tests.payloads import dataset_files, model_files

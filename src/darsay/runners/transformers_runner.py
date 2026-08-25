@@ -1,6 +1,6 @@
 """Run an archived model payload with Hugging Face transformers.
 
-Standalone: executed by modelvault with the hydrated env's python; imports
+Standalone: executed by darsay with the hydrated env's python; imports
 only stdlib + torch/transformers. Writes a JSON result to --json-out and
 streams generated text to stdout. Never writes into the model directory.
 """

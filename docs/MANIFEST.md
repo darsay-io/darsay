@@ -24,7 +24,7 @@ Conventions:
 | Field | Meaning |
 |---|---|
 | `schema_version` | Version of this schema (`"1.5.0"`; 1.1 defined `runtime.tested_hardware`; 1.2 added datasets; 1.3 added gate and structured-lineage provenance; 1.4 added incremental-transfer accounting and local-source provenance; 1.5 added `source.provider` / `source.address` — all additive). |
-| `artifact_type` | Registry key driving completeness rules and the payload root (`"model"` or `"dataset"`; future: GGUF packs, papers — see `src/modelvault/schema.py`). |
+| `artifact_type` | Registry key driving completeness rules and the payload root (`"model"` or `"dataset"`; future: GGUF packs, papers — see `src/darsay/schema.py`). |
 | `bundle_id` | `<bundle directory name>@<first 12 of pinned revision>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Hugging Face dataset bundles take a `datasets--` prefix (`datasets--saidutta69--fable-5-premium@684cb1f849fe`) since model and dataset namespaces can collide on that host. Other providers include their id in the directory name. Stable, deterministic, unique per (source, revision). |
 
 ## `identity`
@@ -65,7 +65,7 @@ Provenance of the download.
 | Field | Meaning |
 |---|---|
 | `spdx_id` | License id from upstream repo metadata (`apache-2.0`). |
-| `name` | Human name when the id is in the rights-flags table (`src/modelvault/licensing.py`). |
+| `name` | Human name when the id is in the rights-flags table (`src/darsay/licensing.py`). |
 | `license_files` | License/notice text files shipped upstream, as archived paths. The primary one is also copied to the bundle root as `LICENSE`. |
 | `commercial_use`, `redistribution`, `modification`, `attribution_required`, `patent_grant` | Rights flags from the table. `null` = unknown license → review manually. Curator convenience, not legal advice. |
 | `trademark_terms` | Trademark clauses worth knowing about (e.g. Apache-2.0 §6). |
@@ -110,7 +110,7 @@ payload itself are *measured*.
 |---|---|
 | `formats` | Files/bytes per extension, computed from the archived inventory (`{"parquet": {file_count, total_size_bytes}, ...}`), largest first. |
 | `declared` | Upstream claims: `sources` (which of `dataset_infos.json` / the card YAML supplied them), `configs` (per config: `features` verbatim, `splits` with `num_examples`/`num_bytes`, `download_size`, `dataset_size`), `example_count_total` (sum of declared split counts; null when none declared). Null when upstream declares nothing. |
-| `measured` | Row counts read from the payload's parquet metadata via pyarrow (optional extra `modelvault[datasets]`): `status` (`measured`/`partial`/`skipped`), `method`, `row_counts` per file, `total_rows`, `errors` on partial reads. Skipped with a reason — never guessed — when pyarrow is absent or no parquet ships. |
+| `measured` | Row counts read from the payload's parquet metadata via pyarrow (optional extra `darsay[datasets]`): `status` (`measured`/`partial`/`skipped`), `method`, `row_counts` per file, `total_rows`, `errors` on partial reads. Skipped with a reason — never guessed — when pyarrow is absent or no parquet ships. |
 | `task_categories`, `size_categories`, `languages` | From the dataset card, when declared. |
 
 Worked example (`cornell-movie-review-data/rotten_tomatoes`, features elided):
@@ -152,7 +152,7 @@ Worked example (`cornell-movie-review-data/rotten_tomatoes`, features elided):
 
 (Without pyarrow, `measured` records the degradation instead of guessing:
 `{"status": "skipped", "reason": "pyarrow not installed (pip install
-modelvault[datasets])"}`. Here declared and measured agree at 10,662 —
+darsay[datasets])"}`. Here declared and measured agree at 10,662 —
 when they disagree, both are kept; the manifest never averages claims.)
 
 ## `runtime` — model bundles only
@@ -161,7 +161,7 @@ when they disagree, both are kept; the manifest never averages claims.)
 |---|---|
 | `supported_engines` | Derived from shipped formats only (safetensors → transformers, gguf → llama.cpp). |
 | `estimated_min_ram_gb`, `estimated_min_vram_gb` | Estimates: weight bytes × 1.2. |
-| `tested_hardware` | Measured runs, never estimates. `modelvault run` appends/refreshes one entry per (host, device, engine) on each successful run: `{at, host, os, chip, device, engine, engine_versions, tokens_per_second, status, via}`. Curators may add entries by hand in the same shape. Null until the model has actually run somewhere. |
+| `tested_hardware` | Measured runs, never estimates. `darsay run` appends/refreshes one entry per (host, device, engine) on each successful run: `{at, host, os, chip, device, engine, engine_versions, tokens_per_second, status, via}`. Curators may add entries by hand in the same shape. Null until the model has actually run somewhere. |
 | `os_support`, `cuda_notes`, `rocm_notes`, `cpu_inference` | Coarse defaults; refine by hand. |
 | `notes` | States the estimation method. |
 
@@ -242,7 +242,7 @@ the manifest are archival authority. See [INCREMENTAL.md](INCREMENTAL.md).
 Structured mirror of the curator's notes: `historical_significance`,
 `major_capabilities`, `known_limitations`, `successor_models`,
 `personal_notes` (all **curator**), plus `curation_file` pointing at
-`curation.md` — the free-form file that `modelvault regen` folds into the
+`curation.md` — the free-form file that `darsay regen` folds into the
 bundle README. Prose belongs in `curation.md`; use the structured fields when
 downstream tooling needs to query them.
 

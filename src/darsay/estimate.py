@@ -1,6 +1,6 @@
 """Estimate a bundle's full footprint before downloading anything.
 
-`modelvault estimate` is a read-only preflight for `archive`: it asks the
+`darsay estimate` is a read-only preflight for `archive`: it asks the
 source provider for the pinned revision's file inventory and reports what
 the bundle would cost — payload size, parameter count (models) or a formats
 breakdown (datasets), engines, completeness, disk headroom — without
@@ -261,9 +261,9 @@ def print_estimate(est: dict, progress=print) -> None:
             p(f"    {size:>10}  {fmts:<12} {row['repo_id']}  ({row['downloads']:,} downloads)")
         rest = v["count_listed"] - v["detail_limit"]
         if rest > 0:
-            p(f"    ... and {rest} more (modelvault estimate <source> to size any of them)")
+            p(f"    ... and {rest} more (darsay estimate <source> to size any of them)")
 
-    cmd = f"modelvault archive {ref}"
+    cmd = f"darsay archive {ref}"
     if src["revision_ref"] != "main":
         cmd += f" --revision {src['revision_ref']}"
     if est["subset"]:

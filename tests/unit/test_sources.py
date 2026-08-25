@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from modelvault.sources import get_provider, parse_source, provider_names, source_from_ledger
+from darsay.sources import get_provider, parse_source, provider_names, source_from_ledger
 
 
 def test_huggingface_is_registered():

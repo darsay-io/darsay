@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from modelvault.readme_gen import human_params, human_size
+from darsay.readme_gen import human_params, human_size
 
 
 def test_human_size():

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 
-from modelvault.archiver import load_manifest
-from modelvault.hashing import hash_file
-from modelvault.verify import verify_bundle
+from darsay.archiver import load_manifest
+from darsay.hashing import hash_file
+from darsay.verify import verify_bundle
 from tests.conftest import silent
 from tests.integration.conftest import archive_quiet
 from tests.payloads import model_files

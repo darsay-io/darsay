@@ -4,17 +4,24 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-Tool version (`pyproject.toml` / `modelvault.__version__`) is independent of
+Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
 `schema_version` in manifests and of `MVB_FORMAT_VERSION` in exports.
 
 ## [Unreleased]
 
 ### Changed
 
+- **Rename:** the package, CLI, and environment variables are now `darsay`
+  (`darsay` / `$DARSAY_HOME` / `$DARSAY_RUNTIME` / `$DARSAY_PYTHON` /
+  `$DARSAY_E2E`). This is a clean break: there are no `MODELVAULT_*`
+  fallbacks. Existing bundles that record `"tool": "modelvault"` still
+  verify and import; new archives and exports write `"tool": "darsay"`.
+  The GitHub repository will be `jeremynorris/darsay`. Schema and MVB
+  format versions are unchanged.
 - Documentation: landing README with the project logo, a documentation
   index at [`docs/README.md`](docs/README.md), and consistent navigation
   across the docs set.
-- Project URLs now point at `jeremynorris/modelvault`.
+- Project URLs now point at `jeremynorris/darsay`.
 
 ### Added
 

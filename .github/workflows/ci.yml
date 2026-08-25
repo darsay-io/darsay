@@ -38,14 +38,14 @@ jobs:
       - name: Unit and integration tests
         run: |
           python -m pytest -m "not e2e" \
-            --cov=modelvault \
+            --cov=darsay \
             --cov-report=term-missing \
             --cov-fail-under=65
 
       - name: CLI smoke
         run: |
-          modelvault --version
-          modelvault --help
+          darsay --version
+          darsay --help
 
   e2e:
     name: E2E (Hugging Face Hub)
@@ -74,7 +74,7 @@ jobs:
       - name: Live Hub path
         env:
           HF_HUB_DISABLE_XET: "1"
-          MODELVAULT_E2E: "1"
+          DARSAY_E2E: "1"
         run: python -m pytest -m e2e --run-e2e
         timeout-minutes: 15
 
@@ -98,16 +98,16 @@ jobs:
         run: |
           python -m venv /tmp/wheel-env
           /tmp/wheel-env/bin/pip install dist/*.whl
-          /tmp/wheel-env/bin/modelvault --version
+          /tmp/wheel-env/bin/darsay --version
           /tmp/wheel-env/bin/python - <<'PY'
           from pathlib import Path
-          import modelvault
-          from modelvault.hydrate import ENGINES
+          import darsay
+          from darsay.hydrate import ENGINES
 
-          root = Path(modelvault.__file__).parent / "runners"
+          root = Path(darsay.__file__).parent / "runners"
           missing = [spec["runner"] for spec in ENGINES.values()
                      if not (root / spec["runner"]).is_file()]
           if missing:
               raise SystemExit(f"wheel is missing runners: {missing}")
-          print("wheel ok:", Path(modelvault.__file__).parent)
+          print("wheel ok:", Path(darsay.__file__).parent)
           PY

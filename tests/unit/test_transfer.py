@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from modelvault.transfer import (
+from darsay.transfer import (
     CleanStop,
     LedgerError,
     NetworkCounter,
@@ -19,7 +19,7 @@ from modelvault.transfer import (
     transfer_plan,
     transfer_summary,
 )
-from modelvault.providers.base import FileSpec, Snapshot, SourceRef
+from darsay.providers.base import FileSpec, Snapshot, SourceRef
 
 
 def _source() -> SourceRef:
@@ -46,7 +46,7 @@ def test_stop_controller_byte_budget():
 
 def test_stop_controller_time_budget(monkeypatch):
     clock = {"t": 0.0}
-    monkeypatch.setattr("modelvault.transfer.time.monotonic", lambda: clock["t"])
+    monkeypatch.setattr("darsay.transfer.time.monotonic", lambda: clock["t"])
     ctrl = StopController(max_minutes=1)
     ctrl.start()
     ctrl.check({"bytes_network": 0})

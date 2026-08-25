@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from modelvault.smoke import _check_csv, _check_jsonl, _check_parquet, structure_test, tokenizer_test
+from darsay.smoke import _check_csv, _check_jsonl, _check_parquet, structure_test, tokenizer_test
 from tests.payloads import parquet_magic_file
 
 

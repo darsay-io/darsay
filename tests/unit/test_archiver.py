@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from modelvault.archiver import (
+from darsay.archiver import (
     _guess_version,
     archive_model,
     bundle_dir_for,
@@ -8,7 +8,7 @@ from modelvault.archiver import (
     hub_url,
     parse_repo_ref,
 )
-from modelvault.sources import parse_source
+from darsay.sources import parse_source
 
 
 def test_parse_repo_ref_model_and_dataset():
@@ -41,7 +41,7 @@ def test_archive_model_wrapper_builds_source_ref(monkeypatch, tmp_path):
         seen["kwargs"] = kwargs
         return tmp_path
 
-    monkeypatch.setattr("modelvault.archiver.archive", fake_archive)
+    monkeypatch.setattr("darsay.archiver.archive", fake_archive)
     assert archive_model("Qwen/Qwen3-0.6B", vault=tmp_path) == tmp_path
     assert seen["source"] == "Qwen/Qwen3-0.6B"
     archive_model("owner/name", repo_type="dataset", vault=tmp_path, force=True)
@@ -50,7 +50,7 @@ def test_archive_model_wrapper_builds_source_ref(monkeypatch, tmp_path):
 
 
 def test_estimate_repo_wrapper_builds_source_ref(monkeypatch, tmp_path):
-    from modelvault.estimate import estimate_repo
+    from darsay.estimate import estimate_repo
 
     seen = {}
 
@@ -58,7 +58,7 @@ def test_estimate_repo_wrapper_builds_source_ref(monkeypatch, tmp_path):
         seen["source"] = source
         return {"ok": True}
 
-    monkeypatch.setattr("modelvault.estimate.estimate", fake_estimate)
+    monkeypatch.setattr("darsay.estimate.estimate", fake_estimate)
     assert estimate_repo("Qwen/Qwen3-0.6B", vault=tmp_path) == {"ok": True}
     assert seen["source"] == "Qwen/Qwen3-0.6B"
     estimate_repo("owner/name", repo_type="dataset", vault=tmp_path)

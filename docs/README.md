@@ -1,5 +1,5 @@
 <p align="center">
-  <a href="../README.md"><img src="modelvault-logo.png" alt="ModelVault" width="640"></a>
+  <a href="../README.md"><img src="darsay-logo.png" alt="darsay" width="640"></a>
 </p>
 
 <p align="center">
@@ -96,9 +96,9 @@ The short list that every document, and every change, is measured against:
 
 | To add… | Register it in… |
 |---|---|
-| A new artifact type (`gguf-pack`, `paper`, …) | `ARTIFACT_TYPES` in `src/modelvault/schema.py` |
-| A new inference runtime (MLX, vLLM, ONNX, …) | `ENGINES` in `src/modelvault/hydrate.py` |
-| A new acquisition host | `SourceProvider` in `src/modelvault/providers/`, wired in `sources.py` |
+| A new artifact type (`gguf-pack`, `paper`, …) | `ARTIFACT_TYPES` in `src/darsay/schema.py` |
+| A new inference runtime (MLX, vLLM, ONNX, …) | `ENGINES` in `src/darsay/hydrate.py` |
+| A new acquisition host | `SourceProvider` in `src/darsay/providers/`, wired in `sources.py` |
 
 Field changes to `manifest.json` or `.mvb.tar` need a docs update here and
 a schema / format version bump. See [Contributing](../CONTRIBUTING.md).

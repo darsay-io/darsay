@@ -4,15 +4,15 @@ import argparse
 
 import pytest
 
-from modelvault import __version__
-from modelvault.cli import _byte_size, _positive_float, _positive_int, _shard_key, main
+from darsay import __version__
+from darsay.cli import _byte_size, _positive_float, _positive_int, _shard_key, main
 
 
 def test_version_flag(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--version"])
     assert exc.value.code == 0
-    assert f"modelvault {__version__}" in capsys.readouterr().out
+    assert f"darsay {__version__}" in capsys.readouterr().out
 
 
 def test_help_lists_subcommands(capsys):
@@ -78,7 +78,7 @@ def test_shard_key():
 
 
 def test_bundle_dir_requires_manifest(tmp_path):
-    from modelvault.cli import _bundle_dir
+    from darsay.cli import _bundle_dir
 
     with pytest.raises(SystemExit, match="no manifest.json"):
         _bundle_dir(str(tmp_path))
@@ -87,10 +87,10 @@ def test_bundle_dir_requires_manifest(tmp_path):
 def test_vault_path_env_and_flag(monkeypatch, tmp_path):
     from argparse import Namespace
 
-    from modelvault.cli import _vault_path
+    from darsay.cli import _vault_path
 
-    monkeypatch.delenv("MODELVAULT_HOME", raising=False)
+    monkeypatch.delenv("DARSAY_HOME", raising=False)
     assert _vault_path(Namespace(vault=None)) == __import__("pathlib").Path("vault")
     assert _vault_path(Namespace(vault=str(tmp_path))) == tmp_path
-    monkeypatch.setenv("MODELVAULT_HOME", str(tmp_path / "from-env"))
+    monkeypatch.setenv("DARSAY_HOME", str(tmp_path / "from-env"))
     assert _vault_path(Namespace(vault=None)) == tmp_path / "from-env"

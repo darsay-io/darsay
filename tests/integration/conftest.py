@@ -11,7 +11,7 @@ from tests.fakes import TestProvider
 @pytest.fixture
 def test_provider():
     """Register a fresh TestProvider and restore the registry afterwards."""
-    from modelvault import sources
+    from darsay import sources
 
     sources._ensure_providers()
     providers = dict(sources._PROVIDERS)
@@ -33,7 +33,7 @@ def _register_test_provider(test_provider):
 
 
 def archive_quiet(source, *, vault, **kwargs):
-    from modelvault.archiver import archive
+    from darsay.archiver import archive
 
     kwargs.setdefault("progress", silent)
     kwargs.setdefault("jobs", 1)

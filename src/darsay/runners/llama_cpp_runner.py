@@ -1,6 +1,6 @@
 """Run an archived GGUF payload with llama-cpp-python.
 
-Standalone: executed by modelvault with the hydrated env's python; imports
+Standalone: executed by darsay with the hydrated env's python; imports
 only stdlib + llama_cpp. Writes a JSON result to --json-out and streams
 generated text to stdout. Never writes into the model directory.
 """

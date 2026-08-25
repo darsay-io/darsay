@@ -47,7 +47,7 @@ a silent Hugging Face parse. Adding ModelScope later is
 
 ## What a provider owns
 
-The interface is `SourceProvider` in `src/modelvault/providers/base.py`.
+The interface is `SourceProvider` in `src/darsay/providers/base.py`.
 Each backend implements:
 
 | Method | Role |
@@ -69,7 +69,7 @@ Hydration, verify, export, and the payload layout never see the provider.
 Hub address grammar, `huggingface_hub`, LFS vs git-blob digests, gated-repo
 auth, `base_model:*` / `dataset:` listings, Xet-disable + Range resume, and
 the payload `.cache/huggingface/` partials all live in
-`src/modelvault/providers/huggingface.py`.
+`src/darsay/providers/huggingface.py`.
 
 Hugging Face bundle directory names are **unchanged**
 (`owner--name`, `datasets--owner--name`) so existing vaults resume. A later
@@ -78,7 +78,7 @@ collide across hosts.
 
 ## Adding a provider
 
-1. Subclass `SourceProvider` in `src/modelvault/providers/<name>.py`.
+1. Subclass `SourceProvider` in `src/darsay/providers/<name>.py`.
 2. Register it in `sources._ensure_providers`.
 3. Declare `url_hosts` if the provider has a web URL people will paste.
 4. Do not add a `--provider` flag or a new archive subcommand.

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from modelvault.licensing import LICENSE_INFO, build_licensing_record, find_license_files
+from darsay.licensing import LICENSE_INFO, build_licensing_record, find_license_files
 
 
 def test_known_spdx_flags(tmp_path):

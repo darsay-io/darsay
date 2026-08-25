@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from modelvault.metadata import estimate_runtime, extract_dataset_metadata, extract_model_metadata
+from darsay.metadata import estimate_runtime, extract_dataset_metadata, extract_model_metadata
 from tests.payloads import dataset_files, make_safetensors, model_files
 
 
@@ -54,7 +54,7 @@ def test_extract_dataset_metadata_declared_not_measured(tmp_path):
 
 
 def test_measured_row_counts_skipped_without_parquet(tmp_path):
-    from modelvault.metadata import _measured_row_counts
+    from darsay.metadata import _measured_row_counts
 
     payload = tmp_path / "data"
     payload.mkdir()

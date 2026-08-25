@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from modelvault.providers.huggingface import (
+from darsay.providers.huggingface import (
     HuggingFaceProvider,
     _json_value,
     _license_from_tags,

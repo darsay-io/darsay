@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from modelvault.hydrate import (
+from darsay.hydrate import (
     ENGINES,
     _env_key,
     _offline_env,
@@ -81,9 +81,9 @@ def test_resolve_requirements_uses_declared_floor(tmp_path):
 def test_runtime_root_env_override(monkeypatch, tmp_path):
     bundle = tmp_path / "vault" / "name" / "rev"
     bundle.mkdir(parents=True)
-    monkeypatch.delenv("MODELVAULT_RUNTIME", raising=False)
+    monkeypatch.delenv("DARSAY_RUNTIME", raising=False)
     assert runtime_root(bundle) == tmp_path / "vault" / ".runtime"
-    monkeypatch.setenv("MODELVAULT_RUNTIME", str(tmp_path / "rt"))
+    monkeypatch.setenv("DARSAY_RUNTIME", str(tmp_path / "rt"))
     assert runtime_root(bundle) == tmp_path / "rt"
 
 
@@ -97,8 +97,8 @@ def test_offline_env_sets_hub_offline(monkeypatch):
 def test_every_engine_ships_a_runner():
     from pathlib import Path
 
-    import modelvault
+    import darsay
 
-    root = Path(modelvault.__file__).parent / "runners"
+    root = Path(darsay.__file__).parent / "runners"
     missing = [spec["runner"] for spec in ENGINES.values() if not (root / spec["runner"]).is_file()]
     assert missing == []

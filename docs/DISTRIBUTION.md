@@ -2,37 +2,37 @@
 
 # Distribution and releases
 
-How people should install ModelVault, what a GitHub Release contains, and
+How people should install darsay, what a GitHub Release contains, and
 when (not) to ship a frozen binary.
 
 ## What to consume
 
-ModelVault is a **pure-Python** package (no compiled extensions). One wheel
+darsay is a **pure-Python** package (no compiled extensions). One wheel
 installs on every platform that has Python 3.10+:
 
-`modelvault-0.6.0-py3-none-any.whl`
+`darsay-0.6.0-py3-none-any.whl`
 
 The only runtime dependency is `huggingface_hub`. Optional extras
-(`fast-hash`, `smoke`, `inference`, `datasets`) stay optional. `modelvault
+(`fast-hash`, `smoke`, `inference`, `datasets`) stay optional. `darsay
 run` does not need them — hydration builds its own isolated env.
 
 ### Recommended: an isolated CLI
 
 ```bash
 # one-shot, no install
-uvx --from git+https://github.com/jeremynorris/modelvault@v0.6.0 \
-    modelvault estimate sshleifer/tiny-gpt2
+uvx --from git+https://github.com/jeremynorris/darsay@v0.6.0 \
+    darsay estimate sshleifer/tiny-gpt2
 
 # install into an isolated tool env
-pipx install git+https://github.com/jeremynorris/modelvault@v0.6.0
+pipx install git+https://github.com/jeremynorris/darsay@v0.6.0
 # or
-uv tool install git+https://github.com/jeremynorris/modelvault@v0.6.0
+uv tool install git+https://github.com/jeremynorris/darsay@v0.6.0
 ```
 
 From a downloaded wheel (GitHub Release asset):
 
 ```bash
-pipx install ./modelvault-0.6.0-py3-none-any.whl
+pipx install ./darsay-0.6.0-py3-none-any.whl
 ```
 
 `pipx` / `uv tool` / `uvx` are the idiomatic way to consume a Python CLI:
@@ -42,8 +42,8 @@ site-packages, and upgrades are one command.
 After a PyPI project exists, the same commands drop the git URL:
 
 ```bash
-pipx install modelvault
-uvx modelvault estimate sshleifer/tiny-gpt2
+pipx install darsay
+uvx darsay estimate sshleifer/tiny-gpt2
 ```
 
 PyPI is the follow-up to GitHub, not a prerequisite for usable releases.
@@ -64,8 +64,8 @@ should attach:
 
 | Asset | Why |
 |---|---|
-| `modelvault-X.Y.Z-py3-none-any.whl` | The installable artifact. One file, every OS. |
-| `modelvault-X.Y.Z.tar.gz` | sdist: source, docs, license. Required for `pip` from git and for auditors. |
+| `darsay-X.Y.Z-py3-none-any.whl` | The installable artifact. One file, every OS. |
+| `darsay-X.Y.Z.tar.gz` | sdist: source, docs, license. Required for `pip` from git and for auditors. |
 | Release notes | `CHANGELOG.md` section for that version, plus the generated commit list. |
 
 Do **not** attach vault bundles, `.mvb.tar` files, or hydrated envs.
@@ -106,10 +106,10 @@ interpreter and every imported module. Typical costs:
 - **Startup.** Onefile extracts to a temp dir on every launch.
 - **Hidden imports.** Freezers miss dynamically imported modules;
   `huggingface_hub` has several. This is maintainable, not free.
-- **Hydration.** `modelvault hydrate` / `run` create virtualenvs and
+- **Hydration.** `darsay hydrate` / `run` create virtualenvs and
   install `torch` / `transformers` / `llama-cpp-python` into them. A frozen
   binary is not a usable `venv` seed. Hydration already expects a real
-  interpreter (`$MODELVAULT_PYTHON` / `--python`; `uv` can fetch one). A
+  interpreter (`$DARSAY_PYTHON` / `--python`; `uv` can fetch one). A
   freeze that cannot hydrate is an incomplete product; a freeze that also
   bundles a second, unfrozen CPython is a zip of a Python install, which
   uv/pipx already are.
@@ -123,7 +123,7 @@ CPython plus the wheel is convenient for developers, hostile for archivists.
 1. **Now:** tagged source, wheel, sdist. Consume with `pipx` / `uvx` /
    `pip`. This is the Python-CLI standard and it is already how
    `huggingface_hub`, `datasets`, and `transformers` are consumed.
-2. **Next:** the same files on PyPI, so `pipx install modelvault` works
+2. **Next:** the same files on PyPI, so `pipx install darsay` works
    with no git URL.
 3. **Only if a real audience has no Python:** a PyInstaller **onedir**
    (not onefile) for Linux x86_64 and macOS arm64 covering

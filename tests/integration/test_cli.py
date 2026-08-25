@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from modelvault.cli import main
+from darsay.cli import main
 from tests.integration.conftest import archive_quiet
 from tests.payloads import model_files
 

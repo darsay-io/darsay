@@ -2,14 +2,14 @@
 
 # Hydration — from archived bundle to running model
 
-`modelvault hydrate` turns an archived bundle into a locally runnable install;
-`modelvault run` executes a prompt against it. The whole path is designed so
+`darsay hydrate` turns an archived bundle into a locally runnable install;
+`darsay run` executes a prompt against it. The whole path is designed so
 that a bundle that passed `verify` can produce tokens with one command,
 without ever touching the archived payload:
 
 ```bash
-modelvault run vault/qwen--qwen3-0.6b/c1899de289a0            # hello prompt
-modelvault run vault/qwen--qwen3-0.6b/c1899de289a0 "2+2=?"    # your prompt
+darsay run vault/qwen--qwen3-0.6b/c1899de289a0            # hello prompt
+darsay run vault/qwen--qwen3-0.6b/c1899de289a0 "2+2=?"    # your prompt
 ```
 
 `run` hydrates automatically when needed. macOS and Linux are the supported
@@ -21,7 +21,7 @@ files any reader opens directly (see [DATASETS.md](DATASETS.md)).
 ## Design rules
 
 1. **The payload stays immutable.** Environments are built *outside* the
-   bundle, under `<vault>/.runtime/envs/` (override with `$MODELVAULT_RUNTIME`).
+   bundle, under `<vault>/.runtime/envs/` (override with `$DARSAY_RUNTIME`).
    The only thing hydration writes into the bundle is the bundle-root record
    `hydration.json` — volatile machine-local state, excluded from `.mvb.tar`
    exports exactly like `exports.json`.
@@ -37,7 +37,7 @@ files any reader opens directly (see [DATASETS.md](DATASETS.md)).
    successful run also writes a measured entry into the manifest's
    `runtime.tested_hardware` (see MANIFEST.md) — one entry per
    (host, device, engine), refreshed on each pass.
-4. **Engines are registry entries.** `ENGINES` in `src/modelvault/hydrate.py`
+4. **Engines are registry entries.** `ENGINES` in `src/darsay/hydrate.py`
    maps an engine to detection globs (over the manifest inventory), pip
    requirements, and a runner script. New runtimes (MLX, vLLM, ONNX…) are
    added there, not special-cased elsewhere.
@@ -62,19 +62,19 @@ requirements, full `pip list`); an env directory without one is treated as
 half-built and rebuilt. Install failures remove the partial env and exit
 non-zero — a broken env is never registered.
 
-- Interpreter: `--python PATH` > `$MODELVAULT_PYTHON` > the python running
-  modelvault. `uv` is used when on PATH, else `venv` + `pip`.
-- `modelvault envs` lists envs, sizes, and which bundles reference them;
-  `modelvault envs --prune` deletes unreferenced ones.
-- `modelvault dehydrate <bundle>` drops the bundle's `hydration.json`
+- Interpreter: `--python PATH` > `$DARSAY_PYTHON` > the python running
+  darsay. `uv` is used when on PATH, else `venv` + `pip`.
+- `darsay envs` lists envs, sizes, and which bundles reference them;
+  `darsay envs --prune` deletes unreferenced ones.
+- `darsay dehydrate <bundle>` drops the bundle's `hydration.json`
   (its run history included); manifest `tested_hardware` entries survive.
-- `modelvault hydrate --dry-run` prints the full plan without touching
+- `darsay hydrate --dry-run` prints the full plan without touching
   anything; `--force` rebuilds an existing env in place.
 
 ## Runner contract
 
-Runners are standalone scripts in `src/modelvault/runners/` — stdlib + their
-engine only, since modelvault is not installed inside hydrated envs. They are
+Runners are standalone scripts in `src/darsay/runners/` — stdlib + their
+engine only, since darsay is not installed inside hydrated envs. They are
 invoked as `<env-python> <runner>.py --json-out FILE …`, stream human output
 to stdout/stderr, and write one JSON result object to `--json-out`.
 `--probe` (used by `hydrate`) validates the env against the payload without
@@ -102,7 +102,7 @@ crashing silently, and never write into the model directory.
 ```
 
 Delete the file at any time — nothing else depends on it; the next
-`modelvault run` re-hydrates.
+`darsay run` re-hydrates.
 
 ---
 

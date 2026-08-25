@@ -1,23 +1,25 @@
-# model-vault
+# darsay
+
+the genesis machine of archives
 
 Tools for archiving full model ecosystems as museum-grade but directly usable
-bundles. One Python package: `modelvault` in `src/modelvault/`, CLI entry
-point `modelvault` (argparse, subcommands in `cli.py`).
+bundles. One Python package: `darsay` in `src/darsay/`, CLI entry
+point `darsay` (argparse, subcommands in `cli.py`).
 
 ## Environment
 
-- Python 3.14 venv at `.venv` (`.venv/bin/modelvault`, `.venv/bin/python`).
+- Python 3.14 venv at `.venv` (`.venv/bin/darsay`, `.venv/bin/python`).
 - Core dependency is `huggingface_hub` only (Hugging Face provider); `blake3`, `tokenizers`,
   `transformers`/`torch` are optional extras — every feature that needs them
   must degrade gracefully (record `skipped` with a reason, never crash).
 - Test suite is pytest (`pip install -e ".[dev]"`; `pytest`). Unit +
   integration are hermetic (fake `test:` provider, no network). Live Hub e2e
-  is opt-in (`pytest --run-e2e` or `MODELVAULT_E2E=1`) and uses
+  is opt-in (`pytest --run-e2e` or `DARSAY_E2E=1`) and uses
   `sshleifer/tiny-gpt2`. See `docs/TESTING.md`.
 
 ## Layout
 
-- `src/modelvault/` — `archiver.py` (download + manifest assembly),
+- `src/darsay/` — `archiver.py` (download + manifest assembly),
   `transfer.py` (pin ledger, reconciliation, resumable/budgeted per-file
   transfer, cooperative lanes/assembly, sibling-blob reuse),
   `estimate.py` (read-only preflight: sizes/params/disk from source metadata),
@@ -25,7 +27,7 @@ point `modelvault` (argparse, subcommands in `cli.py`).
   `metadata.py`, `licensing.py`, `hashing.py`, `safetensors_meta.py`,
   `schema.py` (artifact-type registry), `hydrate.py` (ENGINES registry, env
   management, `hydrate`/`run`), `runners/` (standalone per-engine scripts run
-  inside hydrated envs — stdlib + engine only, no modelvault imports),
+  inside hydrated envs — stdlib + engine only, no darsay imports),
   `sources.py` (source-ref grammar + provider registry), `providers/`
   (acquisition backends; Hugging Face is the first plugin),
   `cli.py`.

@@ -5,8 +5,8 @@ import shutil
 
 import pytest
 
-from modelvault.archiver import load_manifest
-from modelvault.transfer import (
+from darsay.archiver import load_manifest
+from darsay.transfer import (
     PartialTransfer,
     assemble_partials,
     load_ledger,
@@ -51,8 +51,8 @@ def test_reconcile_adopts_existing_bytes(vault, test_provider):
     files = model_files()
     test_provider.add_repo("acme/toy", files)
     # Plant a full payload before archive; reconcile should adopt it.
-    from modelvault.archiver import bundle_dir_for
-    from modelvault.sources import parse_source
+    from darsay.archiver import bundle_dir_for
+    from darsay.sources import parse_source
 
     ref = parse_source("test:acme/toy")
     # Pin first so we know the revision prefix.
@@ -72,9 +72,9 @@ def test_reconcile_adopts_existing_bytes(vault, test_provider):
 
 
 def test_reconcile_discards_unexpected_and_size_mismatch(vault, test_provider, tmp_path):
-    from modelvault.transfer import begin_session, new_ledger, reconcile
-    from modelvault.providers.base import FileSpec, Snapshot
-    from modelvault.sources import parse_source
+    from darsay.transfer import begin_session, new_ledger, reconcile
+    from darsay.providers.base import FileSpec, Snapshot
+    from darsay.sources import parse_source
 
     files = {"keep.bin": b"abcd", "good.bin": b"xxxx"}
     test_provider.add_repo("acme/toy", files)
@@ -87,7 +87,7 @@ def test_reconcile_discards_unexpected_and_size_mismatch(vault, test_provider, t
     (payload / "good.bin").write_bytes(b"wrong-size")  # size mismatch
     (payload / "stray.bin").write_bytes(b"nope")  # not in inventory
     ledger = new_ledger(snapshot)
-    from modelvault.transfer import save_ledger
+    from darsay.transfer import save_ledger
 
     save_ledger(bundle, ledger)
     session = begin_session(bundle, ledger)

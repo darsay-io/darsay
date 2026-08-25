@@ -1,4 +1,4 @@
-"""modelvault: archive full model ecosystems as reproducible, auditable bundles."""
+"""darsay: the genesis machine of archives."""
 
 __version__ = "0.6.0"
 
@@ -6,7 +6,7 @@ __version__ = "0.6.0"
 # Bump the major component on breaking layout changes; consumers should
 # check this before parsing.
 # 1.1.0: defined the shape of runtime.tested_hardware entries (written by
-#        `modelvault run`); previously always null.
+#        `darsay run`); previously always null.
 # 1.2.0: dataset artifact type (payload under data/, dataset_metadata section,
 #        smoke_tests.structure, dataset relationships) and the model-side
 #        relationships.training_datasets field. Additive.

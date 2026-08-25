@@ -2,7 +2,7 @@
 
 # Testing
 
-modelvault's test suite is a pyramid. Fast hermetic tests are the default;
+darsay's test suite is a pyramid. Fast hermetic tests are the default;
 the live Hub path is opt-in and small.
 
 ```
@@ -24,7 +24,7 @@ to run on every commit.
 |---|---|---|---|
 | **Unit** | Call one module. Use `tmp_path` for files. Import optional extras and record `skipped`. | Network. Register a provider. Build a full bundle unless the function under test requires one. | `tests/unit/` |
 | **Integration** | Drive `archive` / `verify` / `export` / `assemble` / the CLI against a `TestProvider` that serves bytes from memory. Touch a temp vault. | Hugging Face, torch installs, hydration `ensure_env`. | `tests/integration/` |
-| **E2E** | `estimate` → `archive` → `verify` → `export` → `import` of `sshleifer/tiny-gpt2`. | Large repos, gated repos, `modelvault run`. | `tests/e2e/` |
+| **E2E** | `estimate` → `archive` → `verify` → `export` → `import` of `sshleifer/tiny-gpt2`. | Large repos, gated repos, `darsay run`. | `tests/e2e/` |
 
 The fake provider (`tests/fakes.py`) is a real `SourceProvider`. Registering
 it is the extensibility check: archive and estimate never import
@@ -55,11 +55,11 @@ From a checkout, with the project venv:
 .venv/bin/pytest                         # unit + integration (e2e skipped)
 .venv/bin/pytest -m unit
 .venv/bin/pytest -m integration
-.venv/bin/pytest --run-e2e -m e2e        # or MODELVAULT_E2E=1
-.venv/bin/pytest --cov=modelvault --cov-report=term-missing
+.venv/bin/pytest --run-e2e -m e2e        # or DARSAY_E2E=1
+.venv/bin/pytest --cov=darsay --cov-report=term-missing
 ```
 
-`--run-e2e` and `MODELVAULT_E2E=1` are equivalent. CI sets the env var on the
+`--run-e2e` and `DARSAY_E2E=1` are equivalent. CI sets the env var on the
 e2e job and runs the hermetic suite on every push and pull request.
 
 ## CI

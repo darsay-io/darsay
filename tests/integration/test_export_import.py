@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from modelvault.archiver import load_manifest
-from modelvault.export import EXPORT_EXCLUDE, MARKER_NAME, export_bundle, import_bundle
-from modelvault.hashing import hash_file
+from darsay.archiver import load_manifest
+from darsay.export import EXPORT_EXCLUDE, MARKER_NAME, export_bundle, import_bundle
+from darsay.hashing import hash_file
 from tests.conftest import silent
 from tests.integration.conftest import archive_quiet
 from tests.payloads import model_files

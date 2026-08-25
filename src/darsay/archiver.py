@@ -343,7 +343,7 @@ def _register_bundle(bundle_dir: Path, payload_dir: Path, ledger: dict, progress
         aliases.append(source.url)
 
     downloader = {
-        "tool": "modelvault",
+        "tool": "darsay",
         "version": __version__,
         "python": platform.python_version(),
         "platform": platform.platform(),
@@ -461,7 +461,7 @@ def _write_curation_template(bundle_dir: Path, manifest: dict) -> None:
     path.write_text(
         f"""# Curation notes — {manifest['bundle_id']}
 
-_This is the curator's file: edit it freely. `modelvault regen` folds it into
+_This is the curator's file: edit it freely. `darsay regen` folds it into
 README.md; nothing here is machine-generated after this template._
 
 ## Historical significance

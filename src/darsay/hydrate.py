@@ -2,7 +2,7 @@
 
 The payload under model/ stays byte-immutable: hydration builds a dedicated
 virtualenv *outside* the bundle (under `<vault>/.runtime/envs/`, or
-$MODELVAULT_RUNTIME) and records what it did in the bundle-root file
+$DARSAY_RUNTIME) and records what it did in the bundle-root file
 `hydration.json` — volatile state, excluded from exports like exports.json.
 
 Environments are shared: keyed by (engine, python major.minor, hash of the
@@ -63,8 +63,8 @@ ENGINES = {
 
 def runtime_root(bundle_dir: Path) -> Path:
     """Envs live next to the vault that holds the bundle (vault/<name>/<rev>),
-    or wherever $MODELVAULT_RUNTIME points."""
-    override = os.environ.get("MODELVAULT_RUNTIME")
+    or wherever $DARSAY_RUNTIME points."""
+    override = os.environ.get("DARSAY_RUNTIME")
     if override:
         return Path(override)
     return bundle_dir.parent.parent / ".runtime"
@@ -163,7 +163,7 @@ def resolve_requirements(engine: str, payload_root: Path) -> list[str]:
 # ------------------------------------------------------------- env management
 
 def _pick_python(explicit: str | None) -> str:
-    return explicit or os.environ.get("MODELVAULT_PYTHON") or sys.executable
+    return explicit or os.environ.get("DARSAY_PYTHON") or sys.executable
 
 
 def _python_version(python_exe: str) -> tuple[str, str]:
@@ -230,7 +230,7 @@ def ensure_env(engine: str, requirements: list[str], python: str | None,
         shutil.rmtree(env_dir, ignore_errors=True)
         progress(f"Install failed; removed {env_dir}.")
         progress("Hint: a different interpreter may have wheels — retry with "
-                 "--python /path/to/python3.x (or set $MODELVAULT_PYTHON).")
+                 "--python /path/to/python3.x (or set $DARSAY_PYTHON).")
         raise
 
     record = {
@@ -371,7 +371,7 @@ def hydrate_bundle(bundle_dir: Path, engine: str | None = None, python: str | No
     if probe.get("status") != "pass":
         progress(f"Hydration recorded with a FAILING probe — see {bundle_dir / HYDRATION_FILE}")
     else:
-        progress(f"Hydrated. Next: modelvault run {bundle_dir}")
+        progress(f"Hydrated. Next: darsay run {bundle_dir}")
     return record
 
 
@@ -511,7 +511,7 @@ def _record_tested_hardware(manifest: dict, run_record: dict, result: dict, now:
         "engine_versions": result.get("versions"),
         "tokens_per_second": run_record["tokens_per_second"],
         "status": "pass",
-        "via": "modelvault run",
+        "via": "darsay run",
     }
     tested = manifest["runtime"].get("tested_hardware") or []
     keyfn = lambda e: (e.get("host"), e.get("device"), e.get("engine"))
@@ -528,7 +528,7 @@ def dehydrate_bundle(bundle_dir: Path, progress=print) -> None:
         return
     path.unlink()
     progress(f"Removed {path} (run history included).")
-    progress("Shared envs are untouched; reclaim disk with: modelvault envs --prune")
+    progress("Shared envs are untouched; reclaim disk with: darsay envs --prune")
 
 
 def _dir_size(path: Path) -> int:
@@ -536,7 +536,7 @@ def _dir_size(path: Path) -> int:
 
 
 def list_envs(vault: Path, progress=print) -> list[dict]:
-    root = Path(os.environ.get("MODELVAULT_RUNTIME") or vault / ".runtime")
+    root = Path(os.environ.get("DARSAY_RUNTIME") or vault / ".runtime")
     refs: dict[str, list[str]] = {}
     for hyd in sorted(vault.glob(f"*/*/{HYDRATION_FILE}")):
         try:

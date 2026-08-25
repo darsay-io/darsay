@@ -9,7 +9,7 @@ Python 3.10+ (development uses 3.14). From the repo root:
 ```bash
 python3 -m venv .venv
 .venv/bin/pip install -e ".[fast-hash,smoke,dev]"
-.venv/bin/modelvault --version
+.venv/bin/darsay --version
 .venv/bin/pytest                    # unit + integration, no network
 ```
 
@@ -18,7 +18,7 @@ provider) on every run, live Hub e2e opt-in. See
 [docs/TESTING.md](docs/TESTING.md).
 
 ```bash
-.venv/bin/pytest --run-e2e -m e2e   # or MODELVAULT_E2E=1; uses sshleifer/tiny-gpt2
+.venv/bin/pytest --run-e2e -m e2e   # or DARSAY_E2E=1; uses sshleifer/tiny-gpt2
 ```
 
 Never archive into the gitignored `vault/` you use for real archives. GitHub
@@ -48,7 +48,7 @@ bump.
 ## Versioning
 
 Bump **both** `project.version` in `pyproject.toml` and `__version__` in
-`src/modelvault/__init__.py`. Add a `CHANGELOG.md` section. Tag the GitHub
+`src/darsay/__init__.py`. Add a `CHANGELOG.md` section. Tag the GitHub
 release as `vX.Y.Z` (the `release` workflow attaches the wheel and sdist).
 
 `SCHEMA_VERSION` and `MVB_FORMAT_VERSION` bump independently, on format

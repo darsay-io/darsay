@@ -65,7 +65,7 @@ def inference_test(payload_root: Path, max_new_tokens: int = 8) -> dict:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
     except ImportError:
-        return {"status": "skipped", "reason": "transformers/torch not installed (install modelvault[inference])"}
+        return {"status": "skipped", "reason": "transformers/torch not installed (install darsay[inference])"}
     try:
         tok = AutoTokenizer.from_pretrained(str(payload_root))
         model = AutoModelForCausalLM.from_pretrained(str(payload_root), torch_dtype="auto")

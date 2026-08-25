@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
 
-from modelvault.providers.base import (
+from darsay.providers.base import (
     FileSpec,
     Snapshot,
     SourceGatedError,
