@@ -62,10 +62,12 @@ hashes against upstream, captures the license, and writes a bundle under
 
 ```
 Bundle ready: ~/darsay/sshleifer--tiny-gpt2/<rev>
+  id:           sshleifer--tiny-gpt2@<rev>
   manifest:     …/manifest.json
   readme:       …/README.md
   verification: …/VERIFICATION.md
   curation:     …/curation.md  <- edit this, then `darsay regen`
+  next:         darsay run sshleifer--tiny-gpt2@<rev>
 ```
 
 Find it later with:
@@ -116,9 +118,10 @@ The mental model in full: [Concepts](CONCEPTS.md).
 Point any Hugging Face-compatible loader at the payload. No conversion:
 
 ```python
+from pathlib import Path
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-path = "vault/sshleifer--tiny-gpt2/<rev>/model"
+path = Path.home() / "darsay/sshleifer--tiny-gpt2/<rev>/model"
 tok = AutoTokenizer.from_pretrained(path)
 model = AutoModelForCausalLM.from_pretrained(path)
 ```
@@ -127,7 +130,7 @@ Or let darsay build an isolated env and run **offline**
 (`HF_HUB_OFFLINE=1`):
 
 ```bash
-darsay run vault/sshleifer--tiny-gpt2/<rev> "Hello"
+darsay run sshleifer--tiny-gpt2 "Hello"
 ```
 
 The tokens will be nonsense — the model is tiny. The point is the path
@@ -186,6 +189,7 @@ A vault is a folder of bundles. A bundle is a pinned snapshot you can
 still load. `estimate` prices, `archive` keeps, `run` proves.
 
 Everything else in this repository is a sharpening of that loop:
-[resumable transfer](INCREMENTAL.md), [dataset bundles](DATASETS.md),
-[offline hydration](HYDRATION.md), [single-file export](MVB-FORMAT.md).
-When you want the map of all of it: [Documentation home](README.md).
+[catalogs](CATALOGS.md), [resumable transfer](INCREMENTAL.md),
+[dataset bundles](DATASETS.md), [offline hydration](HYDRATION.md),
+[single-file export](MVB-FORMAT.md). When you want the map of all of
+it: [Documentation home](README.md).

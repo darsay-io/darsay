@@ -291,13 +291,16 @@ def cmd_archive(args) -> int:
     if bundle is None:  # --dry-run printed the plan and intentionally did not register
         return 0
     bundle_id = f"{bundle.parent.name}@{bundle.name}"
+    from .archiver import load_manifest
+    artifact = load_manifest(bundle).get("artifact_type")
+    next_cmd = f"darsay info {bundle_id}" if artifact == "dataset" else f"darsay run {bundle_id}"
     print(f"\nBundle ready: {bundle}")
     print(f"  id:           {bundle_id}")
     print(f"  manifest:     {bundle / 'manifest.json'}")
     print(f"  readme:       {bundle / 'README.md'}")
     print(f"  verification: {bundle / 'VERIFICATION.md'}")
     print(f"  curation:     {bundle / 'curation.md'}  <- edit this, then `darsay regen`")
-    print(f"  next:         darsay run {bundle_id}")
+    print(f"  next:         {next_cmd}")
     return 0
 
 
@@ -476,7 +479,8 @@ def _list_catalog(args, vault, records, spec) -> int:
             print(row["source"])
         if pinned:
             print(
-                f"warning: {pinned} of {len(printable)} refs is a subset or pinned entry; "
+                f"warning: {pinned} of {len(printable)} refs "
+                f"{'is' if pinned == 1 else 'are'} a subset or pinned entry; "
                 "`archive` of that line will not apply --include/--revision.",
                 file=sys.stderr,
             )
@@ -497,8 +501,10 @@ def _list_catalog(args, vault, records, spec) -> int:
         print(f"  darsay catalog add {catalog['id']} huggingface:owner/name --desire 8")
         return 0
     if not rows:
-        stats = overlay_stats(all_rows)
-        print(f"nothing missing in catalog {catalog['id']} — {stats['have']} have")
+        message, is_error = next_idle_message(catalog, all_rows)
+        if is_error:
+            raise SystemExit("error: " + message)
+        print(message)
         return 0
     stats = overlay_stats(rows)
     print_catalog_table(rows, header_line=catalog_header_line(catalog, stats, rows))
@@ -606,12 +612,14 @@ def cmd_catalog_drop(args) -> int:
     path = resolve_catalog(vault, args.catalog)
     require_writable(vault, path, bool(args.write))
     catalog = load_catalog(path)
+    if args.full and args.include:
+        raise SystemExit("error: pass --full or --include, not both")
     removed = drop_entry(
         catalog,
         args.source,
         revision=args.revision,
-        include=args.include,
-        include_given=bool(args.include),
+        include=None if args.full else args.include,
+        include_given=bool(args.include) or bool(args.full),
         revision_given=bool(args.revision),
     )
     save_catalog(path, catalog)
@@ -770,6 +778,7 @@ def cmd_info(args) -> int:
     bundle = _bundle_dir(args)
     m = load_manifest(bundle)
     print(f"{m['bundle_id']}  (schema v{m['schema_version']}, {m['artifact_type']})")
+    print(f"  path:       {bundle}")
     src = m["source"]
     print(f"  source:     {src['address']} @ {src['revision'][:12]} ({src.get('provider') or src['origin']})")
     print(f"  license:    {m['licensing']['spdx_id']}  commercial={m['licensing']['commercial_use']}")
@@ -797,8 +806,13 @@ def cmd_info(args) -> int:
         hyd = load_hydration(bundle)
         if hyd:
             last = hyd["runs"][-1] if hyd.get("runs") else None
-            run_note = (f"last run {last['status']} ({last['at'][:10]}, {last.get('tokens_per_second')} tok/s)"
-                        if last else "no runs yet")
+            if last:
+                extras = [last["at"][:10]]
+                if last.get("tokens_per_second") is not None:
+                    extras.append(f"{last['tokens_per_second']} tok/s")
+                run_note = f"last run {last['status']} ({', '.join(extras)})"
+            else:
+                run_note = "no runs yet"
             print(f"  hydration:  {hyd['engine']} in env {hyd['env']['key']} — {run_note}")
         else:
             print(f"  hydration:  not hydrated (darsay hydrate {m['bundle_id']})")
@@ -1038,6 +1052,7 @@ def main(argv=None) -> int:
     d.add_argument("source", help="source ref")
     d.add_argument("--revision", help="intended pin")
     d.add_argument("--include", action="append", metavar="GLOB", help=include_help)
+    d.add_argument("--full", action="store_true", help="select the full-repo row (include is null)")
     d.add_argument("--write", action="store_true", help="allow writing a path-addressed catalog")
     d.set_defaults(func=cmd_catalog_drop)
 

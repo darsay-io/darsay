@@ -82,6 +82,9 @@ def test_list_json_and_ids(vault, test_provider, capsys):
     assert data[0]["partial"] is False
     assert "on_disk_bytes" in data[0]
     assert data[0]["payload_bytes"] > 0
+    assert data[0]["status"] == "have"
+    assert data[0]["source_address"] == "test:acme/toy"
+    assert data[0]["remaining_bytes"] == 0
     assert main(["--vault", str(vault), "list", "--ids"]) == 0
     assert "test--acme--toy@" in capsys.readouterr().out
 
@@ -170,6 +173,8 @@ def test_list_info_verify_regen_roundtrip(vault, test_provider, capsys):
     assert main(["--vault", str(vault), "info", "test--acme--toy"]) == 0
     by_id = capsys.readouterr().out
     assert "test:acme/toy" in by_id
+    assert str(bundle) in by_id
+    assert "path:" in by_id
 
     before_info = (bundle / "manifest.json").read_bytes()
     assert main(["--vault", str(vault), "info", str(bundle)]) == 0
@@ -221,6 +226,28 @@ def test_cli_archive_budget_exit_10(vault, test_provider):
     assert rc == 10
 
 
+def test_archive_next_hint_is_run_for_models_info_for_datasets(vault, test_provider, capsys):
+    from tests.payloads import dataset_files
+
+    test_provider.add_repo("acme/toy", model_files())
+    assert main(["--vault", str(vault), "archive", "test:acme/toy"]) == 0
+    model_out = capsys.readouterr().out
+    assert "next:" in model_out
+    assert "darsay run test--acme--toy@" in model_out
+
+    test_provider.add_repo(
+        "acme/reviews",
+        dataset_files(),
+        pipeline_tag=None,
+        license_id="mit",
+        metadata={"card_data": {"license": "mit"}, "tags": [], "gated": False},
+    )
+    assert main(["--vault", str(vault), "archive", "test:datasets/acme/reviews"]) == 0
+    data_out = capsys.readouterr().out
+    assert "darsay info " in data_out
+    assert "darsay run " not in data_out.split("next:")[-1]
+
+
 def test_smoke_dataset_structure_via_cli(vault, test_provider, capsys):
     from tests.payloads import dataset_files
 
@@ -237,3 +264,127 @@ def test_smoke_dataset_structure_via_cli(vault, test_provider, capsys):
     out = capsys.readouterr().out
     results = json.loads(out[out.index("{") :])
     assert results["structure"]["status"] == "pass"
+
+
+def test_catalog_index_ids_and_add_estimate(vault, test_provider, capsys):
+    test_provider.add_repo("acme/toy", model_files())
+    assert main(["--vault", str(vault), "catalog"]) == 0
+    empty = capsys.readouterr().out
+    assert "No catalogs" in empty
+    assert main(["--vault", str(vault), "catalog", "new", "summer", "--title", "Summer 2026"]) == 0
+    capsys.readouterr()
+    assert main(["--vault", str(vault), "catalog"]) == 0
+    listed = capsys.readouterr().out
+    assert "summer" in listed
+    assert "Summer 2026" in listed
+    assert main(["--vault", str(vault), "catalog", "--ids"]) == 0
+    assert capsys.readouterr().out.strip() == "summer"
+    assert main([
+        "--vault", str(vault), "catalog", "add", "summer", "test:acme/toy",
+        "--desire", "8", "--estimate",
+    ]) == 0
+    added = capsys.readouterr().out
+    assert "Added test:acme/toy" in added
+    catalog = json.loads((vault / "catalogs" / "summer" / "catalog.json").read_text())
+    assert catalog["entries"][0]["estimate"]["payload_bytes"] > 0
+    assert "checked_path" not in catalog["entries"][0]["estimate"]
+
+
+def test_hydrate_dry_run_dehydrate_and_envs_via_cli(vault, test_provider, tmp_path, monkeypatch, capsys):
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    runtime = tmp_path / "runtime"
+    monkeypatch.setenv("DARSAY_RUNTIME", str(runtime))
+    capsys.readouterr()
+    assert main(["--vault", str(vault), "hydrate", "acme--toy", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert "engine:" in out or "transformers" in out
+    assert not runtime.exists()
+    assert not (bundle / "hydration.json").exists()
+
+    (bundle / "hydration.json").write_text(
+        json.dumps({
+            "hydration_schema": 1,
+            "bundle_id": "x",
+            "engine": "transformers",
+            "env": {"key": "fake"},
+            "runs": [],
+        })
+        + "\n"
+    )
+    assert main(["--vault", str(vault), "dehydrate", "acme--toy"]) == 0
+    assert not (bundle / "hydration.json").exists()
+    assert main(["--vault", str(vault), "envs"]) == 0
+    assert "No runtime envs" in capsys.readouterr().out
+
+
+def test_assemble_via_cli(vault, test_provider, tmp_path, capsys):
+    from darsay.transfer import PartialTransfer
+
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    partials = []
+    for shard in ((1, 2), (2, 2)):
+        sub = tmp_path / f"lane{shard[0]}"
+        sub.mkdir()
+        try:
+            archive_quiet("test:acme/toy", vault=sub, shard=shard, max_bytes=1)
+        except PartialTransfer as stop:
+            partials.append(str(stop.bundle_dir))
+        else:
+            found = list(sub.glob("*/*"))
+            assert found
+            partials.append(str(found[0]))
+    capsys.readouterr()
+    assert main(["--vault", str(vault), "assemble", *partials]) == 0
+    out = capsys.readouterr().out
+    assert "Combined partial bundle:" in out
+    assert "archive" in out
+    assert not list(vault.glob("*/*/manifest.json"))
+
+
+def test_cli_run_records_via_stubbed_runner(vault, test_provider, monkeypatch, capsys):
+    import sys
+
+    from darsay.archiver import load_manifest
+
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    (bundle / "hydration.json").write_text(
+        json.dumps({
+            "hydration_schema": 1,
+            "bundle_id": load_manifest(bundle)["bundle_id"],
+            "engine": "transformers",
+            "weights": None,
+            "env": {
+                "key": "transformers-py3.14-deadbeef",
+                "path": "/tmp/fake-env",
+                "python": "3.14.0",
+                "python_executable": sys.executable,
+            },
+            "runs": [],
+        })
+        + "\n"
+    )
+
+    def fake_invoke(env_record, engine, runner_args, timeout=None):
+        return 0, {
+            "status": "pass",
+            "output": "ok",
+            "new_tokens": 2,
+            "device": "cpu",
+            "load_seconds": 0.0,
+            "generate_seconds": 0.0,
+            "tokens_per_second": None,
+            "versions": {},
+        }
+
+    monkeypatch.setattr("darsay.hydrate._invoke_runner", fake_invoke)
+    capsys.readouterr()
+    assert main(["--vault", str(vault), "run", "acme--toy", "Hello"]) == 0
+    out = capsys.readouterr().out
+    assert "Run PASSED" in out
+    assert "2 tokens" in out
+    hyd = json.loads((bundle / "hydration.json").read_text())
+    assert hyd["runs"][-1]["status"] == "pass"
+    assert hyd["runs"][-1]["prompt"] == "Hello"

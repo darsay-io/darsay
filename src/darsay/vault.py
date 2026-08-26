@@ -282,7 +282,7 @@ def resolve_bundle(
             listed = "\n".join(f"  {bundle_id}  {directory}" for directory, bundle_id in hits)
             raise SystemExit(
                 f"error: {raw!r} matches {len(hits)} bundles ({kind}):\n{listed}\n"
-                "  use a longer prefix, the bundle id, or the PATH from `darsay list`"
+                "  use a longer prefix, the bundle id from `darsay list`, or a path from `darsay list --json` / `darsay info`"
             )
     extra = ""
     folded = raw.strip().casefold()

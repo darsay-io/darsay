@@ -40,7 +40,7 @@ jobs:
           python -m pytest -m "not e2e" \
             --cov=darsay \
             --cov-report=term-missing \
-            --cov-fail-under=65
+            --cov-fail-under=73
 
       - name: CLI smoke
         run: |

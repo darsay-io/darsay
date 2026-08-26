@@ -133,18 +133,19 @@ def _read_marker(tar_path: Path) -> dict:
     from .schema import MANIFEST_SCHEMA_MAJOR, parse_schema_major
 
     embedded = marker.get("schema_version")
-    if embedded:
-        try:
-            schema_major = parse_schema_major(embedded)
-        except ValueError:
-            raise SystemExit(
-                f"error: export marker schema_version {embedded!r}"
-            ) from None
-        if schema_major > MANIFEST_SCHEMA_MAJOR:
-            raise SystemExit(
-                f"error: embedded manifest schema {embedded} is newer than this darsay "
-                f"(supports {MANIFEST_SCHEMA_MAJOR}.x)"
-            )
+    if not embedded:
+        raise SystemExit("error: export marker schema_version missing")
+    try:
+        schema_major = parse_schema_major(embedded)
+    except ValueError:
+        raise SystemExit(
+            f"error: export marker schema_version {embedded!r}"
+        ) from None
+    if schema_major > MANIFEST_SCHEMA_MAJOR:
+        raise SystemExit(
+            f"error: embedded manifest schema {embedded} is newer than this darsay "
+            f"(supports {MANIFEST_SCHEMA_MAJOR}.x)"
+        )
     return marker
 
 

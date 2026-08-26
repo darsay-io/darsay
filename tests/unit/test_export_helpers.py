@@ -75,6 +75,22 @@ def test_read_marker_rejects_incompatible_major(tmp_path):
         _read_marker(tar_path)
 
 
+def test_read_marker_rejects_missing_schema_version(tmp_path):
+    tar_path = tmp_path / "noschema.tar"
+    marker = {
+        "mvb_format_version": "1.1",
+        "bundle_id": "x@abc",
+        "bundle_hash": {"value": "00"},
+    }
+    payload = (json.dumps(marker) + "\n").encode("utf-8")
+    with tarfile.open(tar_path, "w") as tar:
+        info = tarfile.TarInfo(name=f"x@abc/{MARKER_NAME}")
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    with pytest.raises(SystemExit, match="schema_version missing"):
+        _read_marker(tar_path)
+
+
 def test_current_format_major_is_readable():
     major = MVB_FORMAT_VERSION.split(".")[0]
     assert major == "1"

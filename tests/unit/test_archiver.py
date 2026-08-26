@@ -6,6 +6,7 @@ import pytest
 
 from darsay.archiver import (
     _guess_version,
+    _warn_include_vs_pin,
     archive_model,
     bundle_dir_for,
     bundle_name_for,
@@ -108,12 +109,23 @@ def test_load_manifest_refuses_wrong_kind(tmp_path):
         load_manifest(tmp_path)
 
 
-def test_load_manifest_requires_kind(tmp_path):
+def test_warn_include_refuses_full_repo_resume_of_subset_pin():
+    notes = []
+    ledger = {"subset": {"include": ["*Q4_K_M*"]}}
+    with pytest.raises(SystemExit, match="this pin is a subset"):
+        _warn_include_vs_pin(None, ledger, notes.append)
+    _warn_include_vs_pin(["*Q4_K_M*"], ledger, notes.append)
+    assert notes == []
+    _warn_include_vs_pin(["*.gguf", "*Q4_K_M*"], ledger, notes.append)
+    assert any("differs from the pinned subset" in n for n in notes)
+
+
+def test_load_manifest_missing_kind_is_implied_on_1x(tmp_path):
     data = _minimal_manifest()
     del data["kind"]
     (tmp_path / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
-    with pytest.raises(SystemExit, match="kind missing"):
-        load_manifest(tmp_path)
+    loaded = load_manifest(tmp_path)
+    assert loaded["kind"] == MANIFEST_KIND
 
 
 def test_write_manifest_preserves_unknown_top_level(tmp_path):

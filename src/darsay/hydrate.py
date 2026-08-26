@@ -48,7 +48,7 @@ ENGINES = {
         "requirements": ["torch", "transformers"],
         "runner": "transformers_runner.py",
         "weights_globs": None,  # loads the payload directory itself
-        "architecture_suffixes": ("ForCausalLM",),
+        "architecture_suffixes": ("ForCausalLM", "LMHeadModel"),
         "install_hint": "first hydrate installs torch + transformers (often 1–2 GiB)",
     },
     "llama-cpp": {
@@ -74,9 +74,10 @@ ENGINES = {
         "requirements": ["mlx", "mlx-lm"],
         "runner": "mlx_runner.py",
         "weights_globs": None,
-        "architecture_suffixes": ("ForCausalLM",),
+        "architecture_suffixes": ("ForCausalLM", "LMHeadModel"),
         "install_hint": "first hydrate installs mlx + mlx-lm",
         "platforms": ("darwin",),
+        "machines": ("arm64", "aarch64"),
     },
 }
 
@@ -173,7 +174,7 @@ def preflight_run(
             issues.append({"level": "info", "code": "env-install", "message": hint})
     if (
         engine == "transformers"
-        and sys.platform == "darwin"
+        and _platform_ok(ENGINES["mlx"])
         and _engine_applies(ENGINES["mlx"], [f["path"] for f in manifest.get("inventory", {}).get("files", [])], "compatible")
     ):
         issues.append({
@@ -230,7 +231,12 @@ def _matches(inventory_paths: list[str], patterns: list[str]) -> list[str]:
 
 def _platform_ok(spec: dict) -> bool:
     platforms = spec.get("platforms")
-    return not platforms or sys.platform in platforms
+    if platforms and sys.platform not in platforms:
+        return False
+    machines = spec.get("machines")
+    if machines and platform.machine() not in machines:
+        return False
+    return True
 
 
 def _engine_applies(spec: dict, inventory_paths: list[str], key: str) -> bool:
@@ -262,9 +268,11 @@ def select_engine(manifest: dict, requested: str | None) -> str:
         spec = ENGINES[requested]
         if not _platform_ok(spec):
             where = ", ".join(spec.get("platforms") or [])
+            machines = spec.get("machines") or ()
+            extra = f", {', '.join(machines)}" if machines else ""
             raise SystemExit(
-                f"error: engine {requested!r} is supported on {where or 'no platforms'} "
-                f"(this OS is {sys.platform})"
+                f"error: engine {requested!r} is supported on {where or 'no platforms'}{extra} "
+                f"(this OS is {sys.platform}, machine {platform.machine()})"
             )
         if requested in detected or _engine_applies(spec, inventory_paths, "compatible"):
             return requested
@@ -273,9 +281,14 @@ def select_engine(manifest: dict, requested: str | None) -> str:
             f"(detected: {', '.join(detected) or 'none'})"
         )
     if not detected:
+        if manifest.get("artifact_type") == "dataset":
+            raise SystemExit(
+                "error: datasets have no inference engine — "
+                "open data/ directly, or `darsay info` for the recorded facts"
+            )
         raise SystemExit(
             "error: no known engine matches this payload "
-            f"(known engines: {', '.join(ENGINES)}; see ENGINES in hydrate.py)"
+            f"(known engines: {', '.join(ENGINES)})"
         )
     return detected[0]
 
@@ -672,9 +685,22 @@ def run_bundle(bundle_dir: Path, prompt: str | None = None, engine: str | None =
 
     progress("")
     if ok:
-        progress(f"Run PASSED — {run_record['new_tokens']} tokens on {run_record['device']} "
-                 f"({run_record['tokens_per_second']} tok/s, load {run_record['load_seconds']}s, "
-                 f"generate {run_record['generate_seconds']}s)")
+        bits = ["Run PASSED"]
+        if run_record["new_tokens"] is not None:
+            bits.append(f"— {run_record['new_tokens']} tokens")
+        if run_record["device"]:
+            bits.append(f"on {run_record['device']}")
+        extras = []
+        if run_record["tokens_per_second"] is not None:
+            extras.append(f"{run_record['tokens_per_second']} tok/s")
+        if run_record["load_seconds"] is not None:
+            extras.append(f"load {run_record['load_seconds']}s")
+        if run_record["generate_seconds"] is not None:
+            extras.append(f"generate {run_record['generate_seconds']}s")
+        line = " ".join(bits)
+        if extras:
+            line += f" ({', '.join(extras)})"
+        progress(line)
         progress(f"Recorded in {bundle_dir / HYDRATION_FILE} and manifest runtime.tested_hardware")
     else:
         progress(f"Run FAILED: {run_record['error'] or 'see runner output above'}")

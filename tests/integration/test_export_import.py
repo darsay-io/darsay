@@ -13,7 +13,7 @@ from darsay.export import EXPORT_EXCLUDE, MARKER_NAME, export_bundle, import_bun
 from darsay.hashing import hash_file
 from tests.conftest import silent
 from tests.integration.conftest import archive_quiet
-from tests.payloads import model_files
+from tests.payloads import dataset_files, model_files
 
 
 def _sha256(path: Path) -> str:
@@ -87,3 +87,21 @@ def test_import_failure_registers_nothing(vault, test_provider, tmp_path):
     with pytest.raises(SystemExit, match="import verification FAILED"):
         import_bundle(tampered, vault, progress=silent)
     assert list(vault.glob("*/*/manifest.json")) == []
+
+
+def test_export_import_dataset_roundtrip(vault, test_provider, tmp_path):
+    test_provider.add_repo(
+        "acme/reviews",
+        dataset_files(),
+        pipeline_tag=None,
+        license_id="mit",
+        metadata={"card_data": {"license": "mit"}, "tags": [], "gated": False},
+    )
+    bundle = archive_quiet("test:datasets/acme/reviews", vault=vault)
+    tar_path = export_bundle(bundle, tmp_path / "exports", progress=silent)
+    other = tmp_path / "other-vault"
+    other.mkdir()
+    imported = import_bundle(tar_path, other, progress=silent)
+    assert load_manifest(imported)["artifact_type"] == "dataset"
+    assert load_manifest(imported)["kind"] == "darsay.bundle"
+    assert (imported / "data" / "train.jsonl").is_file()

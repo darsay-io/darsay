@@ -142,7 +142,7 @@ Qwen/Qwen3.8-27B @ main -> 1d4bf0f2ff60
   payload:      32 files, 51.8 GiB
   engines:      transformers
   completeness: complete
-  bundle:       vault/qwen--qwen3.8-27b/1d4bf0f2ff60  (new)
+  bundle:       ~/darsay/qwen--qwen3.8-27b/1d4bf0f2ff60  (new)
   disk:         needs ~55.5 GiB, free 1022.6 GiB — OK
 
 To archive: darsay archive Qwen/Qwen3.8-27B
@@ -176,9 +176,10 @@ Or skip the tool and point any Hugging Face-compatible loader at the
 payload:
 
 ```python
+from pathlib import Path
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-path = "vault/qwen--qwen3-0.6b/<rev>/model"
+path = Path.home() / "darsay/qwen--qwen3-0.6b/<rev>/model"
 tok = AutoTokenizer.from_pretrained(path)
 model = AutoModelForCausalLM.from_pretrained(path)
 ```
@@ -234,7 +235,8 @@ archiving**; the bundle hash covers it alone.
 | Price a source, download nothing | `darsay estimate Qwen/Qwen3.8-27B` |
 | Keep it | `darsay archive Qwen/Qwen3-0.6B` |
 | Talk to it | `darsay run qwen--qwen3-0.6b "Say hello"` |
-| See what you have | `darsay list` (id + path; `--json` for scripts) |
+| See what you have | `darsay list` (STATUS / SOURCE / HAVE; path in `--json` / `info`) |
+| Share a want-list | `darsay catalog new summer` then `list summer` / `archive --next summer` |
 | Disk use | `darsay du` |
 | Delete a bundle | `darsay rm qwen--qwen3-0.6b --yes` |
 | Re-hash and compare | `darsay verify qwen--qwen3-0.6b` |

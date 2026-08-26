@@ -1,8 +1,22 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import pytest
 
-from darsay.complete import COMMANDS, BUNDLE_COMMANDS, script_for
+from darsay.complete import BUNDLE_COMMANDS, CATALOG_COMMANDS, COMMANDS, script_for
+
+ROOT = Path(__file__).resolve().parents[2]
+
+
+def test_complete_command_lists_match_argparse():
+    text = (ROOT / "src" / "darsay" / "cli.py").read_text(encoding="utf-8")
+    cli_cmds = re.findall(r'add_cmd\("([^"]+)"', text)
+    cat_cmds = re.findall(r'add_cat\("([^"]+)"', text)
+    assert set(cli_cmds) == set(COMMANDS)
+    assert set(cat_cmds) == set(CATALOG_COMMANDS)
+    assert set(BUNDLE_COMMANDS) <= set(COMMANDS)
 
 
 def test_script_for_known_shells():

@@ -503,7 +503,7 @@ def drop_entry(
         raise SystemExit(
             f"error: {canonical} matches {len(source_matches)} entries in {catalog['id']}:\n"
             + "\n".join(lines)
-            + "\n  pass --include to choose one"
+            + "\n  pass --include GLOB to choose a subset, or --full for the full-repo row"
         )
     if len(candidates) != 1:
         raise SystemExit(f"error: {canonical} does not match a unique entry in {catalog['id']}")
@@ -808,6 +808,8 @@ def overlay_stats(rows: list[dict]) -> dict:
                 remaining_unknown = True
             else:
                 remaining += rem
+            if est and (est.get("unknown_size_count") or 0) > 0:
+                remaining_unknown = True
     oldest = min(as_ofs) if as_ofs else None
     return {
         "sources": len(rows),

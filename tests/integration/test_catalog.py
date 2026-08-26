@@ -145,7 +145,8 @@ def test_archive_next_resumes_non_main_partial(vault, test_provider, capsys):
     # --next on a partial should resume the matched pin (not pin main).
     rc = main(["--vault", str(vault), "archive", "--next", str(fixture), "--jobs", "1"])
     out = capsys.readouterr().out
-    assert "Resuming from catalog" in out or rc in (0, 10)
+    assert "Resuming from catalog" in out
+    assert rc in (0, 10)
     # Completing should register at the bbbb revision, not a new main pin.
     if rc == 10:
         rc = main(["--vault", str(vault), "archive", "--next", str(fixture), "--jobs", "1"])
@@ -154,6 +155,33 @@ def test_archive_next_resumes_non_main_partial(vault, test_provider, capsys):
     dirs = list((vault / "test--acme--toy").iterdir())
     assert any(d.name.startswith("bbbbbbbbbbbb") for d in dirs if d.is_dir())
     assert not (vault / "test--acme--toy" / "aaaaaaaaaaaa").exists()
+
+
+def test_archive_next_full_repo_does_not_resume_subset_pin(vault, test_provider):
+    from darsay.archiver import archive
+    from darsay.transfer import PartialTransfer
+    from tests.conftest import silent
+
+    files = model_files(extra={
+        "quant.Q4_K_M.gguf": b"q4" * 80,
+        "quant.Q8_0.gguf": b"q8" * 80,
+    })
+    test_provider.add_repo("acme/toy", files)
+    try:
+        archive(
+            "test:acme/toy",
+            vault=vault,
+            include=["*Q4_K_M*"],
+            max_bytes=1,
+            jobs=1,
+            progress=silent,
+        )
+    except PartialTransfer:
+        pass
+    assert main(["--vault", str(vault), "catalog", "new", "summer"]) == 0
+    assert main(["--vault", str(vault), "catalog", "add", "summer", "test:acme/toy", "--desire", "9"]) == 0
+    with pytest.raises(SystemExit, match="this pin is a subset|already exists"):
+        main(["--vault", str(vault), "archive", "--next", "summer"])
 
 
 def test_archive_next_errors(vault, test_provider, capsys):

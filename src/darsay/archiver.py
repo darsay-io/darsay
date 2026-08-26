@@ -132,13 +132,12 @@ def load_manifest(bundle_dir: Path) -> dict:
             f"error: manifest schema {version} is newer than this darsay "
             f"(supports {MANIFEST_SCHEMA_MAJOR}.x)"
         )
-    kind = data.get("kind")
-    if not kind:
-        raise SystemExit(f"error: unreadable manifest at {path}: kind missing")
+    kind = data.get("kind") or MANIFEST_KIND
     if kind != MANIFEST_KIND:
         raise SystemExit(
             f"error: unreadable manifest at {path}: kind is not {MANIFEST_KIND!r}"
         )
+    data["kind"] = kind
     return data
 
 
@@ -153,8 +152,10 @@ def _guess_version(repo_name: str, model_type: str | None) -> str | None:
 
 
 def _warn_include_vs_pin(include: list[str] | None, ledger: dict, progress) -> None:
+    from .catalog import include_key
+
     pinned = (ledger.get("subset") or {}).get("include")
-    if not include:
+    if include_key(include) == include_key(pinned):
         return
     if pinned is None:
         progress(
@@ -162,11 +163,17 @@ def _warn_include_vs_pin(include: list[str] | None, ledger: dict, progress) -> N
             "Use --force to pin a subset."
         )
         return
-    if list(include) != list(pinned):
+    if include:
         progress(
             "WARNING: --include differs from the pinned subset "
             f"{pinned}; resuming the pin. Use --force to re-pin."
         )
+        return
+    raise SystemExit(
+        f"error: this pin is a subset {pinned}; it is not the full repo\n"
+        "  hint: pass matching --include to resume this pin\n"
+        "  hint: --force re-pins the full file set"
+    )
 
 
 def archive(
@@ -237,10 +244,16 @@ def archive(
         manifest_path = bundle_dir / "manifest.json"
         if manifest_path.exists() and not force and not dry_run:
             bundle_id = f"{bundle_dir.parent.name}@{bundle_dir.name}"
+            next_hint = f"`darsay info {bundle_id}` or `darsay run {bundle_id}`"
+            try:
+                existing = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError):
+                existing = {}
+            if isinstance(existing, dict) and existing.get("artifact_type") == "dataset":
+                next_hint = f"`darsay info {bundle_id}`"
             raise SystemExit(
                 f"error: bundle already exists: {bundle_dir}\n"
-                f"  {bundle_id} is already in the vault — "
-                f"`darsay info {bundle_id}` or `darsay run {bundle_id}`.\n"
+                f"  {bundle_id} is already in the vault — {next_hint}.\n"
                 "  --force re-pins (may follow a new main); it is not resume."
             )
 

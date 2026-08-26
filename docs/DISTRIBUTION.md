@@ -20,7 +20,7 @@ darsay is published to [PyPI](https://pypi.org/project/darsay/) as a
 **pure-Python** package (no compiled extensions). One wheel installs on
 every platform that has Python 3.10+:
 
-`darsay-0.6.0-py3-none-any.whl`
+`darsay-0.7.0-py3-none-any.whl`
 
 The only runtime dependency is `huggingface_hub`. Optional extras
 (`fast-hash`, `smoke`, `inference`, `datasets`) stay optional. `darsay
@@ -58,14 +58,14 @@ Hydrate/run still need a real interpreter.
 From a downloaded wheel (GitHub Release asset):
 
 ```bash
-pipx install ./darsay-0.6.0-py3-none-any.whl
+pipx install ./darsay-0.7.0-py3-none-any.whl
 ```
 
 From a git tag or an unreleased commit (not the primary path):
 
 ```bash
-pipx install git+https://github.com/jeremynorris/darsay@v0.6.0
-uvx --from git+https://github.com/jeremynorris/darsay@v0.6.0 \
+pipx install git+https://github.com/jeremynorris/darsay@v0.7.0
+uvx --from git+https://github.com/jeremynorris/darsay@v0.7.0 \
     darsay estimate sshleifer/tiny-gpt2
 ```
 
@@ -79,7 +79,7 @@ python3 -m venv .venv
 
 ## GitHub Release contents
 
-Each tagged release (`v0.6.0`, matching `pyproject.toml` / `__version__`)
+Each tagged release (`v0.7.0`, matching `pyproject.toml` / `__version__`)
 should attach:
 
 | Asset | Why |

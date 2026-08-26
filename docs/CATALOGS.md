@@ -113,7 +113,14 @@ set.
 
 `archive --next` and `list --sort next` prefer `partial` over `want`
 (finish bytes already on disk), then higher desire. `--sort desire` is
-priority-first. Unknown rows are skipped.
+priority-first. Unknown rows are not unfinished work: `--next` skips
+them when anything else remains, and errors if they are all that is
+left.
+
+A vault stores one pin per `(source, revision12)`. Catalog rows that
+differ only by `--include` are different works in the catalog, but they
+cannot both occupy the same bundle directory. `--next` of a full-repo
+row will not resume a subset pin of the same source.
 
 `archive` does not write `catalog.json`. Status flips when *this* vault
 grows bytes. A friend’s overlay against their empty vault is all `want`.
@@ -127,8 +134,11 @@ Unknown bytes print as `+ ?`, never as zero.
 ```
 darsay catalog new NAME
 darsay catalog add CATALOG SOURCE [--desire 1-9] [--estimate]
+darsay catalog drop CATALOG SOURCE [--include GLOB | --full]
+darsay catalog regen CATALOG
 darsay list CATALOG
 darsay list CATALOG --want
+darsay list CATALOG --next
 darsay estimate CATALOG
 darsay archive --next CATALOG
 darsay catalog adopt MINE ./friend

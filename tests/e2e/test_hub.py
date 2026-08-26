@@ -17,21 +17,34 @@ from tests.conftest import silent
 TINY = "sshleifer/tiny-gpt2"
 
 
-def test_tiny_gpt2_estimate_archive_verify_export_import(tmp_path):
+def test_tiny_gpt2_estimate_archive_verify_export_import(tmp_path, capsys):
     vault = tmp_path / "vault"
     vault.mkdir()
     assert main(["--vault", str(vault), "estimate", TINY]) in (0, 1)
+    capsys.readouterr()
 
     rc = main(["--vault", str(vault), "archive", TINY, "--jobs", "2"])
     assert rc == 0
+    capsys.readouterr()
     bundles = list(vault.glob("sshleifer--tiny-gpt2/*/manifest.json"))
     assert len(bundles) == 1
     bundle = bundles[0].parent
     manifest = load_manifest(bundle)
+    assert manifest["kind"] == "darsay.bundle"
     assert manifest["source"]["provider"] == "huggingface"
     assert manifest["source"]["repo_id"] == TINY
     assert manifest["artifact_type"] == "model"
     assert (bundle / "model").is_dir()
+
+    assert main(["--vault", str(vault), "list"]) == 0
+    listed = capsys.readouterr().out
+    assert "sshleifer--tiny-gpt2" in listed
+    assert "have" in listed
+    assert main(["--vault", str(vault), "info", "sshleifer--tiny-gpt2"]) == 0
+    info = capsys.readouterr().out
+    assert "sshleifer/tiny-gpt2" in info
+    assert "path:" in info
+    assert "schema v" in info
 
     report = verify_bundle(bundle, progress=silent)
     assert report["checksum"]["status"] == "pass"

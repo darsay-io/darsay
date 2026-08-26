@@ -1,13 +1,68 @@
 from __future__ import annotations
 
 import json
+import sys
 
 import pytest
 
-from darsay.hydrate import dehydrate_bundle, hydrate_bundle, list_envs, prune_envs
+from darsay.archiver import load_manifest
+from darsay.hydrate import dehydrate_bundle, hydrate_bundle, list_envs, prune_envs, run_bundle
 from tests.conftest import silent
 from tests.integration.conftest import archive_quiet
 from tests.payloads import model_files
+
+
+def _fake_hydration(bundle):
+    return {
+        "hydration_schema": 1,
+        "bundle_id": load_manifest(bundle)["bundle_id"],
+        "engine": "transformers",
+        "weights": None,
+        "env": {
+            "key": "transformers-py3.14-deadbeef",
+            "path": "/tmp/fake-env",
+            "python": "3.14.0",
+            "python_executable": sys.executable,
+        },
+        "runs": [],
+    }
+
+
+def test_run_bundle_records_pass_without_installing(vault, test_provider, monkeypatch):
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    payload = (bundle / "model" / "model.safetensors").read_bytes()
+    schema = load_manifest(bundle)["schema_version"]
+    (bundle / "hydration.json").write_text(json.dumps(_fake_hydration(bundle)) + "\n")
+
+    def fake_invoke(env_record, engine, runner_args, timeout=None):
+        assert engine == "transformers"
+        assert env_record["python_executable"] == sys.executable
+        assert "--prompt" in runner_args
+        assert runner_args[runner_args.index("--prompt") + 1] == "Hi there"
+        return 0, {
+            "status": "pass",
+            "output": "hello from stub",
+            "new_tokens": 4,
+            "device": "cpu",
+            "dtype": "float32",
+            "prompt_mode": "chat-template",
+            "load_seconds": 0.1,
+            "generate_seconds": 0.2,
+            "tokens_per_second": 20.0,
+            "versions": {"torch": "0.0", "transformers": "0.0"},
+        }
+
+    monkeypatch.setattr("darsay.hydrate._invoke_runner", fake_invoke)
+    record = run_bundle(bundle, prompt="Hi there", progress=silent)
+    assert record["status"] == "pass"
+    assert record["new_tokens"] == 4
+    hyd = json.loads((bundle / "hydration.json").read_text())
+    assert hyd["runs"][-1]["output"] == "hello from stub"
+    manifest = load_manifest(bundle)
+    assert manifest["schema_version"] == schema
+    assert manifest["runtime"]["tested_hardware"][0]["engine"] == "transformers"
+    assert (bundle / "model" / "model.safetensors").read_bytes() == payload
 
 
 def test_hydrate_preflight_rejects_non_causal_architecture(vault, test_provider, tmp_path, monkeypatch):

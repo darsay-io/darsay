@@ -40,8 +40,8 @@ at the bundle, run it.
 payload vs metadata, why the formats outlive the tool.
 
 **You want a command that already exists.**
-[Examples](../examples/README.md) — estimate, resume, datasets, export,
-shards, verify. Then the spec for the command you are about to run.
+[Examples](../examples/README.md) — estimate, resume, datasets, catalogs,
+export, shards, verify. Then the spec for the command you are about to run.
 
 **You are reading this in 2040 and the CLI is gone.**
 [Manifest](MANIFEST.md) and [MVB format](MVB-FORMAT.md) are the two

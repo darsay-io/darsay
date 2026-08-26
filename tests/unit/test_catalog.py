@@ -21,6 +21,8 @@ from darsay.catalog import (
     next_entry,
     next_idle_message,
     overlay,
+    overlay_stats,
+    print_catalog_index,
     print_catalog_table,
     project_stored_estimate,
     realize_from_overlay,
@@ -35,6 +37,7 @@ from darsay.catalog import (
     drop_entry,
     adopt_entries,
     warning_detail,
+    write_catalog_readme,
 )
 
 
@@ -164,6 +167,21 @@ def test_overlay_null_revision_matches_any_pin():
     records = [_record("huggingface:acme/toy", revision="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")]
     rows = overlay(catalog, records)
     assert rows[0]["status"] == "have"
+
+
+def test_sort_rows_desire_size_name_status():
+    rows = [
+        {"status": "have", "desire": 3, "source": "b", "remaining_bytes": 0},
+        {"status": "want", "desire": 9, "source": "a", "remaining_bytes": 50},
+        {"status": "partial", "desire": None, "source": "c", "remaining_bytes": 10},
+        {"status": "unknown", "desire": 1, "source": "d", "remaining_bytes": None},
+    ]
+    assert [r["source"] for r in sort_rows(rows, "desire")] == ["a", "b", "d", "c"]
+    # SIZE sort is remaining-to-fetch (None keys as if remaining were -1).
+    assert [r["source"] for r in sort_rows(rows, "size")] == ["a", "c", "b", "d"]
+    assert [r["source"] for r in sort_rows(rows, "name")] == ["a", "b", "c", "d"]
+    assert [r["source"] for r in sort_rows(rows, "status")] == ["b", "c", "a", "d"]
+    assert [r["source"] for r in sort_rows(rows, "nope")] == ["b", "a", "c", "d"]
 
 
 def test_sort_next_puts_unfinished_first():
@@ -333,6 +351,13 @@ def test_upsert_and_drop_include_set(tmp_path):
         drop_entry(cat, "huggingface:acme/toy")
     drop_entry(cat, "huggingface:acme/toy", include=["*Q5*"], include_given=True)
     assert len(cat["entries"]) == 1
+    upsert_entry(cat, "huggingface:acme/toy", desire=1)
+    assert len(cat["entries"]) == 2
+    with pytest.raises(SystemExit, match="--full"):
+        drop_entry(cat, "huggingface:acme/toy")
+    drop_entry(cat, "huggingface:acme/toy", include=None, include_given=True)
+    assert len(cat["entries"]) == 1
+    assert include_key(cat["entries"][0].get("include")) == include_key(["*Q4*", "*.gguf"])
 
 
 def test_upsert_skips_unknown_provider_rows():
@@ -418,6 +443,56 @@ def test_next_idle_message_empty_vs_complete():
     assert "unknown source provider" in msg
 
 
+def test_write_catalog_readme_includes_include_cached_size_and_overlay_hints(tmp_path):
+    dest = tmp_path / "summer"
+    dest.mkdir()
+    catalog = _catalog(
+        [_entry(
+            "huggingface:acme/toy",
+            desire=8,
+            include=["*Q4_K_M*"],
+            note="the quant",
+            estimate={
+                "payload_bytes": 1024,
+                "as_of": "2026-08-01T00:00:00+00:00",
+                "artifact_type": "model",
+                "license": "apache-2.0",
+            },
+        )],
+        curator="Alex",
+        note="a want-list",
+    )
+    write_catalog_readme(dest, catalog)
+    text = (dest / "README.md").read_text(encoding="utf-8")
+    assert "A darsay catalog (`summer`)" in text
+    assert "Curator: Alex" in text
+    assert "> a want-list" in text
+    assert "*Q4_K_M*" in text
+    assert "1.0 KiB" in text
+    assert "apache-2.0" in text
+    assert "the quant" in text
+    assert "darsay list ./catalog.json" in text
+    assert "darsay archive --next ./catalog.json" in text
+
+
+def test_print_catalog_index(capsys):
+    print_catalog_index([
+        {
+            "id": "summer",
+            "title": "Summer 2026",
+            "curator": None,
+            "entries": [{}, {}],
+            "updated": "2026-08-26T12:00:00+00:00",
+        }
+    ])
+    out = capsys.readouterr().out
+    assert "CATALOG" in out
+    assert "summer" in out
+    assert "Summer 2026" in out
+    assert "2" in out
+    assert "2026-08-26" in out
+
+
 def test_print_catalog_table_hides_empty_desire_note(capsys):
     print_catalog_table([
         {
@@ -470,6 +545,18 @@ def test_vault_header_omits_remaining_when_complete(tmp_path):
         "remaining_bytes": 50, "remaining_unknown": False, "on_disk_bytes": 100,
     })
     assert "remaining" in partial
+
+
+def test_overlay_stats_unknown_size_count_is_not_zero_remaining():
+    rows = [{
+        "status": "want",
+        "on_disk_bytes": 0,
+        "remaining_bytes": 0,
+        "estimate": {"as_of": "2026-08-01T00:00:00+00:00", "unknown_size_count": 3},
+    }]
+    stats = overlay_stats(rows)
+    assert stats["remaining_bytes"] == 0
+    assert stats["remaining_unknown"] is True
 
 
 def test_warning_detail_strips_error_prefix():

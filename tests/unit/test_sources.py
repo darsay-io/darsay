@@ -1,8 +1,44 @@
 from __future__ import annotations
 
+import ast
+from pathlib import Path
+
 import pytest
 
 from darsay.sources import get_provider, parse_source, provider_names, source_from_ledger
+
+SRC = Path(__file__).resolve().parents[2] / "src" / "darsay"
+_PLUGIN_CONSUMERS = (
+    "archiver.py",
+    "catalog.py",
+    "cli.py",
+    "estimate.py",
+    "export.py",
+    "hydrate.py",
+    "transfer.py",
+    "vault.py",
+    "verify.py",
+)
+
+
+def _top_level_imports(path: Path) -> set[str]:
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(alias.name.split(".", 1)[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            names.add(node.module.split(".", 1)[0])
+    return names
+
+
+def test_acquisition_consumers_do_not_import_huggingface_hub():
+    offenders = []
+    for name in _PLUGIN_CONSUMERS:
+        path = SRC / name
+        if "huggingface_hub" in _top_level_imports(path):
+            offenders.append(name)
+    assert offenders == []
 
 
 def test_huggingface_is_registered():

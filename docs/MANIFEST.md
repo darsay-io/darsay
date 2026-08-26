@@ -33,7 +33,7 @@ Conventions:
 | Field | Meaning |
 |---|---|
 | `schema_version` | Version of this schema (`"1.6.0"`). Major changes only on breaking layout. |
-| `kind` | Always `"darsay.bundle"`. Any other value (including missing) is a load error. |
+| `kind` | Always `"darsay.bundle"`. New archives write it. A 1.x file with the field missing is read as `"darsay.bundle"`. Any other value is a load error. |
 | `artifact_type` | Registry key driving completeness rules and the payload root (`"model"` or `"dataset"`; future: GGUF packs, papers — see `src/darsay/schema.py`). |
 | `bundle_id` | `<bundle directory name>@<first 12 of pinned revision>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Hugging Face dataset bundles take a `datasets--` prefix (`datasets--saidutta69--fable-5-premium@684cb1f849fe`) since model and dataset namespaces can collide on that host. Other providers include their id in the directory name. Stable, deterministic, unique per (source, revision). |
 
@@ -269,8 +269,9 @@ last touched it. Tool version (`darsay.__version__`) moves independently.
   `.mvb.json` marker before unpacking). A 2.x bundle is unsupported, not
   silently misread. Mixed 1.x minors may coexist in one vault.
 - **Minor / patch** are additive. Readers **ignore unknown fields**.
-  Missing additive fields mean `null`. Writers **preserve** unknown
-  top-level keys on round-trip (`verify`, `run`, `regen`).
+  Missing additive fields mean `null` (`kind` missing on a 1.x file is
+  read as `"darsay.bundle"`). Writers **preserve** unknown top-level keys
+  on round-trip (`verify`, `run`, `regen`).
 - **The version describes this file**, not the tool that last touched it.
   Writes do not stamp the tool's current schema onto the record.
 - **1.x will not** rename or remove a field, change `payload_root` for

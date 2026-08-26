@@ -30,6 +30,7 @@ def test_detect_transformers_and_llama_cpp():
 
 
 def test_select_engine_mlx_opt_in_on_safetensors():
+    import platform
     import sys
 
     manifest = {
@@ -43,7 +44,8 @@ def test_select_engine_mlx_opt_in_on_safetensors():
     assert select_engine(manifest, None) == "transformers"
     assert detect_engines([f["path"] for f in manifest["inventory"]["files"]]) == ["transformers"]
     npz = detect_engines(["model/config.json", "model/weights.npz"])
-    if sys.platform == "darwin":
+    apple_silicon = sys.platform == "darwin" and platform.machine() in {"arm64", "aarch64"}
+    if apple_silicon:
         assert select_engine(manifest, "mlx") == "mlx"
         assert "mlx" in npz
     else:
@@ -88,6 +90,9 @@ def test_select_weights_gguf():
 def test_engine_supports_causal_lm_and_rejects_vlm():
     causal = {"model_metadata": {"architecture": "Qwen3ForCausalLM"}}
     assert engine_supports_payload("transformers", causal) == (True, None)
+    gpt2 = {"model_metadata": {"architecture": "GPT2LMHeadModel"}}
+    assert engine_supports_payload("transformers", gpt2) == (True, None)
+    assert engine_supports_payload("mlx", gpt2) == (True, None)
     vlm = {"model_metadata": {"architecture": "Qwen3VLForConditionalGeneration"}}
     ok, detail = engine_supports_payload("transformers", vlm)
     assert ok is False

@@ -32,8 +32,8 @@ to run on every commit.
 | Layer | What it may do | What it must not do | Where |
 |---|---|---|---|
 | **Unit** | Call one module. Use `tmp_path` for files. Import optional extras and record `skipped`. | Network. Register a provider. Build a full bundle unless the function under test requires one. | `tests/unit/` |
-| **Integration** | Drive `archive` / `verify` / `export` / `assemble` / catalogs / the CLI against a `TestProvider` that serves bytes from memory. Touch a temp vault. | Hugging Face, torch installs, hydration `ensure_env`. Catalog tests stay hermetic (`test:` + fixture JSON). | `tests/integration/` |
-| **E2E** | `estimate` → `archive` → `verify` → `export` → `import` of `sshleifer/tiny-gpt2`. | Large repos, gated repos, `darsay run`. | `tests/e2e/` |
+| **Integration** | Drive `archive` / `verify` / `export` / `assemble` / catalogs / the CLI against a `TestProvider` that serves bytes from memory. Touch a temp vault. Stub `_invoke_runner` to prove `run` records without installing torch. | Hugging Face, torch installs, hydration `ensure_env`. Catalog tests stay hermetic (`test:` + fixture JSON). | `tests/integration/` |
+| **E2E** | `estimate` → `archive` → `list` / `info` → `verify` → `export` → `import` of `sshleifer/tiny-gpt2`. Asserts `kind`. | Large repos, gated repos, `darsay run`. | `tests/e2e/` |
 
 The fake provider (`tests/fakes.py`) is a real `SourceProvider`. Registering
 it is the extensibility check: archive and estimate never import
@@ -76,8 +76,8 @@ e2e job and runs the hermetic suite on every push and pull request.
 `.github/workflows/ci.yml` on push to `main`, pull requests, and
 `workflow_dispatch`:
 
-1. **Tests** — Python 3.10, 3.12, 3.14: `pytest -m "not e2e"` plus a CLI
-   `--version` / `--help` smoke.
+1. **Tests** — Python 3.10, 3.12, 3.14: `pytest -m "not e2e"` with
+   `--cov-fail-under=73`, plus a CLI `--version` / `--help` smoke.
 2. **E2E** — Python 3.12, cached Hub downloads, `sshleifer/tiny-gpt2`.
 3. **sdist and wheel** — build, `twine check`, install the wheel in a clean
    env and confirm runner scripts shipped.
@@ -91,6 +91,9 @@ The existing `release.yml` workflow is unchanged: it publishes artifacts on
 - Anything that needs a bundle uses `TestProvider.add_repo(...)` and
   `archive_quiet` from `tests/integration/conftest.py`. Synthetic payloads
   live in `tests/payloads.py`.
+- `run` / `hydrate` (non-dry-run) must not install torch. Stub
+  `darsay.hydrate._invoke_runner` and write a fake `hydration.json` whose
+  `python_executable` exists (`sys.executable`).
 - Do not call the Hub from unit or integration tests. If a behavior can only
   be proven against a real snapshot, add it under `tests/e2e/` and keep the
   repo tiny.

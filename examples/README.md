@@ -43,11 +43,11 @@ darsay list
 darsay run sshleifer--tiny-gpt2 "Hello"
 ```
 
-`list` prints the bundle id (`name@<rev>`, `<rev>` is the first 12 of the
-pinned commit) and a copy-pasteable path. `run` / `info` / `verify` accept
-that path, the id, or a unique prefix. `run` builds an isolated env the
-first time, then generates **offline**. The payload under `model/` is not
-touched.
+`list` prints STATUS, SOURCE, and HAVE (the bundle id, `name@<rev>`;
+`<rev>` is the first 12 of the pinned commit). Paths live in `list --json`
+and `info`. `run` / `info` / `verify` accept the path, the id, or a unique
+prefix. `run` builds an isolated env the first time, then generates
+**offline**. The payload under `model/` is not touched.
 
 A model you would actually keep is the same shape:
 
@@ -149,7 +149,7 @@ Same verbs.
 ```bash
 darsay estimate datasets/cornell-movie-review-data/rotten_tomatoes
 darsay archive  datasets/cornell-movie-review-data/rotten_tomatoes
-darsay info     vault/datasets--cornell-movie-review-data--rotten_tomatoes/<rev>
+darsay info     datasets--cornell-movie-review-data--rotten_tomatoes
 ```
 
 Paste-from-browser URLs work too:
@@ -171,9 +171,10 @@ directories understand a bundle.
 **Model**
 
 ```python
+from pathlib import Path
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-path = "vault/qwen--qwen3-0.6b/<rev>/model"
+path = Path.home() / "darsay/qwen--qwen3-0.6b/<rev>/model"
 tok = AutoTokenizer.from_pretrained(path)
 model = AutoModelForCausalLM.from_pretrained(path)
 ```
@@ -181,10 +182,11 @@ model = AutoModelForCausalLM.from_pretrained(path)
 **Dataset**
 
 ```python
+from pathlib import Path
 import pyarrow.parquet as pq
 
-path = "vault/datasets--cornell-movie-review-data--rotten_tomatoes/<rev>/data"
-table = pq.read_table(f"{path}/train.parquet")
+path = Path.home() / "darsay/datasets--cornell-movie-review-data--rotten_tomatoes/<rev>/data"
+table = pq.read_table(path / "train.parquet")
 ```
 
 No unpacking, no conversion, no darsay import.
@@ -197,7 +199,7 @@ One bundle → one deterministic tar. Same bundle state always produces
 the same bytes (sorted entries, marker first, no wall clock).
 
 ```bash
-darsay export vault/qwen--qwen3-0.6b/<rev> -o /Volumes/USB/backups
+darsay export qwen--qwen3-0.6b -o /Volumes/USB/backups
 # writes /Volumes/USB/backups/qwen--qwen3-0.6b@<rev>.mvb.tar
 
 darsay --vault /other/vault import /Volumes/USB/backups/qwen--qwen3-0.6b@<rev>.mvb.tar
@@ -244,9 +246,8 @@ Partial bytes are portable. Copy the entire
 — under a different vault and rerun the same `archive` command.
 
 ```bash
-cp -a vault/qwen--qwen3.8-27b /mnt/other/vault/
-cd /mnt/other
-darsay archive Qwen/Qwen3.8-27B
+cp -a ~/darsay/qwen--qwen3.8-27b /mnt/other/vault/
+darsay --vault /mnt/other/vault archive Qwen/Qwen3.8-27B
 ```
 
 The pin is unchanged. Completed files are adopted. The longest Range
@@ -262,7 +263,7 @@ is a view — never the other way around.
 
 ```bash
 # after archive:
-$EDITOR vault/qwen--qwen3-0.6b/<rev>/curation.md
+$EDITOR ~/darsay/qwen--qwen3-0.6b/<rev>/curation.md
 
 darsay regen qwen--qwen3-0.6b
 # rebuilds README.md from manifest + curation.md
