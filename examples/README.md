@@ -26,6 +26,7 @@ This page is the cookbook you return to.
 | Split a download with a friend | [Cooperative shards](#split-a-download-across-machines) |
 | Move a half-finished archive to another disk | [Relocate a partial](#move-a-partial-bundle) |
 | Write curator notes | [Curation](#write-curator-notes) |
+| Curate a want-list and share it | [Share a catalog](#share-a-catalog) |
 | Prove the bytes have not drifted | [Verify](#verify-on-a-schedule) |
 
 ---
@@ -290,6 +291,36 @@ exits non-zero.
 
 `darsay list` is the inventory; `darsay info <bundle>` is the index
 card.
+
+---
+
+## Share a catalog
+
+A catalog is a list of sources you want, before the bytes exist. The vault
+is the same list, realized. Share the file; friends overlay it against
+*their* disk.
+
+```bash
+darsay catalog new summer --title "Summer 2026" --curator Alex
+darsay catalog add summer huggingface:Qwen/Qwen3-0.6B --desire 9
+darsay catalog add summer huggingface:Qwen/Qwen3.8-27B --desire 8 --note "the one to finish"
+darsay estimate summer                 # cache sizes (optional; add is offline)
+darsay list summer                     # want / have / partial, next fetch on top
+darsay archive --next summer --max-gb 10
+```
+
+Copy `~/darsay/catalogs/summer/` to a USB stick or a git repo. A friend:
+
+```bash
+darsay list ./summer                   # every row want, against their vault
+darsay list ./summer --want --sort desire
+darsay archive --next ./summer --max-gb 10
+darsay catalog new reading --curator Sam
+darsay catalog adopt reading ./summer  # copy intent; their overlay, their bytes
+```
+
+`archive` does not rewrite the catalog. Status is a view. Path-addressed
+files are read-only unless `--write`. Spec: [Catalogs](../docs/CATALOGS.md).
 
 ---
 

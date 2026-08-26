@@ -96,3 +96,57 @@ def test_resolve_partial_requires_flag(tmp_path):
     with pytest.raises(SystemExit, match="no manifest.json"):
         resolve_bundle(tmp_path, "acme--toy")
     assert resolve_bundle(tmp_path, "acme--toy", require_manifest=False) == partial
+
+
+def test_iter_bundle_dirs_skips_reserved(tmp_path):
+    _write_bundle(tmp_path, "acme--toy", "aaaaaaaaaaaa")
+    planted = tmp_path / "catalogs" / "x"
+    planted.mkdir(parents=True)
+    (planted / "manifest.json").write_text("{}", encoding="utf-8")
+    (planted / "transfer.json").write_text("{}", encoding="utf-8")
+    runtime = tmp_path / ".runtime" / "envs"
+    runtime.mkdir(parents=True)
+    (runtime / "manifest.json").write_text("{}", encoding="utf-8")
+    dirs = iter_bundle_dirs(tmp_path)
+    assert {d.parent.name for d in dirs} == {"acme--toy"}
+
+
+def test_bundle_records_additive_keys_and_pre15_address(tmp_path):
+    from darsay.vault import bundle_records
+
+    bundle = tmp_path / "acme--toy" / "aaaaaaaaaaaa"
+    bundle.mkdir(parents=True)
+    (bundle / "manifest.json").write_text(
+        json.dumps({
+            "bundle_id": "acme--toy@aaaaaaaaaaaa",
+            "artifact_type": "model",
+            "licensing": {"spdx_id": "mit"},
+            "inventory": {"total_size_bytes": 10},
+            "security": {"integrity_status": "verified-against-upstream"},
+            "archive": {"date_archived": "2026-08-01T00:00:00+00:00"},
+            "source": {"origin": "huggingface", "repo_id": "acme/toy", "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "revision_ref": "main"},
+        }),
+        encoding="utf-8",
+    )
+    rows = bundle_records(tmp_path)
+    assert rows[0]["status"] == "have"
+    assert rows[0]["source_address"] == "huggingface:acme/toy"
+    assert rows[0]["remaining_bytes"] == 0
+    assert rows[0]["revision"].startswith("aaaa")
+
+
+def test_resolve_miss_hints_catalog(tmp_path):
+    cat = tmp_path / "catalogs" / "summer"
+    cat.mkdir(parents=True)
+    (cat / "catalog.json").write_text(
+        json.dumps({
+            "catalog_schema_version": "1.0.0",
+            "kind": "darsay.catalog",
+            "id": "summer",
+            "title": "summer",
+            "entries": [],
+        }),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match="darsay list summer"):
+        resolve_bundle(tmp_path, "summer")

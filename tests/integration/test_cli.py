@@ -44,7 +44,8 @@ def test_cli_list_partial_bundle(vault, test_provider, capsys):
     capsys.readouterr()
     assert main(["--vault", str(vault), "list"]) == 0
     listed = capsys.readouterr().out
-    assert "archiving:" in listed
+    assert "partial" in listed
+    assert "test:acme/toy" in listed
 
 
 def test_run_joins_unquoted_prompt_and_accepts_repl_flag(vault, test_provider, monkeypatch):
@@ -153,9 +154,12 @@ def test_list_info_verify_regen_roundtrip(vault, test_provider, capsys):
     assert main(["--vault", str(vault), "list"]) == 0
     listed = capsys.readouterr().out
     assert "test--acme--toy" in listed
-    assert "apache-2.0" in listed
-    assert "PATH" in listed
-    assert str(bundle) in listed
+    assert "test:acme/toy" in listed
+    assert "have" in listed
+    assert main(["--vault", str(vault), "list", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data[0]["path"] == str(bundle)
+    assert data[0]["license"] == "apache-2.0"
 
     assert main(["--vault", str(vault), "info", "test--acme--toy"]) == 0
     by_id = capsys.readouterr().out

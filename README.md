@@ -39,7 +39,8 @@ darsay run     qwen--qwen3-0.6b "Say hello"
 
 ## The idea in four lines
 
-You have a **vault**. It holds **bundles**.
+You have a **vault**. It holds **bundles**. A **catalog** is a list of
+sources you intend to archive — shareable before any payload exists.
 
 Each bundle is one **pinned revision** of one source: an immutable payload
 (`model/` or `data/`), a `manifest.json` of recorded facts, and one file
@@ -47,6 +48,7 @@ you write by hand (`curation.md`).
 
 `archive` puts the snapshot in the vault. `run` speaks to it **offline**.
 `export` packs it into a single `.mvb.tar` that any `tar` can open in 2040.
+`list` is the vault as a catalog view; `list summer` overlays a want-list.
 
 The payload never changes. The Hub can.
 

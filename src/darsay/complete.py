@@ -12,6 +12,7 @@ COMMANDS = (
     "verify",
     "smoke",
     "list",
+    "catalog",
     "info",
     "regen",
     "hydrate",
@@ -25,6 +26,7 @@ COMMANDS = (
     "du",
     "complete",
 )
+CATALOG_COMMANDS = ("new", "add", "drop", "adopt", "regen")
 BUNDLE_COMMANDS = (
     "verify",
     "smoke",
@@ -58,6 +60,13 @@ _darsay_ids() {{
   _describe 'bundle' ids
 }}
 
+_darsay_catalogs() {{
+  local -a ids
+  ids=(${{(f)"$(darsay catalog --ids 2>/dev/null)"}})
+  _describe 'catalog' ids
+  _files
+}}
+
 _darsay() {{
   local -a cmds
   cmds=({cmds})
@@ -68,6 +77,22 @@ _darsay() {{
   case $words[2] in
     {bundle_case})
       _darsay_ids
+      ;;
+    list)
+      _darsay_catalogs
+      ;;
+    catalog)
+      if (( CURRENT == 3 )); then
+        _values 'catalog-command' {' '.join(CATALOG_COMMANDS)}
+        return
+      fi
+      _darsay_catalogs
+      ;;
+    estimate)
+      _darsay_catalogs
+      ;;
+    archive)
+      _darsay_catalogs
       ;;
     import)
       _files -g '*.mvb.tar'
@@ -128,6 +153,8 @@ def _fish() -> str:
 
 complete -c darsay -n "__fish_use_subcommand" -a "{cmds}"
 complete -c darsay -n "__fish_seen_subcommand_from {bundle}" -a "(darsay list --ids 2>/dev/null)"
+complete -c darsay -n "__fish_seen_subcommand_from list estimate archive catalog" -a "(darsay catalog --ids 2>/dev/null)"
+complete -c darsay -n "__fish_seen_subcommand_from catalog" -a "{' '.join(CATALOG_COMMANDS)}"
 complete -c darsay -n "__fish_seen_subcommand_from import" -F -a "*.mvb.tar"
 complete -c darsay -n "__fish_seen_subcommand_from complete" -a "bash zsh fish"
 """

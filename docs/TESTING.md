@@ -32,7 +32,7 @@ to run on every commit.
 | Layer | What it may do | What it must not do | Where |
 |---|---|---|---|
 | **Unit** | Call one module. Use `tmp_path` for files. Import optional extras and record `skipped`. | Network. Register a provider. Build a full bundle unless the function under test requires one. | `tests/unit/` |
-| **Integration** | Drive `archive` / `verify` / `export` / `assemble` / the CLI against a `TestProvider` that serves bytes from memory. Touch a temp vault. | Hugging Face, torch installs, hydration `ensure_env`. | `tests/integration/` |
+| **Integration** | Drive `archive` / `verify` / `export` / `assemble` / catalogs / the CLI against a `TestProvider` that serves bytes from memory. Touch a temp vault. | Hugging Face, torch installs, hydration `ensure_env`. Catalog tests stay hermetic (`test:` + fixture JSON). | `tests/integration/` |
 | **E2E** | `estimate` → `archive` → `verify` → `export` → `import` of `sshleifer/tiny-gpt2`. | Large repos, gated repos, `darsay run`. | `tests/e2e/` |
 
 The fake provider (`tests/fakes.py`) is a real `SourceProvider`. Registering

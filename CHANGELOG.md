@@ -9,6 +9,26 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-08-26
+
+### Added
+
+- **Catalogs** — a curated, shareable list of sources (want-list). The vault
+  is the same list, realized. `darsay catalog new/add/drop/adopt/regen`,
+  `darsay list CATALOG`, `darsay estimate CATALOG`, `darsay archive --next
+  CATALOG`. Possession is an overlay view; `archive` does not rewrite
+  `catalog.json`. Catalog schema **1.0.0** (independent of bundle schema
+  1.6.0). Spec: [docs/CATALOGS.md](docs/CATALOGS.md).
+
+### Changed
+
+- `darsay list` is one table for the vault and for a catalog: STATUS,
+  DESIRE, SOURCE, HAVE, SIZE, NOTE. PATH / LICENSE / INTEGRITY / ARCHIVED
+  stay in `list --json` and `info`. `list --json` without a catalog remains
+  an array (additive keys). `list CATALOG --json` is an overlay envelope.
+
+## [0.6.0]
+
 ### Added
 
 - Bundle-taking commands (`info`, `run`, `verify`, `export`, …) accept a

@@ -1,8 +1,9 @@
 """Vault inventory and bundle addressing.
 
-``darsay list`` is a walk of this tree. Bundle-taking commands accept a
-filesystem path, a bundle id (``name@revision12``), or a unique prefix of
-either — so the first column of ``list`` is a usable handle.
+``darsay list`` is a walk of this tree (the vault as a catalog view).
+Bundle-taking commands accept a filesystem path, a bundle id
+(``name@revision12``), or a unique prefix of either — HAVE in ``list``
+is a usable handle.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ import sys
 from pathlib import Path
 
 DEFAULT_VAULT_NAME = "darsay"
+RESERVED_DIRS = {".runtime", "catalogs"}
 
 
 def default_vault() -> Path:
@@ -66,9 +68,18 @@ def bundle_records(vault: Path) -> list[dict]:
                     "integrity": "unreadable manifest",
                     "archived": "?",
                     "partial": False,
+                    "status": "have",
+                    "source_address": None,
+                    "revision": None,
+                    "revision_ref": None,
+                    "include": None,
+                    "remaining_bytes": None,
+                    "percent": None,
                 })
                 continue
             payload_bytes = m["inventory"]["total_size_bytes"]
+            src = m.get("source") or {}
+            include = (src.get("subset") or {}).get("include")
             rows.append({
                 "bundle_id": m["bundle_id"],
                 "path": str(bundle_dir),
@@ -80,6 +91,13 @@ def bundle_records(vault: Path) -> list[dict]:
                 "archived": m["archive"]["date_archived"][:10],
                 "partial": False,
                 "artifact_type": m.get("artifact_type"),
+                "status": "have",
+                "source_address": _source_address_from_manifest(m),
+                "revision": src.get("revision"),
+                "revision_ref": src.get("revision_ref"),
+                "include": include,
+                "remaining_bytes": 0,
+                "percent": None,
             })
             continue
         try:
@@ -97,6 +115,7 @@ def bundle_records(vault: Path) -> list[dict]:
             )
             card = ledger.get("metadata", {}).get("card_data", {})
             license_id = card.get("license") if isinstance(card, dict) else None
+            include = (ledger.get("subset") or {}).get("include")
             rows.append({
                 "bundle_id": bundle_id_for(bundle_dir),
                 "path": str(bundle_dir),
@@ -107,6 +126,14 @@ def bundle_records(vault: Path) -> list[dict]:
                 "integrity": status,
                 "archived": ledger["pinned_at"][:10],
                 "partial": True,
+                "artifact_type": ledger.get("repo_type"),
+                "status": "partial",
+                "source_address": _source_address_from_ledger(ledger),
+                "revision": ledger.get("revision"),
+                "revision_ref": ledger.get("revision_ref"),
+                "include": include,
+                "remaining_bytes": sizes["remaining_network"],
+                "percent": percent,
             })
         except (LedgerError, KeyError, OSError, TypeError, ValueError):
             rows.append({
@@ -119,6 +146,13 @@ def bundle_records(vault: Path) -> list[dict]:
                 "integrity": "archiving: unreadable transfer ledger",
                 "archived": "?",
                 "partial": True,
+                "status": "partial",
+                "source_address": None,
+                "revision": None,
+                "revision_ref": None,
+                "include": None,
+                "remaining_bytes": None,
+                "percent": None,
             })
     return rows
 
@@ -129,8 +163,42 @@ def iter_bundle_dirs(vault: Path) -> list[Path]:
         path.parent
         for pattern in ("manifest.json", "transfer.json")
         for path in vault.glob(f"*/*/{pattern}")
+        if path.parent.parent.name not in RESERVED_DIRS
     }
     return sorted(found)
+
+
+def _source_address_from_manifest(manifest: dict) -> str | None:
+    """Canonical source address, reconstructing pre-1.5.0 manifests."""
+    from .sources import parse_source
+
+    src = manifest.get("source") or {}
+    address = src.get("address")
+    if address:
+        return address
+    repo_id = src.get("repo_id")
+    if not repo_id:
+        return None
+    loc = repo_id
+    artifact = manifest.get("artifact_type") or src.get("repo_type")
+    if artifact == "dataset" and not str(loc).startswith("datasets/"):
+        loc = f"datasets/{loc}"
+    provider = src.get("provider") or src.get("origin")
+    try:
+        if provider:
+            return parse_source(f"{provider}:{loc}").canonical
+        return parse_source(loc).canonical
+    except SystemExit:
+        return None
+
+
+def _source_address_from_ledger(ledger: dict) -> str | None:
+    from .sources import source_from_ledger
+
+    try:
+        return source_from_ledger(ledger).canonical
+    except (SystemExit, KeyError, TypeError):
+        return ledger.get("address")
 
 
 def bundle_id_for(bundle_dir: Path) -> str:
@@ -235,9 +303,19 @@ def resolve_bundle(
                 f"error: {raw!r} matches {len(hits)} bundles ({kind}):\n{listed}\n"
                 "  use a longer prefix, the bundle id, or the PATH from `darsay list`"
             )
+    extra = ""
+    folded = raw.strip().casefold()
+    if folded and all(c.isalnum() or c in "._-" for c in folded) and folded[0].isalpha():
+        catalog_file = vault / "catalogs" / folded / "catalog.json"
+        if catalog_file.is_file():
+            extra = (
+                f"\n  hint: darsay list {folded}"
+                f"\n  hint: darsay catalog regen {folded}"
+            )
     raise SystemExit(
         f"error: no bundle matching {raw!r} in {vault}/\n"
         f"  hint: darsay list   (or darsay --vault {vault} list)"
+        f"{extra}"
     )
 
 

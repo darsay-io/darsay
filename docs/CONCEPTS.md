@@ -10,6 +10,11 @@
 
 darsay is small once the objects are named. This page is the naming.
 
+A vault is a folder of bundles. A bundle is a pinned snapshot whose payload
+never changes. The manifest records facts and leaves blanks as blanks. **A
+catalog is a curated list of sources; the vault is that list, realized.**
+You load `model/` (or `data/`) the way you would load the original repo.
+
 Have not run it yet? [Start here](GETTING-STARTED.md) first — five minutes,
 then come back. The ideas land harder after you have a bundle on disk.
 
@@ -23,14 +28,35 @@ subcommand.
 vault/
 ├── qwen--qwen3-0.6b/<rev>/          # a model bundle
 ├── datasets--rotten_tomatoes/<rev>/ # a dataset bundle
+├── catalogs/summer/                 # a catalog (want-list; no payload)
 └── .runtime/                        # disposable inference envs (not archival)
 ```
 
-There is no hidden database. `darsay list` is a walk of this tree; it
-prints each bundle's id and a copy-pasteable path (`list --json` for
-scripts). `info` / `run` / `verify` accept that path, the id, or a unique
-prefix. `darsay du` is disk use; `darsay rm` deletes a bundle. The vault
-is yours to rsync, restic, or put on a shelf.
+There is no hidden database. `darsay list` is a walk of this tree — the
+vault as a catalog view (STATUS, SOURCE, HAVE). `list CATALOG` overlays a
+want-list on the same vault. `list --json` is the script surface (paths,
+licenses). `info` / `run` / `verify` accept a path, a bundle id, or a
+unique prefix. `darsay du` is disk use of bundles and `.runtime` only
+(catalog JSON is curator data, not payload). `darsay rm` deletes a bundle.
+The vault is yours to rsync, restic, or put on a shelf.
+
+## Catalog
+
+A catalog is a curated list of sources — desire, notes, cached sizes —
+before any payload exists. The vault is that list, realized: `darsay list
+summer` overlays the catalog on *this* vault (have / partial / want).
+`archive` does not rewrite the file. Share `catalog.json` (or the
+directory); a friend overlays it against their vault.
+
+```
+darsay catalog new summer
+darsay catalog add summer huggingface:Qwen/Qwen3-0.6B --desire 9
+darsay list summer
+darsay archive --next summer
+```
+
+Field-by-field: [Catalogs](CATALOGS.md). Cookbook:
+[Share a catalog](../examples/README.md#share-a-catalog).
 
 ## Bundle
 

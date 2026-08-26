@@ -1,6 +1,6 @@
 """darsay: the genesis machine of archives."""
 
-__version__ = "0.6.0"
+__version__ = "0.7.0"
 
 # Version of the manifest.json schema, independent of the tool version.
 # Bump the major component on breaking layout changes; consumers should

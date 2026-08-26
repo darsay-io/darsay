@@ -17,6 +17,10 @@
 archive) — this document is about *how the bytes get here* when "what" is
 tens of gigabytes to terabytes.
 
+A catalog overlay treats an in-progress pin as status `partial` — unfinished
+work, same as a want. `darsay archive --next CATALOG` resumes that pin.
+See [Catalogs](CATALOGS.md).
+
 `darsay archive` is now an operation you can interrupt at any
 moment, re-run any number of times, and spread across days of budgeted
 sessions — and every run does the minimum network work required to converge

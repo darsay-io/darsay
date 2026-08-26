@@ -75,10 +75,22 @@ darsay list
 darsay info sshleifer--tiny-gpt2
 ```
 
-`list` prints the bundle id (`name@<rev>`) and a copy-pasteable `PATH`.
-`<rev>` is the first 12 characters of the pinned commit. `info`, `run`,
-`verify`, and the other bundle commands accept the path, the id, or a unique
-prefix (`sshleifer--tiny-gpt2`, `tiny-gpt2`, the revision).
+`list` is the vault as a catalog view: STATUS, SOURCE, and HAVE (the
+bundle id). `<rev>` is the first 12 characters of the pinned commit.
+`info`, `run`, `verify`, and the other bundle commands accept the path
+(`list --json`), the id, or a unique prefix (`sshleifer--tiny-gpt2`,
+`tiny-gpt2`, the revision).
+
+Save a want-list before the bytes exist:
+
+```bash
+darsay catalog new summer
+darsay catalog add summer sshleifer/tiny-gpt2 --desire 8
+darsay list summer
+```
+
+Friends overlay the same file against *their* vault
+([catalogs](CATALOGS.md), [share a catalog](../examples/README.md#share-a-catalog)).
 
 ### What just landed on disk
 

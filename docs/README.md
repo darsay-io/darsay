@@ -20,7 +20,7 @@
 
 | | Current |
 |---|---|
-| Tool | **0.6.0** |
+| Tool | **0.7.0** |
 | Manifest schema | **1.6.0** |
 | MVB format | **1.1** |
 | License | Apache 2.0 |
@@ -63,6 +63,7 @@ documents that must survive. Everything else is how we got there.
 | [**Datasets**](DATASETS.md) | The source is `datasets/owner/name`; payload under `data/` |
 | [**Sources**](SOURCES.md) | Provider-qualified refs; Hugging Face is a plugin |
 | [**Quantization**](QUANTIZATION.md) | Canonical bundle vs satellite quants vs derived precision |
+| [**Catalogs**](CATALOGS.md) | Shareable want-lists; the vault is the same list, realized |
 
 ## The formats
 
@@ -72,6 +73,7 @@ the CLI is gone, as long as these are followed.
 | Document | What it specifies |
 |---|---|
 | [**manifest.json**](MANIFEST.md) | Every field of the machine-readable source of truth. `null` means unknown — the tool never fabricates. |
+| [**catalog.json**](CATALOGS.md) | Curated list of sources. Overlay is a view; the file does not record possession. |
 | [**.mvb.tar**](MVB-FORMAT.md) | Single-file export: uncompressed tar, marker first, deterministic metadata, manual recovery with stock `tar`. |
 
 ## Project

@@ -39,6 +39,8 @@ def test_help_lists_subcommands(capsys):
         "rm",
         "du",
         "complete",
+        "catalog",
+        "list",
     ):
         assert name in out
 
@@ -110,3 +112,25 @@ def test_vault_path_env_and_flag(monkeypatch, tmp_path):
     assert _vault_path(Namespace(vault=None)) == tmp_path / "from-env"
     # --vault wins over the env
     assert _vault_path(Namespace(vault=str(tmp_path / "flag"))) == tmp_path / "flag"
+
+
+def test_list_accepts_catalog_and_sort():
+    from argparse import ArgumentParser
+    # Drive the real parser via main --help-equivalent by parsing through main's error paths
+    with pytest.raises(SystemExit):
+        main(["list", "--sort", "nope"])
+    with pytest.raises(SystemExit):
+        main(["catalog", "add", "summer", "huggingface:acme/toy", "--desire", "0"])
+    with pytest.raises(SystemExit):
+        main(["catalog", "add", "summer", "huggingface:acme/toy", "--desire", "10"])
+
+
+def test_archive_next_parse_orders(tmp_path):
+    from darsay.cli import main as _main
+    vault = ["--vault", str(tmp_path)]
+    with pytest.raises(SystemExit, match="no catalog matching"):
+        _main([*vault, "archive", "--next", "summer"])
+    with pytest.raises(SystemExit, match="no catalog matching"):
+        _main([*vault, "archive", "summer", "--next"])
+    with pytest.raises(SystemExit, match="already chose the catalog"):
+        _main([*vault, "archive", "--next", "summer", "huggingface:Qwen/Qwen3-0.6B"])
