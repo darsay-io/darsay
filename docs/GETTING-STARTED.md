@@ -131,7 +131,8 @@ Same three verbs. Larger bytes. Identical shape.
 ```bash
 darsay estimate Qwen/Qwen3-0.6B
 darsay archive  Qwen/Qwen3-0.6B
-darsay run      qwen--qwen3-0.6b "Say hello"
+darsay run      qwen--qwen3-0.6b Say hello
+# or: darsay run qwen--qwen3-0.6b --repl
 ```
 
 Qwen3-0.6B is about 1.5 GiB. `estimate` tells you before you commit.

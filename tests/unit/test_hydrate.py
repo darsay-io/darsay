@@ -26,6 +26,28 @@ def test_detect_transformers_and_llama_cpp():
     assert detect_engines(["model/README.md"]) == []
 
 
+def test_select_engine_mlx_opt_in_on_safetensors():
+    import sys
+
+    manifest = {
+        "inventory": {
+            "files": [
+                {"path": "model/config.json"},
+                {"path": "model/model.safetensors"},
+            ]
+        }
+    }
+    assert select_engine(manifest, None) == "transformers"
+    assert detect_engines([f["path"] for f in manifest["inventory"]["files"]]) == ["transformers"]
+    npz = detect_engines(["model/config.json", "model/weights.npz"])
+    if sys.platform == "darwin":
+        assert select_engine(manifest, "mlx") == "mlx"
+        assert "mlx" in npz
+    else:
+        with pytest.raises(SystemExit, match="darwin"):
+            select_engine(manifest, "mlx")
+
+
 def test_select_engine_auto_and_requested():
     manifest = {
         "inventory": {

@@ -60,6 +60,24 @@ ENGINES = {
         "architecture_suffixes": None,  # GGUF embeds the architecture
         "install_hint": "first hydrate installs llama-cpp-python",
     },
+    "mlx": {
+        "label": "Apple MLX (mlx-lm)",
+        "detect": {
+            "all": ["model/config.json"],
+            "any": ["model/*.npz"],
+        },
+        # Opt-in on a regular HF safetensors snapshot (`--engine mlx`).
+        "compatible": {
+            "all": ["model/config.json"],
+            "any": ["model/*.safetensors", "model/*.npz", "model/*.bin"],
+        },
+        "requirements": ["mlx", "mlx-lm"],
+        "runner": "mlx_runner.py",
+        "weights_globs": None,
+        "architecture_suffixes": ("ForCausalLM",),
+        "install_hint": "first hydrate installs mlx + mlx-lm",
+        "platforms": ("darwin",),
+    },
 }
 
 
@@ -146,6 +164,16 @@ def preflight_run(
         hint = ENGINES[engine].get("install_hint")
         if hint:
             issues.append({"level": "info", "code": "env-install", "message": hint})
+    if (
+        engine == "transformers"
+        and sys.platform == "darwin"
+        and _engine_applies(ENGINES["mlx"], [f["path"] for f in manifest.get("inventory", {}).get("files", [])], "compatible")
+    ):
+        issues.append({
+            "level": "info",
+            "code": "mlx-available",
+            "message": "Apple Silicon: --engine mlx is often faster and a smaller install",
+        })
     return issues
 
 
@@ -193,14 +221,27 @@ def _matches(inventory_paths: list[str], patterns: list[str]) -> list[str]:
     return sorted({p for p in inventory_paths for pat in patterns if fnmatch(p, pat)})
 
 
+def _platform_ok(spec: dict) -> bool:
+    platforms = spec.get("platforms")
+    return not platforms or sys.platform in platforms
+
+
+def _engine_applies(spec: dict, inventory_paths: list[str], key: str) -> bool:
+    det = spec.get(key)
+    if not det:
+        return False
+    return all(_matches(inventory_paths, [pat]) for pat in det["all"]) and (
+        not det["any"] or bool(_matches(inventory_paths, det["any"]))
+    )
+
+
 def detect_engines(inventory_paths: list[str]) -> list[str]:
     """Engines the payload can support, in registry (preference) order."""
     found = []
     for name, spec in ENGINES.items():
-        det = spec["detect"]
-        if all(_matches(inventory_paths, [pat]) for pat in det["all"]) and (
-            not det["any"] or _matches(inventory_paths, det["any"])
-        ):
+        if not _platform_ok(spec):
+            continue
+        if _engine_applies(spec, inventory_paths, "detect"):
             found.append(name)
     return found
 
@@ -211,12 +252,19 @@ def select_engine(manifest: dict, requested: str | None) -> str:
     if requested:
         if requested not in ENGINES:
             raise SystemExit(f"error: unknown engine {requested!r} (known: {', '.join(ENGINES)})")
-        if requested not in detected:
+        spec = ENGINES[requested]
+        if not _platform_ok(spec):
+            where = ", ".join(spec.get("platforms") or [])
             raise SystemExit(
-                f"error: engine {requested!r} does not match this payload "
-                f"(detected: {', '.join(detected) or 'none'})"
+                f"error: engine {requested!r} is supported on {where or 'no platforms'} "
+                f"(this OS is {sys.platform})"
             )
-        return requested
+        if requested in detected or _engine_applies(spec, inventory_paths, "compatible"):
+            return requested
+        raise SystemExit(
+            f"error: engine {requested!r} does not match this payload "
+            f"(detected: {', '.join(detected) or 'none'})"
+        )
     if not detected:
         raise SystemExit(
             "error: no known engine matches this payload "
@@ -495,7 +543,8 @@ def run_bundle(bundle_dir: Path, prompt: str | None = None, engine: str | None =
                device: str = "auto", dtype: str = "auto", trust_remote_code: bool = False,
                seed: int | None = None, timeout: float | None = None,
                python: str | None = None, weights: str | None = None,
-               ignore_preflight: bool = False, progress=print) -> dict:
+               ignore_preflight: bool = False, repl: bool = False,
+               progress=print) -> dict:
     from .archiver import load_manifest, utc_now, write_manifest
 
     hydration = load_hydration(bundle_dir)
@@ -521,11 +570,16 @@ def run_bundle(bundle_dir: Path, prompt: str | None = None, engine: str | None =
 
     env_record = {"python_executable": hydration["env"]["python_executable"]}
     chosen = hydration["engine"]
-    prompt = prompt if prompt is not None else DEFAULT_PROMPT
+    if not repl:
+        prompt = prompt if prompt is not None else DEFAULT_PROMPT
 
     payload_dir = bundle_dir / manifest_payload_root(load_manifest(bundle_dir))
-    runner_args = ["--model-dir", str(payload_dir), "--prompt", prompt,
+    runner_args = ["--model-dir", str(payload_dir),
                    "--max-new-tokens", str(max_new_tokens), "--device", device]
+    if prompt:
+        runner_args += ["--prompt", prompt]
+    if repl:
+        runner_args.append("--repl")
     if chosen == "transformers":
         runner_args += ["--dtype", dtype]
     if hydration.get("weights"):

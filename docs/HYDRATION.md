@@ -18,7 +18,9 @@ without ever touching the archived payload:
 
 ```bash
 darsay run qwen--qwen3-0.6b            # hello prompt; id or unique prefix
-darsay run qwen--qwen3-0.6b "2+2=?"    # your prompt
+darsay run qwen--qwen3-0.6b Say hello  # quotes optional
+darsay run qwen--qwen3-0.6b --repl     # interactive; model stays loaded
+darsay run qwen--qwen3-0.6b --engine mlx   # Apple Silicon alternative to torch
 ```
 
 `run` hydrates automatically when needed. macOS and Linux are the supported
@@ -57,6 +59,7 @@ files any reader opens directly (see [DATASETS.md](DATASETS.md)).
 |---|---|---|---|
 | `transformers` (preferred) | `model/config.json` + safetensors/`.bin`/`.pt` weights | `torch`, `transformers>=X` (floor taken from the payload's own `config.json` `transformers_version`) | `runners/transformers_runner.py` — device auto (cuda → mps → cpu), chat template when the tokenizer ships one, greedy by default (`--sample` for the model's own sampling defaults) |
 | `llama-cpp` | `model/*.gguf` | `llama-cpp-python` | `runners/llama_cpp_runner.py` — GPU offload when available; with several GGUF files, pick one with `--weights model/foo.gguf` |
+| `mlx` (macOS) | auto: `config.json` + `*.npz`; opt-in: `--engine mlx` on a safetensors snapshot | `mlx`, `mlx-lm` | `runners/mlx_runner.py` — Metal; same prompt / `--repl` contract |
 
 Auto-detection prefers the first matching registry entry; override with
 `--engine`.

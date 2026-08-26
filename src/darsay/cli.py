@@ -21,6 +21,7 @@ immutable payload, recorded facts, still loadable as-is.
     darsay assemble <partial> […]     combine matching partials offline
     darsay hydrate <bundle>           build a runnable env for the bundle
     darsay run     <bundle> [PROMPT]  hydrate if needed, then generate (offline)
+    darsay run     <bundle> --repl    interactive; quotes around the prompt are optional
     darsay dehydrate <bundle>         drop the bundle's hydration record
     darsay envs [--prune]             list / clean up shared runtime envs
 
@@ -346,7 +347,7 @@ def cmd_run(args) -> int:
 
     record = run_bundle(
         _bundle_dir(args),
-        prompt=args.prompt,
+        prompt=" ".join(args.prompt) if args.prompt else None,
         engine=args.engine,
         max_new_tokens=args.max_new_tokens,
         raw=args.raw,
@@ -359,6 +360,7 @@ def cmd_run(args) -> int:
         python=args.python,
         weights=args.weights,
         ignore_preflight=args.ignore_preflight,
+        repl=args.repl,
     )
     return 0 if record["status"] == "pass" else 1
 
@@ -488,7 +490,14 @@ def main(argv=None) -> int:
 
     p = add_cmd("run", help="run a prompt against a bundle (hydrates first if needed; fully offline)")
     p.add_argument("bundle", help=bundle_help)
-    p.add_argument("prompt", nargs="?", help='prompt text (default: "Say hello in one short sentence.")')
+    p.add_argument(
+        "prompt",
+        nargs="*",
+        help='prompt text (quotes optional: darsay run toy Say hello). '
+             'Default: "Say hello in one short sentence."',
+    )
+    p.add_argument("--repl", action="store_true",
+                   help="interactive loop; the model stays loaded. /quit to exit")
     p.add_argument("--engine", help="runtime engine (default: the hydrated one, else auto-detect)")
     p.add_argument("--max-new-tokens", type=int, default=256)
     p.add_argument("--device", default="auto", help="auto | cpu | cuda | mps")

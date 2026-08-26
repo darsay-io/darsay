@@ -89,13 +89,80 @@ def generate(args) -> dict:
     }
 
 
+def repl(args) -> dict:
+    from llama_cpp import Llama
+
+    n_gpu_layers = 0 if args.device == "cpu" else -1
+    print(f"[runner] loading {args.weights} (n_gpu_layers={n_gpu_layers})", file=sys.stderr)
+    t0 = time.perf_counter()
+    llm = Llama(
+        model_path=args.weights, n_ctx=4096,
+        n_gpu_layers=n_gpu_layers,
+        seed=args.seed if args.seed is not None else -1, verbose=False,
+    )
+    load_seconds = time.perf_counter() - t0
+    print("[repl] model loaded. Type a prompt; /quit to exit.", file=sys.stderr)
+    temperature = 0.8 if args.sample else 0.0
+    messages = []
+    last = None
+    pending = args.prompt
+    while True:
+        if pending is not None:
+            user, pending = pending, None
+        else:
+            try:
+                user = input("> ")
+            except (EOFError, KeyboardInterrupt):
+                print(file=sys.stderr)
+                break
+        user = user.strip()
+        if not user:
+            continue
+        if user in ("/quit", "/exit"):
+            break
+        t1 = time.perf_counter()
+        if args.raw:
+            resp = llm(user, max_tokens=args.max_new_tokens, temperature=temperature)
+            text = resp["choices"][0]["text"]
+            prompt_mode = "raw-completion"
+        else:
+            messages.append({"role": "user", "content": user})
+            resp = llm.create_chat_completion(
+                messages=messages, max_tokens=args.max_new_tokens, temperature=temperature)
+            text = resp["choices"][0]["message"]["content"]
+            messages.append({"role": "assistant", "content": text})
+            prompt_mode = "chat-template"
+        generate_seconds = time.perf_counter() - t1
+        print(text, flush=True)
+        new_tokens = resp["usage"]["completion_tokens"]
+        last = {
+            "status": "pass",
+            "engine": "llama-cpp",
+            "versions": versions(),
+            "device": "cpu" if n_gpu_layers == 0 else "gpu-offload",
+            "dtype": None,
+            "prompt": user,
+            "prompt_mode": prompt_mode,
+            "sampling": {"do_sample": args.sample, "temperature": temperature},
+            "output": text,
+            "new_tokens": new_tokens,
+            "stop_reason": "eos" if resp["choices"][0].get("finish_reason") == "stop" else "length",
+            "load_seconds": round(load_seconds, 2),
+            "generate_seconds": round(generate_seconds, 2),
+            "tokens_per_second": round(new_tokens / generate_seconds, 1) if generate_seconds > 0 else None,
+            "repl": True,
+        }
+    return last or {"status": "fail", "engine": "llama-cpp", "error": "repl ended without a prompt"}
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--model-dir", required=True, help="payload directory (context only)")
     p.add_argument("--weights", required=True, help="path to the .gguf file")
     p.add_argument("--json-out", required=True)
     p.add_argument("--probe", action="store_true")
-    p.add_argument("--prompt", default="Say hello in one short sentence.")
+    p.add_argument("--prompt", default=None)
+    p.add_argument("--repl", action="store_true", help="interactive loop; model stays loaded")
     p.add_argument("--max-new-tokens", type=int, default=256)
     p.add_argument("--device", default="auto", help="auto (GPU offload when built with it) | cpu")
     p.add_argument("--raw", action="store_true", help="plain completion, skip the chat template")
@@ -105,7 +172,14 @@ def main() -> int:
     args = p.parse_args()
 
     try:
-        result = probe(args) if args.probe else generate(args)
+        if args.probe:
+            result = probe(args)
+        elif args.repl:
+            result = repl(args)
+        else:
+            if not args.prompt:
+                args.prompt = "Say hello in one short sentence."
+            result = generate(args)
     except Exception as exc:  # runner contract: report, never crash silently
         write_result(args.json_out, {"status": "fail", "engine": "llama-cpp",
                                      "error": f"{type(exc).__name__}: {exc}"})

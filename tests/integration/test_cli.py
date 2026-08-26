@@ -47,6 +47,27 @@ def test_cli_list_partial_bundle(vault, test_provider, capsys):
     assert "archiving:" in listed
 
 
+def test_run_joins_unquoted_prompt_and_accepts_repl_flag(vault, test_provider, monkeypatch):
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    seen = {}
+
+    def fake_run(bundle_dir, prompt=None, **kwargs):
+        seen["prompt"] = prompt
+        seen["repl"] = kwargs.get("repl")
+        seen["bundle"] = bundle_dir
+        return {"status": "pass"}
+
+    monkeypatch.setattr("darsay.hydrate.run_bundle", fake_run)
+    assert main(["--vault", str(vault), "run", "acme--toy", "Say", "hello"]) == 0
+    assert seen["prompt"] == "Say hello"
+    assert seen["repl"] is False
+    assert seen["bundle"] == bundle
+    assert main(["--vault", str(vault), "run", "acme--toy", "--repl"]) == 0
+    assert seen["repl"] is True
+    assert seen["prompt"] is None
+
+
 def test_list_empty_vault(vault, capsys):
     assert main(["--vault", str(vault), "list"]) == 0
     assert "No bundles" in capsys.readouterr().out
