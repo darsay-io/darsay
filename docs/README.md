@@ -3,16 +3,17 @@
 </p>
 
 <p align="center">
-  <strong>The formats outlive the tool.</strong><br>
-  These documents are the self-describing record of those formats,
-  and the design that produced them.
+  <strong>Keep a model forever. Run it tomorrow.</strong><br>
+  A vault is a folder of bundles. A bundle is a pinned snapshot<br>
+  whose payload never changes.
 </p>
 
 <p align="center">
-  <a href="../README.md">Project README</a> ·
-  <a href="../CONTRIBUTING.md">Contributing</a> ·
-  <a href="../CHANGELOG.md">Changelog</a> ·
-  <a href="../SECURITY.md">Security</a>
+  <a href="GETTING-STARTED.md">Start here</a> ·
+  <a href="CONCEPTS.md">Concepts</a> ·
+  <a href="../examples/README.md">Examples</a> ·
+  <a href="../README.md">README</a> ·
+  <a href="../CONTRIBUTING.md">Contributing</a>
 </p>
 
 ---
@@ -27,18 +28,41 @@
 Tool version, schema version, and export-format version bump independently.
 Major schema / format bumps are breaking; additive fields are minor.
 
-## Reading order
+## Where to go
 
-**Using the vault.** [Project README](../README.md) → this page → the
-document for the command you are about to run.
+**You have five minutes.**
+[Start here](GETTING-STARTED.md) — install, archive a tiny model, look
+at the bundle, run it.
 
-**Keeping a bundle interpretable without the tool.**
-[Manifest](MANIFEST.md) and [MVB format](MVB-FORMAT.md) are the two that
-must survive a 2040 reader. Everything else is how we got there.
+**You want the picture in your head.**
+[Concepts](CONCEPTS.md) — vault, bundle, pin, payload vs metadata,
+why the formats outlive the tool.
 
-**Changing the tool.** [Design](DESIGN.md) for why, [Testing](TESTING.md)
-and [Contributing](../CONTRIBUTING.md) for how, [Distribution](DISTRIBUTION.md)
-for how a release is consumed.
+**You want a command that already exists.**
+[Examples](../examples/README.md) — estimate, resume, datasets, export,
+shards, verify. Then the spec for the command you are about to run.
+
+**You are reading this in 2040 and the CLI is gone.**
+[Manifest](MANIFEST.md) and [MVB format](MVB-FORMAT.md) are the two
+documents that must survive. Everything else is how we got there.
+
+**You are changing the tool.**
+[Design](DESIGN.md) for why, [Testing](TESTING.md) and
+[Contributing](../CONTRIBUTING.md) for how,
+[Distribution](DISTRIBUTION.md) for how a release is consumed.
+
+## Using the vault
+
+| Document | Open it when… |
+|---|---|
+| [**Getting started**](GETTING-STARTED.md) | You have never run `darsay` |
+| [**Concepts**](CONCEPTS.md) | You want the objects named before the flags |
+| [**Examples**](../examples/README.md) | You want a copy-paste recipe |
+| [**Hydration**](HYDRATION.md) | `hydrate` / `run` / `envs` — isolated engines, offline inference |
+| [**Incremental transfer**](INCREMENTAL.md) | Budgets, Ctrl-C, Range partials, `--shard N/T`, `assemble` |
+| [**Datasets**](DATASETS.md) | The source is `datasets/owner/name`; payload under `data/` |
+| [**Sources**](SOURCES.md) | Provider-qualified refs; Hugging Face is a plugin |
+| [**Quantization**](QUANTIZATION.md) | Canonical bundle vs satellite quants vs derived precision |
 
 ## The formats
 
@@ -50,22 +74,12 @@ the CLI is gone, as long as these are followed.
 | [**manifest.json**](MANIFEST.md) | Every field of the machine-readable source of truth. `null` means unknown — the tool never fabricates. |
 | [**.mvb.tar**](MVB-FORMAT.md) | Single-file export: uncompressed tar, marker first, deterministic metadata, manual recovery with stock `tar`. |
 
-## Using the vault
-
-| Document | When to open it |
-|---|---|
-| [**Hydration**](HYDRATION.md) | `hydrate` / `run` / `envs` — isolated engines, offline inference, disposable venvs. |
-| [**Incremental transfer**](INCREMENTAL.md) | Budgets, Ctrl-C, Range partials, `--shard N/T`, offline `assemble`, relocatable ledgers. |
-| [**Datasets**](DATASETS.md) | Second artifact type. Addressed `datasets/owner/name`; payload under `data/`. |
-| [**Sources**](SOURCES.md) | Provider-qualified refs (`huggingface:owner/name`). Hugging Face is a plugin. |
-| [**Quantization**](QUANTIZATION.md) | Canonical bundle vs satellite quants vs disposable derived precision. |
-
 ## Project
 
-| Document | When to open it |
+| Document | Open it when… |
 |---|---|
 | [**Design**](DESIGN.md) | Why Python. Why longevity is in the formats, not a frozen binary. |
-| [**Distribution**](DISTRIBUTION.md) | PyPI, pipx / uvx / wheel, personal Homebrew tap. Why frozen executables are not the primary path. |
+| [**Distribution**](DISTRIBUTION.md) | PyPI, pipx / uvx / wheel, personal Homebrew tap. |
 | [**Testing**](TESTING.md) | Unit / integration / opt-in Hub e2e. What the suite is there to keep. |
 
 ## Invariants

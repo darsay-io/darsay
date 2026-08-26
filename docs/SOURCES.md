@@ -1,6 +1,15 @@
-> [Documentation](README.md) · [Project README](../README.md)
+<p align="center">
+  <a href="GETTING-STARTED.md">Start here</a> ·
+  <a href="CONCEPTS.md">Concepts</a> ·
+  <a href="../examples/README.md">Examples</a> ·
+  <a href="README.md">All docs</a> ·
+  <a href="../README.md">README</a>
+</p>
 
 # Source providers
+
+> **In one sentence.** `estimate` and `archive` take a source ref.
+> Hugging Face is the first provider, not the product.
 
 Acquisition is a plugin. The archive format, the vault, and the CLI verbs do
 not belong to Hugging Face. Hugging Face is the first **source provider**:

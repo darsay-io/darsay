@@ -1,6 +1,12 @@
 # Security
 
-[Documentation](docs/README.md) · [Project README](README.md)
+<p align="center">
+  <a href="docs/GETTING-STARTED.md">Start here</a> ·
+  <a href="docs/CONCEPTS.md">Concepts</a> ·
+  <a href="examples/README.md">Examples</a> ·
+  <a href="docs/README.md">All docs</a> ·
+  <a href="README.md">README</a>
+</p>
 
 darsay copies untrusted upstream files (weights, tokenizers, datasets,
 and whatever else a Hub repo contains) onto local disk and, during

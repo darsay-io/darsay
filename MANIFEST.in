@@ -4,4 +4,5 @@ include CHANGELOG.md
 include CONTRIBUTING.md
 include SECURITY.md
 graft docs
+graft examples
 graft tests

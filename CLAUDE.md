@@ -33,7 +33,11 @@ point `darsay` (argparse, subcommands in `cli.py`).
   `cli.py`.
 - `tests/` — pytest pyramid: `unit/`, `integration/` (fake `test:` provider),
   `e2e/` (live Hub, opt-in). See `docs/TESTING.md`.
-- `docs/MANIFEST.md` — field-by-field manifest schema reference.
+- `docs/GETTING-STARTED.md` — first-bundle walkthrough for new users.
+  `docs/CONCEPTS.md` — vault, bundle, pin, payload vs metadata.
+  `examples/README.md` — copy-paste cookbook.
+  `docs/README.md` — documentation home / reading map.
+  `docs/MANIFEST.md` — field-by-field manifest schema reference.
   `docs/MVB-FORMAT.md` — single-file export format spec.
   `docs/HYDRATION.md` — bundle→runnable-install design (envs, runner
   contract, hydration.json).
@@ -54,7 +58,8 @@ point `darsay` (argparse, subcommands in `cli.py`).
   `docs/TESTING.md` — test pyramid (unit / integration / e2e) and CI.
   **Update these whenever manifest fields or the export format change**, and
   bump `SCHEMA_VERSION` (`__init__.py`) / `MVB_FORMAT_VERSION` (`export.py`)
-  appropriately (major = breaking).
+  appropriately (major = breaking). Keep GETTING-STARTED / CONCEPTS /
+  examples in sync with the CLI (do not document unshipped flags as live).
 - `vault/` — archived bundles. **Gitignored; never commit bundles.** The
   reference bundle is `vault/qwen--qwen3-0.6b/c1899de289a0/` (Qwen3-0.6B).
 

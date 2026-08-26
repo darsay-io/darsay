@@ -1,6 +1,15 @@
-> [Documentation](README.md) · [Project README](../README.md)
+<p align="center">
+  <a href="GETTING-STARTED.md">Start here</a> ·
+  <a href="CONCEPTS.md">Concepts</a> ·
+  <a href="../examples/README.md">Examples</a> ·
+  <a href="README.md">All docs</a> ·
+  <a href="../README.md">README</a>
+</p>
 
 # Distribution and releases
+
+> **In one sentence.** `pipx install darsay` (or `uvx darsay` with no
+> install). Isolated CLI, pure-Python wheel, one runtime dependency.
 
 How people should install darsay, what a GitHub Release contains, and
 when (not) to ship a frozen binary.

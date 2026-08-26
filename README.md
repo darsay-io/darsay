@@ -3,7 +3,20 @@
 </h1>
 
 <p align="center">
-  <strong>the genesis machine of archives</strong>
+  <strong>Keep a model forever. Run it tomorrow.</strong>
+</p>
+
+```bash
+pipx install darsay
+
+darsay archive Qwen/Qwen3-0.6B
+darsay run     vault/qwen--qwen3-0.6b/<rev> "Say hello"
+```
+
+<p align="center">
+  A pinned snapshot of the Hub — hashed, licensed, and still loadable as-is.<br>
+  The Hub is a living website. A darsay bundle is a museum piece that still runs.<br>
+  <sub>Python 3.10+ · macOS and Linux · Apache 2.0</sub>
 </p>
 
 <p align="center">
@@ -15,95 +28,82 @@
 </p>
 
 <p align="center">
-  <a href="https://pypi.org/project/darsay/">PyPI</a> ·
-  <a href="#quick-start">Quick start</a> ·
-  <a href="#how-it-works">How it works</a> ·
-  <a href="#a-bundle">A bundle</a> ·
-  <a href="#commands">Commands</a> ·
-  <a href="docs/README.md">Documentation</a> ·
+  <a href="docs/GETTING-STARTED.md">Start here</a> ·
+  <a href="docs/CONCEPTS.md">Concepts</a> ·
+  <a href="examples/README.md">Examples</a> ·
+  <a href="docs/README.md">All docs</a> ·
   <a href="CONTRIBUTING.md">Contributing</a>
 </p>
 
 ---
 
-darsay pulls a model or dataset from a source (Hugging Face today) at a
-**pinned revision**, hashes every file, cross-checks upstream checksums,
-captures the license verbatim, extracts metadata from the payload itself, and
-writes a bundle that any Hugging Face-compatible loader uses **as-is**.
+## The idea in four lines
 
-When you want the archived model to speak:
+You have a **vault**. It holds **bundles**.
 
-```bash
-darsay run vault/qwen--qwen3-0.6b/<rev> "Say hello"
+Each bundle is one **pinned revision** of one source: an immutable payload
+(`model/` or `data/`), a `manifest.json` of recorded facts, and one file
+you write by hand (`curation.md`).
+
+`archive` puts the snapshot in the vault. `run` speaks to it **offline**.
+`export` packs it into a single `.mvb.tar` that any `tar` can open in 2040.
+
+The payload never changes. The Hub can.
+
+```
+  Hugging Face                         your disk
+  ────────────                         ─────────
+  Qwen/Qwen3-0.6B                      vault/
+       │                                 │
+       │  darsay archive                 │
+       └──────────────►──────────────────┤
+                                         │
+                          qwen--qwen3-0.6b/<rev>/
+                          ├── model/           frozen snapshot
+                          ├── manifest.json    recorded facts
+                          └── curation.md      your notes
+                                         │
+                          darsay run ────┘──► tokens, offline
 ```
 
-That command hydrates an isolated environment, runs **offline**, and leaves
-the payload byte-immutable. Before you commit tens of gigabytes,
-`darsay estimate` prices the source from upstream metadata alone.
+| On the Hub | In a bundle |
+|---|---|
+| A living website | A pinned git revision |
+| Can be gated, rewritten, deleted | Payload is immutable after archive |
+| “latest” is a moving target | The manifest records what was true |
+| You hope it still loads | `darsay run` is offline proof |
 
-<table>
-<tr>
-<td width="50%" valign="top">
+New here? Take the [guided first bundle](docs/GETTING-STARTED.md)
+(~five minutes with a tiny model). Want the mental model in full?
+[Concepts](docs/CONCEPTS.md). Want copy-paste recipes?
+[Examples](examples/README.md).
 
-**Estimate first.** Price a 50 GB model from Hub metadata. Nothing downloaded.
+## Install
 
-</td>
-<td width="50%" valign="top">
-
-**Archive for keeps.** Pinned revision, hashed, license captured, payload immutable.
-
-</td>
-</tr>
-<tr>
-<td width="50%" valign="top">
-
-**Resume anything.** Budgets, Ctrl-C, USB sticks, collaborators with `--shard 1/3`.
-
-</td>
-<td width="50%" valign="top">
-
-**Run offline.** One command. Isolated env. `HF_HUB_OFFLINE=1`. Payload untouched.
-
-</td>
-</tr>
-</table>
-
-## Why it exists
-
-The Hub is a living website, not an archive. Repos get gated, rewritten, and
-deleted. Datasets vanish faster than weights. Published quants — the official
-FP8, the community GGUF people actually ran — cannot be regenerated bit-exact
-from the master. If it matters what the world used, the bytes themselves must
-be kept, with a manifest that records facts and never fabricates them.
-
-A darsay bundle is that record: **immutable payload + machine-readable
-manifest + derived views + one curator file**. The tool is replaceable. The
-formats are not.
-
-## Quick start
-
-Requires Python 3.10+. Install from [PyPI](https://pypi.org/project/darsay/).
-Isolated CLI tools are the intended way to run a release; see
-[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+Requires Python 3.10+. Isolated CLI tools are the intended way to run a
+release; see [distribution](docs/DISTRIBUTION.md).
 
 ```bash
 pipx install darsay
-# or, one-shot with no install:
+# or, no install at all:
 uvx darsay --help
 # or:
 uv tool install darsay
 ```
 
-Then:
+<details>
+<summary><strong>Homebrew tap</strong> — personal tap, not homebrew/core</summary>
+
+Unqualified `brew install darsay` will not find it.
 
 ```bash
-darsay estimate Qwen/Qwen3-0.6B
-darsay archive  Qwen/Qwen3-0.6B
-darsay run      vault/qwen--qwen3-0.6b/<rev> "Say hello"
+brew install jeremynorris/darsay/darsay
 ```
 
+</details>
+
 <details>
-<summary><strong>Development checkout and extras</strong></summary>
+<summary><strong>Development checkout</strong></summary>
 
 ```bash
 python3 -m venv .venv
@@ -120,44 +120,67 @@ them — hydration builds its own isolated env per engine.
 
 </details>
 
-<details>
-<summary><strong>Homebrew tap</strong></summary>
-
-A personal tap, **not** homebrew/core. Unqualified `brew install darsay`
-will not find it.
-
-```bash
-brew install jeremynorris/darsay/darsay
-```
-
-</details>
-
 The vault root defaults to `./vault` (override with `--vault` or
 `$DARSAY_HOME`). Bundles are gitignored — they live on disk or in your
 backup tier, not in this repo.
 
-## How it works
+## The three verbs
 
-```mermaid
-flowchart LR
-  S["Source<br/>huggingface:owner/name"] --> E["estimate"]
-  E --> A["archive"]
-  A --> B["Bundle"]
-  B --> V["verify"]
-  B --> R["run"]
-  B --> X["export .mvb.tar"]
-  X --> I["import"]
+**1. Estimate** — price the source from Hub metadata. Nothing downloaded.
+
+```bash
+darsay estimate Qwen/Qwen3.8-27B
 ```
 
-1. **Estimate** — read-only preflight. Exact sizes, parameter counts, disk
-   headroom, quantized ecosystem. Nothing downloaded.
-2. **Archive** — pin a revision, transfer bytes (resumable, budgeted,
-   cooperative), hash, verify against upstream, write the manifest.
-3. **Keep** — the payload never changes again. Metadata at the bundle root
-   is mutable by design.
-4. **Use** — point any HF-compatible loader at `<bundle>/model`, or
-   `darsay run` for one-command offline inference. `export` packs a
-   deterministic `.mvb.tar` for offsite storage.
+```
+Qwen/Qwen3.8-27B @ main -> 1d4bf0f2ff60
+  image-text-to-text | license apache-2.0
+  parameters:   27.78B BF16  [upstream safetensors metadata]
+  payload:      32 files, 51.8 GiB
+  engines:      transformers
+  completeness: complete
+  bundle:       vault/qwen--qwen3.8-27b/1d4bf0f2ff60  (new)
+  disk:         needs ~55.5 GiB, free 1022.6 GiB — OK
+
+To archive: darsay archive Qwen/Qwen3.8-27B
+```
+
+Exits non-zero when free space is insufficient, so it doubles as a guard
+in scripts. `--variants` lists the quantized ecosystem.
+`--include '*Q4_K_M*'` prices one file inside a huge GGUF pack.
+
+**2. Archive** — pin a revision, fetch bytes, hash them, write the manifest.
+
+```bash
+darsay archive Qwen/Qwen3-0.6B
+```
+
+Ctrl-C is fine. Budgets are fine. The same command resumes:
+
+```bash
+darsay archive Qwen/Qwen3.8-27B --max-gb 10     # tonight
+darsay archive Qwen/Qwen3.8-27B --max-gb 10     # tomorrow
+darsay archive Qwen/Qwen3.8-27B                 # finish, verify, register
+```
+
+**3. Run** — isolated env, fully offline, payload untouched.
+
+```bash
+darsay run vault/qwen--qwen3-0.6b/<rev> "Say hello"
+```
+
+Or skip the tool and point any Hugging Face-compatible loader at the
+payload:
+
+```python
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
+path = "vault/qwen--qwen3-0.6b/<rev>/model"
+tok = AutoTokenizer.from_pretrained(path)
+model = AutoModelForCausalLM.from_pretrained(path)
+```
+
+No unpacking. No conversion. The archived files *are* the model.
 
 ## A bundle
 
@@ -177,8 +200,7 @@ vault/qwen--qwen3-0.6b/<revision12>/
 ```
 
 The payload under `model/` (or `data/` for datasets) is **immutable after
-archiving**; the bundle hash covers it alone. To use a model, point
-`transformers` at `<bundle>/model` — no unpacking, no conversion.
+archiving**; the bundle hash covers it alone.
 
 <details>
 <summary><strong>What the manifest records</strong></summary>
@@ -197,225 +219,118 @@ archiving**; the bundle hash covers it alone. To use a model, point
 | `security` | integrity status, unexpected-change flags, trust level |
 | `curation` | historical significance, capabilities, limitations, notes (via `curation.md`) |
 
-`schema_version` is recorded in every manifest. Full field-by-field
-reference: [docs/MANIFEST.md](docs/MANIFEST.md).
+`schema_version` is recorded in every manifest. Field-by-field reference:
+[docs/MANIFEST.md](docs/MANIFEST.md).
 
 </details>
 
 ## Commands
 
-```bash
-darsay estimate Qwen/Qwen3.8-27B --variants          # preflight: size, params, disk, quants
-darsay estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
-darsay estimate datasets/saidutta69/fable-5-premium  # Hub dataset address grammar
-darsay archive  Qwen/Qwen3-0.6B                      # download + hash + manifest
-darsay archive  datasets/saidutta69/fable-5-premium  # dataset bundle: payload under data/
-darsay archive  Qwen/Qwen3.8-27B --max-gb 10         # pause cleanly; rerun to resume
-darsay archive  Qwen/Qwen3.8-27B --dry-run           # verified / partial / missing plan
-darsay archive  Qwen/Qwen3.8-27B --shard 1/3 --max-gb 20
-darsay --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle>
-darsay verify   vault/qwen--qwen3-0.6b/<rev>
-darsay smoke    vault/qwen--qwen3-0.6b/<rev> [--inference]
-darsay list
-darsay info     vault/qwen--qwen3-0.6b/<rev>
-darsay regen    vault/qwen--qwen3-0.6b/<rev>         # rebuild README after editing curation.md
-darsay export   vault/qwen--qwen3-0.6b/<rev> -o /backups
-darsay import   /backups/qwen--qwen3-0.6b@<rev>.mvb.tar
-
-darsay run      vault/qwen--qwen3-0.6b/<rev> "Say hello"
-darsay hydrate  vault/qwen--qwen3-0.6b/<rev> [--dry-run]
-darsay envs [--prune]
-darsay dehydrate vault/qwen--qwen3-0.6b/<rev>
-```
+| You want to… | Type |
+|---|---|
+| Price a source, download nothing | `darsay estimate Qwen/Qwen3.8-27B` |
+| Keep it | `darsay archive Qwen/Qwen3-0.6B` |
+| Talk to it | `darsay run vault/<bundle> "Say hello"` |
+| See what you have | `darsay list` |
+| Re-hash and compare | `darsay verify vault/<bundle>` |
+| Pack one file for a USB drive | `darsay export vault/<bundle> -o /backups` |
+| Bring that file back | `darsay import /backups/<file>.mvb.tar` |
 
 Source refs are provider-qualified — `huggingface:Qwen/Qwen3-0.6B`,
 `huggingface:datasets/owner/name`. Unprefixed `owner/name` /
 `datasets/owner/name` and huggingface.co URLs are Hugging Face shorthand.
-Bundle-path commands dispatch on the manifest's `artifact_type`. Adding
-another host is a source provider, not a new CLI:
+
+<details>
+<summary><strong>The rest of the CLI</strong></summary>
+
+```bash
+darsay estimate Qwen/Qwen3.8-27B --variants
+darsay estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
+darsay estimate datasets/saidutta69/fable-5-premium
+darsay archive  datasets/saidutta69/fable-5-premium
+darsay archive  Qwen/Qwen3.8-27B --max-gb 10          # pause; rerun to resume
+darsay archive  Qwen/Qwen3.8-27B --dry-run            # verified / partial / missing
+darsay archive  Qwen/Qwen3.8-27B --shard 1/3 --max-gb 20
+darsay --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle>
+darsay smoke    vault/<bundle> [--inference]
+darsay info     vault/<bundle>
+darsay regen    vault/<bundle>                        # rebuild README after editing curation.md
+darsay hydrate  vault/<bundle> [--dry-run]
+darsay envs [--prune]
+darsay dehydrate vault/<bundle>
+```
+
+Adding another host is a source provider, not a new CLI:
 [docs/SOURCES.md](docs/SOURCES.md).
 
-## Estimate before you archive
+</details>
 
-A 27B model is a 50+ GB commitment. `estimate` is a read-only preflight
-against the Hub API — nothing downloaded, nothing written. It reports the
-pinned revision's exact inventory, parameter counts by dtype, the engines
-the payload will support, a completeness check, and a disk verdict. It
-exits non-zero when free space is insufficient, so it doubles as a guard
-in scripts. Upstream numbers are facts; derived figures (min RAM, download
-scratch) are labeled estimates.
+## When you need more
 
-```
-$ darsay estimate Qwen/Qwen3.8-27B
+<table>
+<tr>
+<td width="50%" valign="top">
 
-Qwen/Qwen3.8-27B @ main -> 1d4bf0f2ff60
-  image-text-to-text | license apache-2.0
-  parameters:   27.78B BF16  [upstream safetensors metadata]
-  payload:      32 files, 51.8 GiB
-                weights 51.7 GiB in 18 files (largest 3.7 GiB: model-00004-of-00018.safetensors)
-                support 22.0 MiB in 14 files
-  engines:      transformers
-  completeness: complete
-  estimated:    download scratch +3.7 GiB (largest file in flight), min RAM/VRAM 62.1 GB (weight bytes x1.2)
-  bundle:       vault/qwen--qwen3.8-27b/1d4bf0f2ff60  (new)
-  disk:         needs ~55.5 GiB, free 1022.6 GiB — OK
+**Pause, resume, share the work.**
+Ctrl-C, `--max-gb`, a USB stick, `--shard 1/3`
+with a collaborator. Partial bundles are
+relocatable. [Incremental transfer](docs/INCREMENTAL.md)
+· [recipe](examples/README.md#pause-and-resume-a-large-archive)
 
-To archive: darsay archive Qwen/Qwen3.8-27B
-```
+</td>
+<td width="50%" valign="top">
 
-`--variants` lists the quantized ecosystem (Hub `base_model:quantized`
-relation), with query caps recorded in the output. `--include GLOB` prices
-a subset of a repo — e.g. one Q4_K_M file inside a 439.7 GiB GGUF pack.
-`--json` emits the full machine-readable estimate.
+**Datasets are the same shape.**
+Addressed `datasets/owner/name`, payload under
+`data/`. Everything else is identical.
+[Datasets](docs/DATASETS.md)
+· [recipe](examples/README.md#archive-a-dataset)
 
-## Incremental, relocatable, cooperative transfers
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
-The first `archive` pins one immutable commit and writes the expected file
-set to `transfer.json`. Every later run reconciles that set against local
-bytes, trusts already verified files, hashes and adopts unrecorded complete
-files, resumes bundle-local `.incomplete` files with HTTP Range, and only
-registers `manifest.json` after every expected file is verified.
+**Export is a plain tar.**
+Deterministic `.mvb.tar`, marker first, no
+compression, recoverable with stock `tar`.
+[MVB format](docs/MVB-FORMAT.md)
+· [recipe](examples/README.md#export-to-a-usb-drive)
 
-`--max-gb`, `--max-bytes`, and `--max-minutes` stop cleanly with **exit
-code 10**. `--jobs` controls the small-file pool. `--rehash` rechecks
-trusted ledger entries.
+</td>
+<td width="50%" valign="top">
 
-Partial bundles are self-contained and relocatable. Copy the entire
-`<repo-slug>/<revision12>/` directory — including the payload `.cache` —
-under a different vault and rerun the same `archive` command. The pin is
-unchanged; completed files are adopted; the longest Range partial continues.
+**Quants are history or cache, never both.**
+Archive the master. Archive published quants
+that matter. Derive the rest at run time.
+[Quantization](docs/QUANTIZATION.md)
 
-Collaborators use `--shard N/T`: `1/3`, `2/3`, and `3/3` deterministically
-prioritize different byte-balanced whole-file lanes, but each can still
-finish the identical bundle alone. `darsay --vault DEST assemble
-PARTIAL...` merges matching partials **offline**.
+</td>
+</tr>
+</table>
 
-Full design, ledger shape, and failure semantics:
-[docs/INCREMENTAL.md](docs/INCREMENTAL.md).
+`verify` re-hashes the payload against the manifest and exits non-zero on
+drift — suitable for cron. `import` fully re-hashes **before** a bundle
+enters the vault; failures register nothing.
 
-## Quantized models: fidelity first
-
-The canonical bundle is the **highest-fidelity upstream release**, archived
-byte-exact — the master is the negative, quants are prints. Published quants
-that matter historically (the official FP8, the community-standard GGUF)
-are archived as ordinary **satellite bundles**: most are calibration-based
-and can never be regenerated bit-exact from the master.
-
-Everything else — running the model smaller on your own hardware — is
-disposable hydration-time derivation, never archival. Full policy:
-[docs/QUANTIZATION.md](docs/QUANTIZATION.md).
-
-## Dataset bundles
-
-Datasets are the vault's second artifact type. Models are functions of
-data, and datasets are *more* endangered than weights. One sentence covers
-the difference: datasets are addressed as `datasets/owner/name` and their
-payload lives in `data/`; everything else is identical.
-
-Bundle directories take a `datasets--` prefix. The manifest carries
-`dataset_metadata` (formats from the inventory; configs, splits, and
-example counts as **declared** upstream claims; **measured** parquet row
-counts only when pyarrow is installed). Dataset bundles record
-`models_trained_on`; model bundles record `training_datasets`.
-
-`hydrate` / `run` do not apply — a dataset has no engine. Any reader points
-at `data/` directly:
-
-```python
-import pyarrow.parquet as pq
-
-path = "vault/datasets--cornell-movie-review-data--rotten_tomatoes/aa13bc287fa6/data"
-table = pq.read_table(f"{path}/train.parquet")     # 8,530 rows, offline
-```
-
-Design and rationale: [docs/DATASETS.md](docs/DATASETS.md).
-
-## Verification
-
-- **At archive time** every file is checked against upstream expectations:
-  LFS files against their upstream SHA-256, small files against their git
-  blob SHA-1. Result: `verified-against-upstream`.
-- **`darsay verify`** re-hashes the payload and diffs it against the
-  manifest. Modified, missing, and extra files flip integrity to
-  `compromised` and the command exits non-zero — suitable for cron.
-- The **bundle hash** (SHA-256 over the sorted per-file hash lines)
-  fingerprints the entire payload.
-
-`import` fully re-hashes a payload **before** a bundle enters the vault.
-Failures register nothing and exit non-zero.
-
-## Single-file exports (`.mvb.tar`)
-
-`darsay export` packs a whole bundle into one **deterministic tar**:
-entries sorted (a `.mvb.json` marker first), tar metadata normalized, no
-compression — weights are incompressible and a plain tar stays inspectable
-with standard tools. The same bundle state always exports byte-identically,
-so the file has one stable SHA-256 for an offsite catalog.
-
-`darsay import` streams the marker, checks format compatibility, unpacks
-to staging, re-hashes against the embedded manifest, and only then
-registers. Manual recovery without the tool is documented:
-[docs/MVB-FORMAT.md](docs/MVB-FORMAT.md).
-
-## Running archived models
-
-`darsay run <bundle> ["prompt"]` goes from bundle to generated tokens
-in one command (macOS and Linux). It hydrates first: picks an engine from
-what the payload ships (safetensors → `transformers`, GGUF → `llama-cpp`),
-builds a dedicated virtualenv **outside the bundle** under
-`<vault>/.runtime/envs/` — content-keyed, so matching bundles share one env —
-and probes it against the payload.
-
-Inference then runs fully **offline** (`HF_HUB_OFFLINE=1`). A passing run
-is evidence the archived payload alone is sufficient. Envs are disposable:
-`darsay envs --prune` reclaims the disk; the next `run` rebuilds.
-
-Design details: [docs/HYDRATION.md](docs/HYDRATION.md).
-
-## Extending
-
-New artifact types go in the `ARTIFACT_TYPES` registry
-(`src/darsay/schema.py`) — add an entry with its payload root and
-completeness rules, and verify / export / report work unchanged. The
-`dataset` type was added exactly this way.
-
-New inference runtimes go in `ENGINES` (`src/darsay/hydrate.py`) — a
-detection glob, pip requirements, and a standalone runner script. MLX,
-vLLM, or ONNX is a registry entry, not a special case.
-
-New acquisition hosts go in `SourceProvider` (`src/darsay/providers/`).
-Hugging Face is the first plugin, not the product:
-[docs/SOURCES.md](docs/SOURCES.md).
+`run` hydrates first: picks an engine from what the payload ships
+(safetensors → `transformers`, GGUF → `llama-cpp`), builds a dedicated
+venv **outside the bundle** under `<vault>/.runtime/`, and infers with
+`HF_HUB_OFFLINE=1`. Envs are disposable. Design:
+[docs/HYDRATION.md](docs/HYDRATION.md).
 
 ## Documentation
 
-| | |
-|---|---|
-| [**Documentation home**](docs/README.md) | Map of every document, versions, reading order |
-| [Manifest schema](docs/MANIFEST.md) | Field-by-field `manifest.json` reference (v1.5.0) |
-| [MVB format](docs/MVB-FORMAT.md) | Deterministic `.mvb.tar` + manual recovery |
-| [Hydration](docs/HYDRATION.md) | Bundle → runnable env → offline inference |
-| [Incremental transfer](docs/INCREMENTAL.md) | Pin, reconcile, budget, shard, assemble |
-| [Datasets](docs/DATASETS.md) | Second artifact type: payload under `data/` |
-| [Sources](docs/SOURCES.md) | Provider grammar; Hugging Face as a plugin |
-| [Quantization](docs/QUANTIZATION.md) | What is archival vs derived |
-| [Design](docs/DESIGN.md) | Why Python; why longevity lives in the formats |
-| [Distribution](docs/DISTRIBUTION.md) | PyPI, pipx/uvx, Homebrew tap, and why not frozen binaries |
-| [Testing](docs/TESTING.md) | Unit / integration / opt-in Hub e2e |
+| Start here | Then | When you need the spec |
+|---|---|---|
+| [**Getting started**](docs/GETTING-STARTED.md) | [Concepts](docs/CONCEPTS.md) · [Examples](examples/README.md) | [Documentation home](docs/README.md) |
+| [Manifest](docs/MANIFEST.md) | [MVB format](docs/MVB-FORMAT.md) | the two documents a 2040 reader still needs |
+| [Hydration](docs/HYDRATION.md) · [Incremental](docs/INCREMENTAL.md) · [Datasets](docs/DATASETS.md) | [Sources](docs/SOURCES.md) · [Quantization](docs/QUANTIZATION.md) | how the verbs actually work |
+| [Design](docs/DESIGN.md) | [Distribution](docs/DISTRIBUTION.md) · [Testing](docs/TESTING.md) | why Python, how a release is consumed, what CI keeps |
 
-## Design
-
-darsay is deliberately Python: hydration runners live inside the
-torch / transformers ecosystem, the Hugging Face *provider* uses
-`huggingface_hub` as the reference client for that host's snapshot
-semantics, and the workload is IO-bound glue. A compiled rewrite would buy
-seconds on a tens-of-minutes job.
-
-Longevity is carried by the **formats**, not the tool — plain-JSON
-manifests and plain-tar exports, each documented for recovery without
-darsay — so the bundles outlive whatever software reads them next.
-
-Full rationale: [docs/DESIGN.md](docs/DESIGN.md).
+The tool is replaceable. The formats are not — plain JSON and plain tar,
+each documented for recovery without darsay. Full rationale:
+[docs/DESIGN.md](docs/DESIGN.md).
 
 ## License
 

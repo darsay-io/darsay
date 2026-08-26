@@ -1,6 +1,16 @@
-> [Documentation](README.md) · [Project README](../README.md)
+<p align="center">
+  <a href="GETTING-STARTED.md">Start here</a> ·
+  <a href="CONCEPTS.md">Concepts</a> ·
+  <a href="../examples/README.md">Examples</a> ·
+  <a href="README.md">All docs</a> ·
+  <a href="../README.md">README</a>
+</p>
 
 # .mvb.tar — single-file bundle format (v1.1)
+
+> **In one sentence.** One bundle, one uncompressed tar, recoverable with
+> stock `tar`. Same bundle state always exports the same bytes.
+> Copy-paste: [export to a USB drive](../examples/README.md#export-to-a-usb-drive).
 
 A darsay export packs one bundle into one file for offsite storage and
 transfer. The format is a plain tar, deliberately boring: any standard tar

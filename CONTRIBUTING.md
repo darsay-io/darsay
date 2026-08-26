@@ -1,6 +1,15 @@
 # Contributing
 
-Full documentation lives in [`docs/`](docs/README.md).
+<p align="center">
+  <a href="docs/GETTING-STARTED.md">Start here</a> ·
+  <a href="docs/CONCEPTS.md">Concepts</a> ·
+  <a href="examples/README.md">Examples</a> ·
+  <a href="docs/README.md">All docs</a> ·
+  <a href="README.md">README</a>
+</p>
+
+New to the tool? [Start here](docs/GETTING-STARTED.md). Full
+documentation lives in [`docs/`](docs/README.md).
 
 ## Setup
 

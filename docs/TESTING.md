@@ -1,6 +1,15 @@
-> [Documentation](README.md) · [Project README](../README.md)
+<p align="center">
+  <a href="GETTING-STARTED.md">Start here</a> ·
+  <a href="CONCEPTS.md">Concepts</a> ·
+  <a href="../examples/README.md">Examples</a> ·
+  <a href="README.md">All docs</a> ·
+  <a href="../README.md">README</a>
+</p>
 
 # Testing
+
+> **In one sentence.** Unit and integration tests never touch the Hub.
+> Live Hub e2e is opt-in and tiny (`sshleifer/tiny-gpt2`).
 
 darsay's test suite is a pyramid. Fast hermetic tests are the default;
 the live Hub path is opt-in and small.

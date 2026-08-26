@@ -18,10 +18,13 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
   verify and import; new archives and exports write `"tool": "darsay"`.
   The GitHub repository will be `jeremynorris/darsay`. Schema and MVB
   format versions are unchanged.
-- Documentation: landing README with the project logo, a documentation
-  index at [`docs/README.md`](docs/README.md), and consistent navigation
-  across the docs set. Quick start and
-  [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md) install from
+- Documentation: landing README opens with three commands and the
+  vault/bundle mental model. New [getting-started](docs/GETTING-STARTED.md)
+  walkthrough, [concepts](docs/CONCEPTS.md), and
+  [examples cookbook](examples/README.md). Documentation home at
+  [`docs/README.md`](docs/README.md); every spec page shares the same
+  navigation and user-facing specs lead with one sentence. `darsay --help`
+  matches that first impression. Install from
   [PyPI](https://pypi.org/project/darsay/)
   (`pipx install darsay` / `uvx darsay` / `uv tool install darsay`).
   A personal Homebrew tap lives at

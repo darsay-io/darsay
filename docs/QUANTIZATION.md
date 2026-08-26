@@ -1,6 +1,15 @@
-> [Documentation](README.md) · [Project README](../README.md)
+<p align="center">
+  <a href="GETTING-STARTED.md">Start here</a> ·
+  <a href="CONCEPTS.md">Concepts</a> ·
+  <a href="../examples/README.md">Examples</a> ·
+  <a href="README.md">All docs</a> ·
+  <a href="../README.md">README</a>
+</p>
 
 # Quantization policy — what gets archived, what gets derived
+
+> **In one sentence.** Archive the highest-fidelity release. Archive
+> published quants that matter historically. Derive the rest at run time.
 
 How darsay treats a model that ships in many precisions: which artifact
 is the canonical bundle, when a quantized repo deserves archiving in its own

@@ -1,6 +1,15 @@
-> [Documentation](README.md) · [Project README](../README.md)
+<p align="center">
+  <a href="GETTING-STARTED.md">Start here</a> ·
+  <a href="CONCEPTS.md">Concepts</a> ·
+  <a href="../examples/README.md">Examples</a> ·
+  <a href="README.md">All docs</a> ·
+  <a href="../README.md">README</a>
+</p>
 
 # Design rationale — implementation choices
+
+> **In one sentence.** Python because hydration and Hub snapshot semantics
+> live there. Longevity lives in the formats, not the binary.
 
 Why darsay is written in Python, and why the archive's longevity does
 not depend on that choice. Decision reviewed 2026-08 at v0.3.0 (~2,600

@@ -1,6 +1,15 @@
-> [Documentation](README.md) · [Project README](../README.md)
+<p align="center">
+  <a href="GETTING-STARTED.md">Start here</a> ·
+  <a href="CONCEPTS.md">Concepts</a> ·
+  <a href="../examples/README.md">Examples</a> ·
+  <a href="README.md">All docs</a> ·
+  <a href="../README.md">README</a>
+</p>
 
 # Hydration — from archived bundle to running model
+
+> **In one sentence.** `darsay run` builds an isolated env *outside* the
+> bundle and generates tokens offline. The payload is never touched.
 
 `darsay hydrate` turns an archived bundle into a locally runnable install;
 `darsay run` executes a prompt against it. The whole path is designed so

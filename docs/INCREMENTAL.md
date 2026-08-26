@@ -1,6 +1,16 @@
-> [Documentation](README.md) · [Project README](../README.md)
+<p align="center">
+  <a href="GETTING-STARTED.md">Start here</a> ·
+  <a href="CONCEPTS.md">Concepts</a> ·
+  <a href="../examples/README.md">Examples</a> ·
+  <a href="README.md">All docs</a> ·
+  <a href="../README.md">README</a>
+</p>
 
 # Incremental archiving — idempotent, resumable transfer
+
+> **In one sentence.** `archive` is interruptible by default. Rerun the
+> same command. `--max-gb` stops cleanly. `--shard N/T` shares the work.
+> Copy-paste: [pause and resume](../examples/README.md#pause-and-resume-a-large-archive).
 
 **Status: implemented** in v0.5.0, manifest schema 1.4.0 (additive),
 2026-08-24. Companion to [QUANTIZATION.md](QUANTIZATION.md) (what to

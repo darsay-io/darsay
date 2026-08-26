@@ -1,6 +1,15 @@
-> [Documentation](README.md) · [Project README](../README.md)
+<p align="center">
+  <a href="GETTING-STARTED.md">Start here</a> ·
+  <a href="CONCEPTS.md">Concepts</a> ·
+  <a href="../examples/README.md">Examples</a> ·
+  <a href="README.md">All docs</a> ·
+  <a href="../README.md">README</a>
+</p>
 
 # manifest.json — schema reference (v1.5.0)
+
+> **In one sentence.** The manifest is the recorded facts about a bundle.
+> Unknown is `null`. The tool never fabricates.
 
 `manifest.json` is the machine-readable source of truth for a bundle. This
 document describes every field so a bundle remains interpretable without the

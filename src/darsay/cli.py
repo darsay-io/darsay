@@ -1,4 +1,11 @@
-"""darsay — the genesis machine of archives.
+"""darsay — keep a model forever, run it tomorrow.
+
+    pipx install darsay
+    darsay archive Qwen/Qwen3-0.6B
+    darsay run     vault/qwen--qwen3-0.6b/<rev> "Say hello"
+
+A vault is a folder of bundles. A bundle is one pinned revision:
+immutable payload, recorded facts, still loadable as-is.
 
     darsay estimate huggingface:Qwen/Qwen3-0.6B   preflight: size, params, disk — no download
     darsay estimate datasets/<owner>/<name>       Hugging Face shorthand; same for a dataset

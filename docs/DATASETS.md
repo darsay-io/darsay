@@ -1,6 +1,20 @@
-> [Documentation](README.md) · [Project README](../README.md)
+<p align="center">
+  <a href="GETTING-STARTED.md">Start here</a> ·
+  <a href="CONCEPTS.md">Concepts</a> ·
+  <a href="../examples/README.md">Examples</a> ·
+  <a href="README.md">All docs</a> ·
+  <a href="../README.md">README</a>
+</p>
 
 # Dataset bundles — the vault's second artifact type
+
+> **In one sentence.** Datasets are addressed as `datasets/owner/name`
+> and their payload lives in `data/`; everything else is identical.
+> Copy-paste: [archive a dataset](../examples/README.md#archive-a-dataset).
+
+```bash
+darsay archive datasets/cornell-movie-review-data/rotten_tomatoes
+```
 
 Design for archiving Hugging Face datasets with the same bundling mechanism
 as models. Status: **implemented** (schema 1.2.0, darsay 0.4.0, 2026-08).
