@@ -68,6 +68,50 @@ def test_run_joins_unquoted_prompt_and_accepts_repl_flag(vault, test_provider, m
     assert seen["prompt"] is None
 
 
+def test_list_json_and_ids(vault, test_provider, capsys):
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    assert main(["--vault", str(vault), "list", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data[0]["bundle_id"].startswith("test--acme--toy")
+    assert data[0]["path"] == str(bundle)
+    assert data[0]["partial"] is False
+    assert main(["--vault", str(vault), "list", "--ids"]) == 0
+    assert "test--acme--toy@" in capsys.readouterr().out
+
+
+def test_rm_yes_deletes_bundle(vault, test_provider, capsys):
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    assert bundle.is_dir()
+    assert main(["--vault", str(vault), "rm", "--yes", "acme--toy"]) == 0
+    assert not bundle.exists()
+    assert "Removed" in capsys.readouterr().out
+    assert main(["--vault", str(vault), "list"]) == 0
+    assert "No bundles" in capsys.readouterr().out
+
+
+def test_du_counts_bundle_bytes(vault, test_provider, capsys):
+    test_provider.add_repo("acme/toy", model_files())
+    archive_quiet("test:acme/toy", vault=vault)
+    assert main(["--vault", str(vault), "du", "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["bundles_bytes"] > 0
+    assert data["total_bytes"] >= data["bundles_bytes"]
+    assert data["bundles"][0]["bundle_id"].startswith("test--acme--toy")
+
+
+def test_complete_scripts(capsys):
+    assert main(["complete", "zsh"]) == 0
+    zsh = capsys.readouterr().out
+    assert "#compdef darsay" in zsh
+    assert "list --ids" in zsh
+    assert main(["complete", "bash"]) == 0
+    assert "complete -F _darsay darsay" in capsys.readouterr().out
+    with pytest.raises(SystemExit):
+        main(["complete", "tcsh"])
+
+
 def test_list_empty_vault(vault, capsys):
     assert main(["--vault", str(vault), "list"]) == 0
     assert "No bundles" in capsys.readouterr().out

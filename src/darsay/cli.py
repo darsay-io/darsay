@@ -13,7 +13,10 @@ immutable payload, recorded facts, still loadable as-is.
     darsay archive datasets/<owner>/<name>        archive a dataset (payload under data/)
     darsay verify  <bundle>           re-hash and compare against manifest
     darsay smoke   <bundle> [--inference]
-    darsay list                       all bundles in the vault (id + path)
+    darsay list [--json]              all bundles in the vault (id + path)
+    darsay rm      <bundle> […]       delete bundles (confirmation unless --yes)
+    darsay du                         disk usage of bundles and .runtime
+    darsay complete bash|zsh|fish     print a completion script to eval
     darsay info    <bundle>           quick manifest summary
     darsay regen   <bundle>           rebuild README.md after editing curation.md
     darsay export  <bundle> [-o DIR]  pack into a single deterministic .mvb.tar
@@ -187,68 +190,123 @@ def cmd_smoke(args) -> int:
 
 
 def cmd_list(args) -> int:
-    vault = _vault_path(args, announce=True)
-    from .vault import bundle_id_for, iter_bundle_dirs
+    vault = _vault_path(args, announce=not (args.json or args.ids))
+    from .vault import bundle_records
 
-    bundle_dirs = iter_bundle_dirs(vault)
-    if not bundle_dirs:
+    records = bundle_records(vault)
+    if args.json:
+        print(json.dumps(records, indent=2, ensure_ascii=False))
+        return 0
+    if args.ids:
+        for rec in records:
+            print(rec["bundle_id"])
+        return 0
+    if not records:
         print(f"No bundles in {vault}/")
         return 0
-    from .readme_gen import human_size
-    from .schema import payload_root_for
-    from .transfer import LedgerError, load_ledger, transfer_plan
-
-    rows = []
-    for bundle_dir in bundle_dirs:
-        manifest_path = bundle_dir / "manifest.json"
-        if manifest_path.is_file():
-            m = json.loads(manifest_path.read_text(encoding="utf-8"))
-            rows.append((
-                m["bundle_id"],
-                str(bundle_dir),
-                m["licensing"]["spdx_id"] or "?",
-                human_size(m["inventory"]["total_size_bytes"]),
-                m["security"]["integrity_status"],
-                m["archive"]["date_archived"][:10],
-            ))
-            continue
-
-        try:
-            ledger = load_ledger(bundle_dir)
-            root = payload_root_for(ledger["repo_type"])
-            plan = transfer_plan(bundle_dir / root, ledger)
-            sizes = plan["bytes"]
-            files = plan["files"]
-            banked = sizes["verified"] + sizes["partial"]
-            percent = int(banked * 100 / sizes["total"]) if sizes["total"] else 0
-            status = (
-                f"archiving: {percent}% "
-                f"({human_size(banked)}/{human_size(sizes['total'])}, "
-                f"{files['verified']}/{files['total']} files verified)"
-            )
-            card = ledger.get("metadata", {}).get("card_data", {})
-            license_id = card.get("license") if isinstance(card, dict) else None
-            rows.append((
-                bundle_id_for(bundle_dir),
-                str(bundle_dir),
-                license_id or "?",
-                human_size(sizes["total"]),
-                status,
-                ledger["pinned_at"][:10],
-            ))
-        except (LedgerError, KeyError, OSError, TypeError, ValueError):
-            rows.append((
-                bundle_id_for(bundle_dir),
-                str(bundle_dir),
-                "?",
-                "?",
-                "archiving: unreadable transfer ledger",
-                "?",
-            ))
+    rows = [
+        (r["bundle_id"], r["path"], r["license"], r["size"], r["integrity"], r["archived"])
+        for r in records
+    ]
     header = ("BUNDLE", "PATH", "LICENSE", "SIZE", "INTEGRITY", "ARCHIVED")
     widths = [max(len(str(r[i])) for r in rows + [header]) for i in range(6)]
     for row in [header] + rows:
         print("  ".join(str(v).ljust(w) for v, w in zip(row, widths)))
+    return 0
+
+
+def cmd_rm(args) -> int:
+    import shutil
+
+    bundles = []
+    for spec in args.bundles:
+        bundles.append(_bundle_dir(args, spec, require_manifest=False))
+    # Unique, keep order.
+    seen = set()
+    unique = []
+    for bundle in bundles:
+        resolved = bundle.resolve()
+        if resolved not in seen:
+            seen.add(resolved)
+            unique.append(bundle)
+    vault = _vault_path(args).resolve()
+    for bundle in unique:
+        try:
+            bundle.resolve().relative_to(vault)
+        except ValueError:
+            raise SystemExit(
+                f"error: {bundle} is not inside the vault {vault} — refusing to delete"
+            ) from None
+        if bundle.resolve() == vault:
+            raise SystemExit("error: refusing to delete the vault root")
+    if not args.yes:
+        print("Will remove:")
+        for bundle in unique:
+            print(f"  {bundle}")
+        try:
+            answer = input("Type yes to confirm: ")
+        except EOFError:
+            answer = ""
+        if answer.strip().lower() != "yes":
+            print("Aborted.")
+            return 1
+    for bundle in unique:
+        shutil.rmtree(bundle)
+        parent = bundle.parent
+        try:
+            if parent.is_dir() and not any(parent.iterdir()):
+                parent.rmdir()
+        except OSError:
+            pass
+        print(f"Removed {bundle}")
+    return 0
+
+
+def cmd_du(args) -> int:
+    from .readme_gen import human_size
+    from .vault import bundle_records, dir_size
+
+    vault = _vault_path(args, announce=not args.json)
+    records = bundle_records(vault)
+    runtime = Path(os.environ.get("DARSAY_RUNTIME") or vault / ".runtime")
+    runtime_bytes = dir_size(runtime)
+    bundles_bytes = sum(r.get("size_bytes") or 0 for r in records)
+    payload = {
+        "vault": str(vault),
+        "bundles": [
+            {
+                "bundle_id": r["bundle_id"],
+                "path": r["path"],
+                "bytes": r.get("size_bytes") or 0,
+                "partial": r.get("partial", False),
+            }
+            for r in records
+        ],
+        "bundles_bytes": bundles_bytes,
+        "runtime": str(runtime),
+        "runtime_bytes": runtime_bytes,
+        "total_bytes": bundles_bytes + runtime_bytes,
+    }
+    if args.json:
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return 0
+    if not records and runtime_bytes == 0:
+        print(f"No bundles in {vault}/")
+        return 0
+    print(f"Vault {vault}")
+    for rec in records:
+        note = "  (partial)" if rec.get("partial") else ""
+        print(f"  {human_size(rec.get('size_bytes') or 0):>10}  {rec['bundle_id']}{note}")
+    print(f"  {human_size(runtime_bytes):>10}  .runtime")
+    print(f"  {human_size(payload['total_bytes']):>10}  total")
+    return 0
+
+
+def cmd_complete(args) -> int:
+    from .complete import script_for
+
+    text = script_for(args.shell)
+    sys.stdout.write(text if text.endswith("\n") else text + "\n")
     return 0
 
 
@@ -467,7 +525,23 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_smoke)
 
     p = add_cmd("list", help="list bundles in the vault (id and copy-pasteable path)")
+    list_fmt = p.add_mutually_exclusive_group()
+    list_fmt.add_argument("--json", action="store_true", help="machine-readable records")
+    list_fmt.add_argument("--ids", action="store_true", help="bundle ids, one per line (for completion)")
     p.set_defaults(func=cmd_list)
+
+    p = add_cmd("rm", help="delete one or more bundles from the vault")
+    p.add_argument("bundles", nargs="+", metavar="BUNDLE", help=bundle_help)
+    p.add_argument("-y", "--yes", action="store_true", help="do not prompt for confirmation")
+    p.set_defaults(func=cmd_rm)
+
+    p = add_cmd("du", help="disk usage of bundles and the shared runtime")
+    p.add_argument("--json", action="store_true", help="machine-readable totals")
+    p.set_defaults(func=cmd_du)
+
+    p = add_cmd("complete", help="print a bash/zsh/fish completion script")
+    p.add_argument("shell", choices=("bash", "zsh", "fish"))
+    p.set_defaults(func=cmd_complete)
 
     p = add_cmd("info", help="summarize a bundle")
     p.add_argument("bundle", help=bundle_help)

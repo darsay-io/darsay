@@ -150,6 +150,8 @@ If a later source is gated, set `$HF_TOKEN` or run
 | You want one file for a USB drive | `darsay export <bundle> -o /backups` |
 | You want to know it still matches | `darsay verify <bundle>` |
 | You wrote curator notes | edit `curation.md`, then `darsay regen <bundle>` |
+| You want shell completion | `eval "$(darsay complete zsh)"` (or `bash` / `fish`) |
+| You want disk usage | `darsay du` |
 
 Copy-paste for each of those: [Examples](../examples/README.md).
 

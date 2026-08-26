@@ -29,6 +29,9 @@ def test_help_lists_subcommands(capsys):
         "assemble",
         "hydrate",
         "run",
+        "rm",
+        "du",
+        "complete",
     ):
         assert name in out
 

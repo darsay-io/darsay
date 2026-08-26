@@ -36,6 +36,90 @@ def announce_vault(vault: Path, *, implicit: bool) -> None:
         )
 
 
+def dir_size(path: Path) -> int:
+    if not path.exists():
+        return 0
+    return sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
+
+
+def bundle_records(vault: Path) -> list[dict]:
+    """Inventory rows for ``list`` / ``du`` / completion."""
+    from .readme_gen import human_size
+    from .schema import payload_root_for
+    from .transfer import LedgerError, load_ledger, transfer_plan
+
+    rows = []
+    for bundle_dir in iter_bundle_dirs(vault):
+        on_disk = dir_size(bundle_dir)
+        manifest_path = bundle_dir / "manifest.json"
+        if manifest_path.is_file():
+            try:
+                m = json.loads(manifest_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                rows.append({
+                    "bundle_id": bundle_id_for(bundle_dir),
+                    "path": str(bundle_dir),
+                    "license": "?",
+                    "size_bytes": on_disk,
+                    "size": human_size(on_disk),
+                    "integrity": "unreadable manifest",
+                    "archived": "?",
+                    "partial": False,
+                })
+                continue
+            rows.append({
+                "bundle_id": m["bundle_id"],
+                "path": str(bundle_dir),
+                "license": m["licensing"]["spdx_id"] or "?",
+                "size_bytes": on_disk,
+                "payload_bytes": m["inventory"]["total_size_bytes"],
+                "size": human_size(m["inventory"]["total_size_bytes"]),
+                "integrity": m["security"]["integrity_status"],
+                "archived": m["archive"]["date_archived"][:10],
+                "partial": False,
+                "artifact_type": m.get("artifact_type"),
+            })
+            continue
+        try:
+            ledger = load_ledger(bundle_dir)
+            root = payload_root_for(ledger["repo_type"])
+            plan = transfer_plan(bundle_dir / root, ledger)
+            sizes = plan["bytes"]
+            files = plan["files"]
+            banked = sizes["verified"] + sizes["partial"]
+            percent = int(banked * 100 / sizes["total"]) if sizes["total"] else 0
+            status = (
+                f"archiving: {percent}% "
+                f"({human_size(banked)}/{human_size(sizes['total'])}, "
+                f"{files['verified']}/{files['total']} files verified)"
+            )
+            card = ledger.get("metadata", {}).get("card_data", {})
+            license_id = card.get("license") if isinstance(card, dict) else None
+            rows.append({
+                "bundle_id": bundle_id_for(bundle_dir),
+                "path": str(bundle_dir),
+                "license": license_id or "?",
+                "size_bytes": on_disk,
+                "payload_bytes": sizes["total"],
+                "size": human_size(sizes["total"]),
+                "integrity": status,
+                "archived": ledger["pinned_at"][:10],
+                "partial": True,
+            })
+        except (LedgerError, KeyError, OSError, TypeError, ValueError):
+            rows.append({
+                "bundle_id": bundle_id_for(bundle_dir),
+                "path": str(bundle_dir),
+                "license": "?",
+                "size_bytes": on_disk,
+                "size": human_size(on_disk) if on_disk else "?",
+                "integrity": "archiving: unreadable transfer ledger",
+                "archived": "?",
+                "partial": True,
+            })
+    return rows
+
+
 def iter_bundle_dirs(vault: Path) -> list[Path]:
     """Registered bundles and in-progress archives (ledger, no manifest)."""
     found = {

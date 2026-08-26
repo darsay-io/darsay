@@ -38,6 +38,9 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
 - Hydration rebuilds install the package versions recorded in
   `hydration.json` (`engine_packages`) instead of floating `torch` /
   `transformers`. `--force` refreshes to current PyPI.
+- `darsay rm` deletes bundles (confirmation unless `--yes`). `darsay du`
+  reports on-disk size of bundles and `.runtime`. `list --json` / `--ids`
+  for scripts. `darsay complete bash|zsh|fish` prints a completion script.
 
 - **Rename:** the package, CLI, and environment variables are now `darsay`
   (`darsay` / `$DARSAY_HOME` / `$DARSAY_RUNTIME` / `$DARSAY_PYTHON` /

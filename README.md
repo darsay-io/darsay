@@ -232,7 +232,9 @@ archiving**; the bundle hash covers it alone.
 | Price a source, download nothing | `darsay estimate Qwen/Qwen3.8-27B` |
 | Keep it | `darsay archive Qwen/Qwen3-0.6B` |
 | Talk to it | `darsay run qwen--qwen3-0.6b "Say hello"` |
-| See what you have | `darsay list` (id + path) |
+| See what you have | `darsay list` (id + path; `--json` for scripts) |
+| Disk use | `darsay du` |
+| Delete a bundle | `darsay rm qwen--qwen3-0.6b --yes` |
 | Re-hash and compare | `darsay verify qwen--qwen3-0.6b` |
 | Pack one file for a USB drive | `darsay export qwen--qwen3-0.6b -o /backups` |
 | Bring that file back | `darsay import /backups/<file>.mvb.tar` |
@@ -254,6 +256,10 @@ darsay archive  Qwen/Qwen3.8-27B --max-gb 10          # pause; rerun to resume
 darsay archive  Qwen/Qwen3.8-27B --dry-run            # verified / partial / missing
 darsay archive  Qwen/Qwen3.8-27B --shard 1/3 --max-gb 20
 darsay --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle>
+darsay list --json
+darsay du
+darsay rm       <bundle> --yes
+darsay complete zsh                                   # eval "$(darsay complete zsh)"
 darsay smoke    <bundle> [--inference]
 darsay info     <bundle>                              # path, id, or unique prefix
 darsay regen    <bundle>                              # rebuild README after editing curation.md

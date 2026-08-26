@@ -27,9 +27,10 @@ vault/
 ```
 
 There is no hidden database. `darsay list` is a walk of this tree; it
-prints each bundle's id and a copy-pasteable path. `info` / `run` /
-`verify` accept that path, the id, or a unique prefix. The vault is yours
-to rsync, restic, or put on a shelf.
+prints each bundle's id and a copy-pasteable path (`list --json` for
+scripts). `info` / `run` / `verify` accept that path, the id, or a unique
+prefix. `darsay du` is disk use; `darsay rm` deletes a bundle. The vault
+is yours to rsync, restic, or put on a shelf.
 
 ## Bundle
 
