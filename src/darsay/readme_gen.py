@@ -87,7 +87,7 @@ def _source_lines(src: dict) -> list[str]:
         "",
         "## Source & provenance",
         "",
-        f"- Origin: [{src.get('address') or src['repo_id']}]({src['upstream_url']}) "
+        f"- Origin: [{src['address']}]({src['upstream_url']}) "
         f"via {src.get('provider') or src['origin']}",
         f"- Pinned revision: `{src['revision']}` (ref `{src['revision_ref']}`, last modified upstream {src['last_modified_upstream'] or '?'})",
         f"- Downloaded: {src['download_timestamp']} by {src['downloader']['tool']} v{src['downloader']['version']} "
@@ -322,7 +322,7 @@ def _render_model_readme(bundle_dir: Path, m: dict) -> str:
         f"darsay verify {bundle_path}",
         "",
         "# Re-create an identical bundle from upstream (bit-for-bit payload)",
-        f"darsay archive {src.get('address') or src['repo_id']} --revision {src['revision']}",
+        f"darsay archive {src['address']} --revision {src['revision']}",
         "```",
     ]
 
@@ -461,7 +461,7 @@ def _render_dataset_readme(bundle_dir: Path, m: dict) -> str:
         f"darsay verify {bundle_path}",
         "",
         "# Re-create an identical bundle from upstream (bit-for-bit payload)",
-        f"darsay archive {src.get('address') or ('datasets/' + src['repo_id'])} --revision {src['revision']}",
+        f"darsay archive {src['address']} --revision {src['revision']}",
         "```",
     ]
 

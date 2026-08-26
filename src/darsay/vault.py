@@ -169,27 +169,8 @@ def iter_bundle_dirs(vault: Path) -> list[Path]:
 
 
 def _source_address_from_manifest(manifest: dict) -> str | None:
-    """Canonical source address, reconstructing pre-1.5.0 manifests."""
-    from .sources import parse_source
-
-    src = manifest.get("source") or {}
-    address = src.get("address")
-    if address:
-        return address
-    repo_id = src.get("repo_id")
-    if not repo_id:
-        return None
-    loc = repo_id
-    artifact = manifest.get("artifact_type") or src.get("repo_type")
-    if artifact == "dataset" and not str(loc).startswith("datasets/"):
-        loc = f"datasets/{loc}"
-    provider = src.get("provider") or src.get("origin")
-    try:
-        if provider:
-            return parse_source(f"{provider}:{loc}").canonical
-        return parse_source(loc).canonical
-    except SystemExit:
-        return None
+    """Canonical source address from the manifest."""
+    return (manifest.get("source") or {}).get("address")
 
 
 def _source_address_from_ledger(ledger: dict) -> str | None:

@@ -125,15 +125,5 @@ def parse_source(ref: str) -> SourceRef:
 
 
 def source_from_ledger(ledger: dict) -> SourceRef:
-    """Rebuild a SourceRef from a transfer ledger (including pre-provider ledgers)."""
-    address = ledger.get("address")
-    if address:
-        return parse_source(address)
-    locator = ledger["repo_id"]
-    provider = ledger.get("provider") or "huggingface"
-    if provider in ("huggingface", "hf"):
-        if ledger.get("repo_type") == "dataset":
-            return parse_source(f"datasets/{locator}")
-        return parse_source(locator)
-    prefix = "datasets/" if ledger.get("repo_type") == "dataset" else ""
-    return parse_source(f"{provider}:{prefix}{locator}")
+    """Rebuild a SourceRef from a transfer ledger."""
+    return parse_source(ledger["address"])

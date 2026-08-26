@@ -16,9 +16,8 @@ is the canonical bundle, when a quantized repo deserves archiving in its own
 right, and how "I want to run it at 4 bits" is served without archiving
 anything extra.
 
-Status: policy §1–3 adopted; `estimate --include` and `archive --include`
-are implemented (schema 1.6.0). Hydration-time `--quantize` is still
-proposed. Case study: Qwen/Qwen3.8-27B (2026-08).
+`estimate --include` and `archive --include` pin a subset. Hydration-time
+`--quantize` is proposed. Case study: Qwen/Qwen3.8-27B.
 
 ## 1. The two kinds of quantized artifact
 
@@ -107,7 +106,6 @@ pass for a single GGUF (`model/*.gguf` satisfies config/weights/tokenizer).
 The manifest records the subset honestly — `source.subset` holds the
 include patterns **and the full upstream file list with sizes/hashes**,
 so the bundle states exactly what it deliberately does not contain.
-Schema 1.6.0 (additive).
 
 ### Proposed: hydration-time quantization (`hydrate --quantize`, `run --quantize`)
 

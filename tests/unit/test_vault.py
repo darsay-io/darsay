@@ -111,7 +111,7 @@ def test_iter_bundle_dirs_skips_reserved(tmp_path):
     assert {d.parent.name for d in dirs} == {"acme--toy"}
 
 
-def test_bundle_records_additive_keys_and_pre15_address(tmp_path):
+def test_bundle_records_source_address_and_remaining(tmp_path):
     from darsay.vault import bundle_records
 
     bundle = tmp_path / "acme--toy" / "aaaaaaaaaaaa"
@@ -124,7 +124,14 @@ def test_bundle_records_additive_keys_and_pre15_address(tmp_path):
             "inventory": {"total_size_bytes": 10},
             "security": {"integrity_status": "verified-against-upstream"},
             "archive": {"date_archived": "2026-08-01T00:00:00+00:00"},
-            "source": {"origin": "huggingface", "repo_id": "acme/toy", "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "revision_ref": "main"},
+            "source": {
+                "origin": "huggingface",
+                "provider": "huggingface",
+                "address": "huggingface:acme/toy",
+                "repo_id": "acme/toy",
+                "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                "revision_ref": "main",
+            },
         }),
         encoding="utf-8",
     )

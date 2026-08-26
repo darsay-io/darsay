@@ -108,13 +108,12 @@ def test_load_manifest_refuses_wrong_kind(tmp_path):
         load_manifest(tmp_path)
 
 
-def test_load_manifest_allows_missing_kind(tmp_path):
+def test_load_manifest_requires_kind(tmp_path):
     data = _minimal_manifest()
     del data["kind"]
     (tmp_path / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
-    loaded = load_manifest(tmp_path)
-    assert "kind" not in loaded
-    assert loaded["bundle_id"] == "acme--toy@aaaaaaaaaaaa"
+    with pytest.raises(SystemExit, match="kind missing"):
+        load_manifest(tmp_path)
 
 
 def test_write_manifest_preserves_unknown_top_level(tmp_path):

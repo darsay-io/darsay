@@ -45,10 +45,9 @@ point `darsay` (argparse, subcommands in `cli.py`).
   when a model has quantized variants.
   `docs/DESIGN.md` — implementation rationale: why Python, and why bundle
   longevity rests on the formats, not the tool.
-  `docs/DATASETS.md` — dataset bundles (implemented, schema 1.2.0):
-  Hub-address refs, per-type payload roots, dataset manifest sections.
-  `docs/INCREMENTAL.md` — incremental archiving (implemented in
-  v0.5.0/schema 1.4.0): idempotent resumable transfer — pin →
+  `docs/DATASETS.md` — dataset bundles: Hub-address refs, per-type payload
+  roots, dataset manifest sections.
+  `docs/INCREMENTAL.md` — incremental archiving: idempotent resumable transfer — pin →
   reconcile → plan → transfer → register, `transfer.json` ledger, session
   budgets, local-source adoption.
   `docs/DISTRIBUTION.md` — how releases are consumed (PyPI / pipx / uvx, personal Homebrew tap)

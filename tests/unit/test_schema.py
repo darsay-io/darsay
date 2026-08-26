@@ -25,7 +25,7 @@ def test_payload_root_for_known_types():
     assert payload_root_for("dataset") == "data"
 
 
-def test_payload_root_reads_layout_with_legacy_fallback():
+def test_payload_root_reads_layout_defaulting_to_model():
     assert payload_root({"inventory": {"layout": {"payload_root": "data/"}}}) == "data"
     assert payload_root({"inventory": {}}) == "model"
     assert payload_root({}) == "model"

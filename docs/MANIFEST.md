@@ -32,8 +32,8 @@ Conventions:
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | Version of this schema (`"1.6.0"`; 1.1 defined `runtime.tested_hardware`; 1.2 added datasets; 1.3 added gate and structured-lineage provenance; 1.4 added incremental-transfer accounting and local-source provenance; 1.5 added `source.provider` / `source.address`; 1.6 added `source.subset` and `kind` — all additive). |
-| `kind` | Always `"darsay.bundle"` on files this tool writes. Absent on pre-1.6 manifests (still valid 1.x). A present value that is not this string is a load error. |
+| `schema_version` | Version of this schema (`"1.6.0"`). Major changes only on breaking layout. |
+| `kind` | Always `"darsay.bundle"`. Any other value (including missing) is a load error. |
 | `artifact_type` | Registry key driving completeness rules and the payload root (`"model"` or `"dataset"`; future: GGUF packs, papers — see `src/darsay/schema.py`). |
 | `bundle_id` | `<bundle directory name>@<first 12 of pinned revision>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Hugging Face dataset bundles take a `datasets--` prefix (`datasets--saidutta69--fable-5-premium@684cb1f849fe`) since model and dataset namespaces can collide on that host. Other providers include their id in the directory name. Stable, deterministic, unique per (source, revision). |
 
@@ -54,9 +54,9 @@ Provenance of the download.
 
 | Field | Meaning |
 |---|---|
-| `origin` | Provider id (`huggingface`). Same value as `provider`; kept so pre-1.5 readers still see a hosting service. |
-| `provider` | Acquisition plugin id (`huggingface`). Added in 1.5.0. |
-| `address` | Canonical source ref (`huggingface:Qwen/Qwen3-0.6B`, `huggingface:datasets/owner/name`). Added in 1.5.0. |
+| `origin` | Hosting service id (`huggingface`). Same value as `provider` for the Hugging Face plugin. |
+| `provider` | Acquisition plugin id (`huggingface`). |
+| `address` | Canonical source ref (`huggingface:Qwen/Qwen3-0.6B`, `huggingface:datasets/owner/name`). |
 | `repo_id`, `upstream_url` | Provider-native locator and its web URL. |
 | `revision` | Full commit hash the download is pinned to. Re-archiving this revision reproduces the payload bit-for-bit. |
 | `revision_ref` | The ref that was requested (`main`, a tag, or a hash). |
@@ -69,7 +69,7 @@ Provenance of the download.
 | `access` | `{gated, notes}`. `gated` is the Hub gate status at archive time: `"auto"` (agree → instant access, contact info shared with the authors), `"manual"` (authors approve each request), or `false`. The gate agreement text lives in Hub repo settings, **not** in the repo tree, so it is not part of the snapshot — `notes` records that. Gates are enforced server-side on file downloads; an archive of a gated repo means the archiving account had accepted the terms. |
 | `upstream_stats_at_archive` | Downloads/month and likes at archive time — a popularity snapshot for the historical record. |
 | `upstream_tags` | Raw repo tags at archive time. |
-| `subset` | Present when `archive --include` pinned a globbed subset. `{include, sidecars, sidecar_file_count, full_file_count, full_total_size_bytes, kept_file_count, kept_total_size_bytes, omitted_file_count, full_files[]}`. `full_files` is the complete upstream inventory (path, size, sha256, git_sha1, sorted by path) so the bundle states exactly what it left out. `inventory.files` is only the kept payload. `null` when the pin is the whole repo. Added in 1.6.0. |
+| `subset` | Present when `archive --include` pinned a globbed subset. `{include, sidecars, sidecar_file_count, full_file_count, full_total_size_bytes, kept_file_count, kept_total_size_bytes, omitted_file_count, full_files[]}`. `full_files` is the complete upstream inventory (path, size, sha256, git_sha1, sorted by path) so the bundle states exactly what it left out. `inventory.files` is only the kept payload. `null` when the pin is the whole repo. |
 
 ## `licensing`
 
@@ -197,7 +197,7 @@ Model bundles:
 | `base_models` | All declared parents, from card `base_model` plus the Hub's `base_model:*` repo tags (merges have several; null when nothing is declared). |
 | `base_model` | The primary (first) parent — convenience alias for `base_models[0]`. |
 | `base_model_relation` | The model-tree edge label: `finetune`, `adapter`, `quantized`, or `merge`, from the card's `base_model_relation` or an unambiguous typed tag. Null when upstream doesn't label the edge (or labels conflict) — record, don't fabricate. Note the Hub has no relation type for alignment edits (e.g. abliteration); those surface only in tags and card text, and belong in `curation.md`. |
-| `finetuned_from` | The parent **only when the declared relation is `finetune`**; null otherwise — a quantization or alignment edit is not a finetune. (Pre-1.3 manifests set this to `base_model` unconditionally; treat old values as "parent", not "finetune parent".) |
+| `finetuned_from` | The parent **only when the declared relation is `finetune`**; null otherwise — a quantization or alignment edit is not a finetune. |
 | `training_datasets` | Dataset ids the model card declares training on (`card.datasets`, normalized to a list; null when not declared) — the mirror of a dataset bundle's `models_trained_on`. |
 | `quantized_versions`, `gguf_repos` | Downstream repos found at archive time (GGUFs are the `*gguf*` subset). |
 | `finetunes_count`, `adapters_count` | Counts of downstream finetune/adapter repos. |
@@ -271,13 +271,11 @@ last touched it. Tool version (`darsay.__version__`) moves independently.
 - **Minor / patch** are additive. Readers **ignore unknown fields**.
   Missing additive fields mean `null`. Writers **preserve** unknown
   top-level keys on round-trip (`verify`, `run`, `regen`).
-- **Stamp the version when the write introduces that version's field.**
-  A `darsay run` that records `runtime.tested_hardware` (a 1.1 field) may
-  bump a pre-1.1 file to `1.1.0`. It must not stamp the tool's current
-  schema onto an older honest record.
-- **1.x will not** rename or remove a field (including `source.origin` and
-  `identity.model_name`), change `payload_root` for `model` or `dataset`,
-  change `bundle_hash` or what it covers, or rewrite payload.
+- **The version describes this file**, not the tool that last touched it.
+  Writes do not stamp the tool's current schema onto the record.
+- **1.x will not** rename or remove a field, change `payload_root` for
+  `model` or `dataset`, change `bundle_hash` or what it covers, or rewrite
+  payload.
 - **New artifact types** (GGUF packs, papers) are a new `artifact_type`
   plus payload root — not a 2.0. Readers take `inventory.layout.payload_root`
   from the record.

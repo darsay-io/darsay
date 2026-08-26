@@ -172,8 +172,8 @@ Museum-grade does not mean “hope this CLI still runs.” Longevity sits in
 two boring formats:
 
 - **`manifest.json`** — plain JSON, `kind: darsay.bundle`, field-by-field
-  spec in [MANIFEST.md](MANIFEST.md). Major-newer is a hard error; unknown
-  fields are ignored on read and preserved on write.
+  spec in [MANIFEST.md](MANIFEST.md). Unknown fields are ignored on read
+  and preserved on write. Major-newer is a hard error.
 - **`.mvb.tar`** — uncompressed tar, marker first, deterministic
   metadata, unpackable with stock `tar`. Spec and manual recovery:
   [MVB-FORMAT.md](MVB-FORMAT.md).

@@ -771,7 +771,7 @@ def cmd_info(args) -> int:
     m = load_manifest(bundle)
     print(f"{m['bundle_id']}  (schema v{m['schema_version']}, {m['artifact_type']})")
     src = m["source"]
-    print(f"  source:     {src.get('address') or src['repo_id']} @ {src['revision'][:12]} ({src.get('provider') or src['origin']})")
+    print(f"  source:     {src['address']} @ {src['revision'][:12]} ({src.get('provider') or src['origin']})")
     print(f"  license:    {m['licensing']['spdx_id']}  commercial={m['licensing']['commercial_use']}")
     if m["artifact_type"] == "dataset":
         dm = m["dataset_metadata"]
@@ -829,7 +829,7 @@ def cmd_assemble(args) -> int:
     )
     ledger = json.loads((bundle / "transfer.json").read_text(encoding="utf-8"))
     from .sources import source_from_ledger
-    address = ledger.get("address") or source_from_ledger(ledger).canonical
+    address = source_from_ledger(ledger).canonical
     print(f"\nCombined partial bundle: {bundle}")
     if plan["complete"]:
         print("All payload files are present and verified; run archive once to register the bundle:")

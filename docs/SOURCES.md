@@ -16,8 +16,6 @@ not belong to Hugging Face. Hugging Face is the first **source provider**:
 it pins a revision, lists files, and fetches bytes. A second provider is a
 new class plus a registry line; it is not a new `archive` flag.
 
-Implemented in v0.6.0, manifest schema 1.5.0 (additive).
-
 ## Public address grammar
 
 `estimate` and `archive` take one argument, a **source ref**:
@@ -98,11 +96,9 @@ format. Optional extras are unchanged.
 
 ## Manifest
 
-Schema 1.5.0 records `source.provider` and `source.address` alongside the
-existing `origin` / `repo_id` / `upstream_url`. `origin` is the provider
-id (still `"huggingface"` for Hub archives). Older manifests without the
-new fields remain valid; readers fall back to `origin` + `repo_id`.
-See [MANIFEST.md](MANIFEST.md).
+The record stores `source.provider` and `source.address` alongside
+`origin` / `repo_id` / `upstream_url`. `origin` is the hosting service
+id (`"huggingface"` for Hub archives). See [MANIFEST.md](MANIFEST.md).
 
 ---
 

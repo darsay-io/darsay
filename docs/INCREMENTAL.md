@@ -12,17 +12,16 @@
 > same command. `--max-gb` stops cleanly. `--shard N/T` shares the work.
 > Copy-paste: [pause and resume](../examples/README.md#pause-and-resume-a-large-archive).
 
-**Status: implemented** in v0.5.0, manifest schema 1.4.0 (additive),
-2026-08-24. Companion to [QUANTIZATION.md](QUANTIZATION.md) (what to
-archive) — this document is about *how the bytes get here* when "what" is
-tens of gigabytes to terabytes.
+Companion to [QUANTIZATION.md](QUANTIZATION.md) (what to archive) — this
+document is about *how the bytes get here* when "what" is tens of
+gigabytes to terabytes.
 
 A catalog overlay treats an in-progress pin as status `partial` — unfinished
 work, same as a want. `darsay archive --next CATALOG` prefers a `partial`
 over a `want` (desire is the tiebreak among partials, then among wants) so
 budgeted sessions finish bytes already on disk. See [Catalogs](CATALOGS.md).
 
-`darsay archive` is now an operation you can interrupt at any
+`darsay archive` is an operation you can interrupt at any
 moment, re-run any number of times, and spread across days of budgeted
 sessions — and every run does the minimum network work required to converge
 on the same verified bundle:
@@ -322,18 +321,17 @@ an in-progress row for bundles with a ledger but no manifest —
 `archiving: 61% (34.1/55.6 GB, 9/15 files verified)` — so the vault's
 overall state is visible without running anything.
 
-## 7. Manifest impact (schema 1.4.0, additive)
+## 7. Manifest impact
 
 | Field | Meaning |
 |---|---|
 | `source.transfer` | `{sessions, started, completed, bytes_network, bytes_adopted, bytes_local_sources, retries}` — the durable summary of how the payload got here. A one-shot archive is simply `sessions: 1`. |
-| `source.download_timestamp` | Unchanged meaning (completion time); `source.transfer.started` records first-byte time. |
-| `source.mirrors_used` | Now populated when local sources served files (`local:<bundle_id>` entries). |
-| `validation.checksum_verification.method` | `"per-file at download completion"` — states honestly *when* hashes were established; `at` remains registration time. |
+| `source.download_timestamp` | Completion time of the transfer. `source.transfer.started` is first-byte time. |
+| `source.mirrors_used` | `local:<bundle_id>` entries when sibling bundles supplied matching blobs. |
+| `validation.checksum_verification.method` | `"per-file at download completion"` — *when* hashes were established; `at` is registration time. |
 
-Per-file records in `inventory.files` are unchanged — hashes come from the
-ledger instead of a final mega-pass, which is a provenance improvement, not
-a schema change.
+Per-file records in `inventory.files` take hashes from the ledger, not a
+final mega-pass.
 
 ## 8. Failure modes
 
@@ -341,7 +339,7 @@ a schema change.
 |---|---|
 | Power loss / crash mid-file | Partial resumes; at most one file's ledger entry is lost and reconciliation re-derives it. |
 | `transfer.json` deleted or corrupt | Rebuilt by reconciliation: hash present files, adopt matches. Slow, never lossy. |
-| Upstream repo gated or deleted between sessions | CDN fetches fail with the clean gated/not-found messages (schema 1.3.0 behavior); the partial bundle stays resumable if access returns. Logged in `events`. |
+| Upstream repo gated or deleted between sessions | CDN fetches fail with the clean gated/not-found messages; the partial bundle stays resumable if access returns. Logged in `events`. |
 | Persistent digest mismatch | Retried once, then recorded; registration proceeds with `checksum_verification: fail` and the warning — same contract as the one-shot flow. |
 | Disk fills mid-session | Plan-phase preflight warns before starting; a mid-session `ENOSPC` ends the session as `error` with state intact. |
 | Two concurrent runs | Second exits on the live lock. |

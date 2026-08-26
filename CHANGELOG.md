@@ -19,8 +19,7 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
   CATALOG`. Possession is an overlay view; `archive` does not rewrite
   `catalog.json`. Catalog schema **1.0.0** (independent of bundle schema
   1.6.0). Spec: [docs/CATALOGS.md](docs/CATALOGS.md).
-- Manifest `kind: "darsay.bundle"` on newly written records (absent on
-  pre-1.6 files; still valid 1.x).
+- Manifest `kind: "darsay.bundle"`.
 
 ### Changed
 
@@ -40,14 +39,13 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
   unregistered schemes.
 - Bash/fish complete catalog ids; `archive` completes them only after
   `--next`.
-- `load_manifest` refuses a missing `schema_version` and major `> 1`.
-  `import` checks the marker's embedded schema major before unpacking.
-  Unknown top-level manifest keys round-trip. `darsay run` no longer
-  stamps the tool's current schema onto older honest records (a pre-1.1
-  file may bump to 1.1.0 when `tested_hardware` is first written).
+- `load_manifest` requires `kind` and `schema_version`, and refuses major
+  `> 1`. `import` checks the marker's embedded schema major before unpacking.
+  Unknown top-level manifest keys round-trip. `darsay run` does not stamp
+  the tool's current schema onto the record.
 - Export events in `exports.json` record `written_by` (tool + version).
-  The in-tar marker still names only the format family, so packing the
-  same bundle state stays byte-identical across tool releases.
+  The in-tar marker names only the format family, so packing the same
+  bundle state is byte-identical across tool releases.
 
 ### Fixed
 

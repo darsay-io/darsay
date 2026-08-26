@@ -28,9 +28,7 @@ tool can list and unpack it decades from now, with or without darsay.
 - **Excluded from the tar:** `exports.json`, `hydration.json`, `transfer.json`,
   and `transfer.lock` — volatile machine-local state (see Determinism; run,
   transfer, and lock records are meaningless on another machine) — plus
-  `.DS_Store`. (v1.1 added the `hydration.json` exclusion; v1.0 readers import
-  v1.1 files unchanged. The transfer sidecars are likewise excluded without a
-  container-format change.)
+  `.DS_Store`.
 
 ## Marker (`.mvb.json`, always the first entry)
 
@@ -54,8 +52,7 @@ payload hash are known up front.
 The container is artifact-type-agnostic: `artifact_type` (`"model"`,
 `"dataset"`, ...) rides in the marker and the embedded manifest, and the
 payload directory inside the tar is whatever the manifest's
-`inventory.layout.payload_root` names (`model/`, `data/`). Dataset bundles
-therefore needed no format bump — a v1.x reader unpacks them unchanged.
+`inventory.layout.payload_root` names (`model/`, `data/`).
 
 ## Determinism
 

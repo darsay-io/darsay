@@ -170,8 +170,7 @@ Copy-paste for each of those: [Examples](../examples/README.md).
 ## If something feels wrong
 
 - **`No bundles in …/darsay/`** — you passed `--vault` / `$DARSAY_HOME`
-  when you archived, or you are looking at a leftover `./vault` from an
-  older darsay. The default is `~/darsay`; `list` prints the path it used.
+  when you archived. The default is `~/darsay`; `list` prints the path it used.
 - **Disk verdict `insufficient`** — `estimate` is doing its job. Free
   space, or pick a smaller source.
 - **Archive paused with exit code 10** — a budget ran out. Rerun the

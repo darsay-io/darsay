@@ -16,7 +16,7 @@ from fnmatch import fnmatch
 MANIFEST_KIND = "darsay.bundle"
 MANIFEST_SCHEMA_MAJOR = 1
 # Known top-level keys in document order. write_manifest emits these first,
-# then any extra keys (1.x readers ignore unknowns; writers must preserve them).
+# then any extra keys (readers ignore unknowns; writers preserve them).
 MANIFEST_TOP_KEYS = (
     "schema_version",
     "kind",
@@ -91,8 +91,8 @@ def payload_root_for(artifact_type: str) -> str:
 
 
 def payload_root(manifest: dict) -> str:
-    """Payload directory name (no trailing slash) recorded in a manifest.
-    Falls back to "model/" for pre-1.2 manifests that predate the field."""
+    """Payload directory name (no trailing slash) from the manifest.
+    Default ``model/`` when ``inventory.layout.payload_root`` is omitted."""
     layout = manifest.get("inventory", {}).get("layout") or {}
     return (layout.get("payload_root") or "model/").rstrip("/")
 

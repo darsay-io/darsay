@@ -71,9 +71,9 @@ def hub_url(repo_id: str, repo_type: str = "model") -> str:
 def bundle_name_for(repo_id: str, repo_type: str = "model") -> str:
     """Vault directory name for a Hugging Face-shaped locator.
 
-    Prefer ``parse_source(...).bundle_name``. Hugging Face bundle names are
-    unchanged (``owner--name``, ``datasets--owner--name``) so existing vaults
-    keep resuming. Other providers include their id in the name.
+    Prefer ``parse_source(...).bundle_name``. Hugging Face names are
+    ``owner--name`` / ``datasets--owner--name``. Other providers include
+    their id in the name.
     """
     loc = f"datasets/{repo_id}" if repo_type == "dataset" else repo_id
     return parse_source(loc).bundle_name
@@ -82,8 +82,8 @@ def bundle_name_for(repo_id: str, repo_type: str = "model") -> str:
 def bundle_dir_for(vault: Path, source: str | SourceRef, revision: str, repo_type: str | None = None) -> Path:
     """Return the bundle directory for a source + pinned revision.
 
-    ``repo_type`` is accepted only so older callers that passed a bare
-    ``repo_id`` string still work; new code passes a SourceRef or source ref.
+    Pass a SourceRef or source ref. ``repo_type`` qualifies a bare locator
+    as a dataset when needed.
     """
     if isinstance(source, SourceRef):
         ref = source
@@ -106,7 +106,7 @@ def write_manifest(bundle_dir: Path, manifest: dict) -> None:
 
 
 def load_manifest(bundle_dir: Path) -> dict:
-    """Read + validate. Major-newer than 1.x → SystemExit. Missing kind is allowed."""
+    """Read + validate. Major-newer than 1.x → SystemExit."""
     path = bundle_dir / "manifest.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -133,7 +133,9 @@ def load_manifest(bundle_dir: Path) -> dict:
             f"(supports {MANIFEST_SCHEMA_MAJOR}.x)"
         )
     kind = data.get("kind")
-    if kind is not None and kind != MANIFEST_KIND:
+    if not kind:
+        raise SystemExit(f"error: unreadable manifest at {path}: kind missing")
+    if kind != MANIFEST_KIND:
         raise SystemExit(
             f"error: unreadable manifest at {path}: kind is not {MANIFEST_KIND!r}"
         )
@@ -360,7 +362,7 @@ def archive_model(
     repo_type: str = "model",
     **kwargs,
 ) -> Path | None:
-    """Backward-compatible wrapper: ``repo_id`` + ``repo_type`` → ``archive(source)``."""
+    """Archive by locator (``owner/name`` or ``datasets/owner/name``)."""
     loc = f"datasets/{repo_id}" if repo_type == "dataset" else repo_id
     return archive(loc, revision=revision, vault=vault, force=force, **kwargs)
 

@@ -167,7 +167,7 @@ def estimate_repo(
     repo_type: str = "model",
     progress=print,
 ) -> dict:
-    """Backward-compatible wrapper: ``repo_id`` + ``repo_type`` → ``estimate(source)``."""
+    """Estimate by locator (``owner/name`` or ``datasets/owner/name``)."""
     loc = f"datasets/{repo_id}" if repo_type == "dataset" else repo_id
     return estimate(
         loc,

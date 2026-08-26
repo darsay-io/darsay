@@ -12,8 +12,7 @@
 > live there. Longevity lives in the formats, not the binary.
 
 Why darsay is written in Python, and why the archive's longevity does
-not depend on that choice. Decision reviewed 2026-08 at v0.3.0 (~2,600
-lines, one runtime dependency); revisit criteria at the end.
+not depend on that choice. Revisit criteria at the end.
 
 ## Why Python
 

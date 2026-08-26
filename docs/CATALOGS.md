@@ -27,8 +27,8 @@ Conventions match the [manifest](MANIFEST.md):
   unknown fields; this tool preserves unknown *top-level* keys on
   round-trip. A 2.x file is a hard error for a 1.x tool.
 
-The catalog schema is independent of bundle `schema_version` (currently
-1.6.0). Catalogs are not inside `.mvb.tar`.
+The catalog schema is independent of bundle `schema_version`. Catalogs
+are not inside `.mvb.tar`.
 
 ## Where it lives
 

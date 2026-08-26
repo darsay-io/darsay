@@ -76,17 +76,6 @@ def test_parse_unknown_host():
 def test_source_from_ledger_canonical_address():
     ref = source_from_ledger({"address": "huggingface:Qwen/Qwen3-0.6B"})
     assert ref.canonical == "huggingface:Qwen/Qwen3-0.6B"
-
-
-def test_source_from_ledger_pre_provider_model():
-    ref = source_from_ledger({"repo_id": "Qwen/Qwen3-0.6B"})
-    assert ref.provider == "huggingface"
-    assert ref.artifact_type == "model"
-    assert ref.locator == "Qwen/Qwen3-0.6B"
-
-
-def test_source_from_ledger_pre_provider_dataset():
-    ref = source_from_ledger({"repo_id": "owner/name", "repo_type": "dataset"})
-    assert ref.artifact_type == "dataset"
-    assert ref.locator == "owner/name"
-    assert ref.canonical == "huggingface:datasets/owner/name"
+    dataset = source_from_ledger({"address": "huggingface:datasets/owner/name"})
+    assert dataset.artifact_type == "dataset"
+    assert dataset.canonical == "huggingface:datasets/owner/name"
