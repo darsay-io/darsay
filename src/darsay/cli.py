@@ -165,11 +165,14 @@ def cmd_archive(args) -> int:
         return 10
     if bundle is None:  # --dry-run printed the plan and intentionally did not register
         return 0
+    bundle_id = f"{bundle.parent.name}@{bundle.name}"
     print(f"\nBundle ready: {bundle}")
+    print(f"  id:           {bundle_id}")
     print(f"  manifest:     {bundle / 'manifest.json'}")
     print(f"  readme:       {bundle / 'README.md'}")
     print(f"  verification: {bundle / 'VERIFICATION.md'}")
     print(f"  curation:     {bundle / 'curation.md'}  <- edit this, then `darsay regen`")
+    print(f"  next:         darsay run {bundle_id}")
     return 0
 
 

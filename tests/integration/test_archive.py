@@ -62,8 +62,10 @@ def test_archive_dataset_uses_data_payload_root(vault, test_provider):
 def test_archive_refuses_to_overwrite_without_force(vault, test_provider):
     test_provider.add_repo("acme/toy", model_files())
     archive_quiet("test:acme/toy", vault=vault)
-    with pytest.raises(SystemExit, match="already exists"):
+    with pytest.raises(SystemExit, match="already exists") as exc:
         archive_quiet("test:acme/toy", vault=vault)
+    assert "darsay info" in str(exc.value)
+    assert "--force re-pins" in str(exc.value)
 
 
 def test_archive_dry_run_does_not_register(vault, test_provider):

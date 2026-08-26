@@ -154,14 +154,19 @@ def _match_keys(bundle_dir: Path, bundle_id: str) -> list[str]:
     ]
 
 
-def _looks_like_path(spec: str) -> bool:
-    return (
-        "/" in spec
-        or "\\" in spec
-        or spec.startswith(".")
-        or spec.startswith("~")
-        or Path(spec).is_absolute()
-    )
+def _is_forced_path(spec: str) -> bool:
+    """Absolute, home, or explicit relative paths are not vault-id searches."""
+    return spec.startswith(".") or spec.startswith("~") or Path(spec).is_absolute()
+
+
+def _dedupe(rows: list[tuple[Path, str]]) -> list[tuple[Path, str]]:
+    seen: set[Path] = set()
+    out = []
+    for bundle_dir, bundle_id in rows:
+        if bundle_dir not in seen:
+            seen.add(bundle_dir)
+            out.append((bundle_dir, bundle_id))
+    return out
 
 
 def resolve_bundle(
@@ -172,10 +177,10 @@ def resolve_bundle(
 ) -> Path:
     """Resolve a bundle spec to a directory.
 
-    Accepts:
-    - an existing directory (absolute, relative, or ``~/…``)
-    - a bundle id (``name@revision12``)
-    - a unique prefix or substring of the id, directory name, or ``name/rev``
+    Accepts an existing directory (cwd- or vault-relative, absolute, ``~/…``),
+    a bundle id (``name@revision12``), or a unique prefix of the id / name /
+    revision. A unique substring of the id is a last resort (3+ characters)
+    so a one-letter typo does not match the whole vault.
     """
     raw = (spec or "").strip()
     if not raw:
@@ -184,36 +189,52 @@ def resolve_bundle(
     path = Path(raw).expanduser()
     if path.is_dir():
         return _require(path, require_manifest=require_manifest)
+    vault_relative = vault / raw
+    if (
+        not _is_forced_path(raw)
+        and vault_relative.is_dir()
+        and (
+            (vault_relative / "manifest.json").is_file()
+            or (vault_relative / "transfer.json").is_file()
+        )
+    ):
+        return _require(vault_relative, require_manifest=require_manifest)
 
-    if _looks_like_path(raw):
+    if _is_forced_path(raw):
         raise SystemExit(
             f"error: no manifest.json in {path} — not a darsay bundle"
             if require_manifest
             else f"error: {path} is not a darsay bundle"
         )
 
-    needle = raw.lower()
-    matches: list[tuple[Path, str]] = []
-    seen: set[Path] = set()
+    needle = raw.lower().replace("\\", "/")
+    exact: list[tuple[Path, str]] = []
+    prefix: list[tuple[Path, str]] = []
+    substring: list[tuple[Path, str]] = []
     for bundle_dir in iter_bundle_dirs(vault):
         bundle_id = bundle_id_for(bundle_dir)
         keys = _match_keys(bundle_dir, bundle_id)
-        if any(key == needle or key.startswith(needle) or needle in key for key in keys):
-            if bundle_dir not in seen:
-                matches.append((bundle_dir, bundle_id))
-                seen.add(bundle_dir)
+        rec = (bundle_dir, bundle_id)
+        if any(key == needle for key in keys):
+            exact.append(rec)
+        elif any(key.startswith(needle) for key in keys):
+            prefix.append(rec)
+        elif len(needle) >= 3 and any(needle in key for key in keys):
+            substring.append(rec)
 
-    if len(matches) == 1:
-        return _require(matches[0][0], require_manifest=require_manifest)
-    if not matches:
-        raise SystemExit(
-            f"error: no bundle matching {raw!r} in {vault}/\n"
-            f"  hint: darsay list   (or darsay --vault {vault} list)"
-        )
-    listed = "\n".join(f"  {bundle_id}  {directory}" for directory, bundle_id in matches)
+    for pool, kind in ((exact, "exact"), (_dedupe(prefix), "prefix"), (_dedupe(substring), "substring")):
+        hits = _dedupe(pool)
+        if len(hits) == 1:
+            return _require(hits[0][0], require_manifest=require_manifest)
+        if len(hits) > 1:
+            listed = "\n".join(f"  {bundle_id}  {directory}" for directory, bundle_id in hits)
+            raise SystemExit(
+                f"error: {raw!r} matches {len(hits)} bundles ({kind}):\n{listed}\n"
+                "  use a longer prefix, the bundle id, or the PATH from `darsay list`"
+            )
     raise SystemExit(
-        f"error: {raw!r} matches {len(matches)} bundles:\n{listed}\n"
-        "  use a longer prefix, the bundle id, or the PATH from `darsay list`"
+        f"error: no bundle matching {raw!r} in {vault}/\n"
+        f"  hint: darsay list   (or darsay --vault {vault} list)"
     )
 
 

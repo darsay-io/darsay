@@ -59,6 +59,7 @@ def test_resolve_by_path_id_and_unique_prefix(tmp_path):
     assert resolve_bundle(tmp_path, "acme--toy") == bundle
     assert resolve_bundle(tmp_path, "toy@aaaa") == bundle
     assert resolve_bundle(tmp_path, "aaaaaaaaaaaa") == bundle
+    assert resolve_bundle(tmp_path, "acme--toy/aaaaaaaaaaaa") == bundle
 
 
 def test_resolve_ambiguous_and_missing(tmp_path):
@@ -68,6 +69,8 @@ def test_resolve_ambiguous_and_missing(tmp_path):
         resolve_bundle(tmp_path, "acme")
     with pytest.raises(SystemExit, match="no bundle matching"):
         resolve_bundle(tmp_path, "missing-model")
+    with pytest.raises(SystemExit, match="no bundle matching"):
+        resolve_bundle(tmp_path, "x")  # too short to substring-match
 
 
 def test_resolve_path_without_manifest_errors(tmp_path):
@@ -77,6 +80,8 @@ def test_resolve_path_without_manifest_errors(tmp_path):
         resolve_bundle(tmp_path, str(empty))
     with pytest.raises(SystemExit, match="no manifest.json"):
         resolve_bundle(tmp_path, str(tmp_path / "does" / "not" / "exist"))
+    with pytest.raises(SystemExit, match="no bundle matching"):
+        resolve_bundle(tmp_path, "does/not/exist")
 
 
 def test_resolve_empty_spec(tmp_path):

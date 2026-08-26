@@ -189,7 +189,13 @@ def archive(
     with transfer_lock(bundle_dir, progress=progress):
         manifest_path = bundle_dir / "manifest.json"
         if manifest_path.exists() and not force and not dry_run:
-            raise SystemExit(f"Bundle already exists: {bundle_dir} (use --force to re-archive)")
+            bundle_id = f"{bundle_dir.parent.name}@{bundle_dir.name}"
+            raise SystemExit(
+                f"error: bundle already exists: {bundle_dir}\n"
+                f"  {bundle_id} is already in the vault — "
+                f"`darsay info {bundle_id}` or `darsay run {bundle_id}`.\n"
+                "  --force re-pins (may follow a new main); it is not resume."
+            )
 
         if pinned is not None:
             ledger = load_ledger(bundle_dir)
