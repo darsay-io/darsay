@@ -45,3 +45,18 @@ def test_verify_detects_modified_missing_extra(vault, test_provider):
     history = json.loads((bundle / "verification.json").read_text())
     assert history["latest"]["result"] == "fail"
     assert len(history["history"]) >= 2  # initial archive + this re-verify
+
+
+def test_verify_heals_integrity_after_restore(vault, test_provider):
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    original = (bundle / "model" / "model.safetensors").read_bytes()
+    (bundle / "model" / "model.safetensors").write_bytes(b"tampered")
+    assert verify_bundle(bundle, progress=silent)["result"] == "fail"
+    assert load_manifest(bundle)["security"]["integrity_status"] == "compromised"
+    (bundle / "model" / "model.safetensors").write_bytes(original)
+    assert verify_bundle(bundle, progress=silent)["result"] == "pass"
+    assert load_manifest(bundle)["security"]["integrity_status"] == "verified-against-upstream"
+    # The compromise is still in the append-only log.
+    changes = load_manifest(bundle)["security"]["unexpected_changes"]
+    assert any(c["type"] == "modified" for c in changes)

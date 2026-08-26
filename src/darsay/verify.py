@@ -70,6 +70,10 @@ def verify_bundle(bundle_dir: Path, progress=print) -> dict:
             changes.append({"detected_at": now, "type": kind, "path": p})
     if status == "fail":
         manifest["security"]["integrity_status"] = "compromised"
+    elif manifest["security"].get("integrity_status") != "upstream-mismatch":
+        # Heal a previous compromise once the payload matches the inventory
+        # again. Archive-time upstream-mismatch is a recorded fact and stays.
+        manifest["security"]["integrity_status"] = "verified-against-upstream"
 
     write_manifest(bundle_dir, manifest)
     report = write_verification_report(bundle_dir, checksum, completeness)

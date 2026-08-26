@@ -29,6 +29,9 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
   architectures on the transformers runner, compare estimated RAM to
   this machine, and announce the first-time package install. Override
   with `--ignore-preflight`.
+- A passing `verify` after a restored payload heals `integrity_status`
+  back to `verified-against-upstream` (the unexpected-changes log stays
+  append-only). `info` no longer rewrites `manifest.json`.
 
 - **Rename:** the package, CLI, and environment variables are now `darsay`
   (`darsay` / `$DARSAY_HOME` / `$DARSAY_RUNTIME` / `$DARSAY_PYTHON` /

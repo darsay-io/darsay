@@ -252,7 +252,7 @@ def cmd_list(args) -> int:
 
 
 def cmd_info(args) -> int:
-    from .archiver import load_manifest, utc_now, write_manifest
+    from .archiver import load_manifest
     from .readme_gen import human_params, human_size
 
     bundle = _bundle_dir(args)
@@ -284,8 +284,6 @@ def cmd_info(args) -> int:
             print(f"  hydration:  {hyd['engine']} in env {hyd['env']['key']} — {run_note}")
         else:
             print(f"  hydration:  not hydrated (darsay hydrate {bundle})")
-    m["archive"]["last_accessed"] = utc_now()
-    write_manifest(bundle, m)
     return 0
 
 

@@ -93,10 +93,12 @@ def test_list_info_verify_regen_roundtrip(vault, test_provider, capsys):
     by_id = capsys.readouterr().out
     assert "test:acme/toy" in by_id
 
+    before_info = (bundle / "manifest.json").read_bytes()
     assert main(["--vault", str(vault), "info", str(bundle)]) == 0
     info = capsys.readouterr().out
     assert "test:acme/toy" in info
     assert "schema v" in info
+    assert (bundle / "manifest.json").read_bytes() == before_info
 
     assert main(["--vault", str(vault), "verify", str(bundle)]) == 0
 

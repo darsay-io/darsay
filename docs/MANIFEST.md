@@ -224,7 +224,7 @@ Both:
 | `archived_by` | **curator** (or automation identity). |
 | `location`, `host` | Absolute path and machine. Rewritten on import. |
 | `storage_tier`, `backup_status`, `replicas` | Where copies live (`local-disk` / `none` / `[]` until a backup workflow records otherwise). |
-| `last_integrity_check`, `last_accessed` | Maintained by `verify`, `smoke`, `info`, import. |
+| `last_integrity_check`, `last_accessed` | Maintained by `verify`, `smoke`, `hydrate` / `run`, import. `info` is read-only and does not rewrite the manifest. |
 | `imported` | Present on imported bundles: `at`, `from_file`, `file_sha256`, `mvb_format_version`. |
 
 Export events are logged in the sibling file `exports.json`
@@ -242,7 +242,7 @@ the manifest are archival authority. See [INCREMENTAL.md](INCREMENTAL.md).
 
 | Field | Meaning |
 |---|---|
-| `integrity_status` | `verified-against-upstream` (archive-time cross-check passed) → `compromised` if a later `verify` finds changes; `upstream-mismatch` if the archive-time cross-check itself failed. |
+| `integrity_status` | `verified-against-upstream` (archive-time cross-check passed) → `compromised` if a later `verify` finds changes → back to `verified-against-upstream` when a later `verify` passes. `upstream-mismatch` if the archive-time cross-check itself failed (not healed by a later payload-vs-manifest pass). |
 | `unexpected_changes[]` | Append-only log of `{detected_at, type: modified|missing|extra, path}` from failed verifications. |
 | `trust_level` | `unreviewed` until a human reviews; then curator-set (e.g. `reviewed`, `trusted`). |
 | `reviewed_by`, `review_notes` | **curator**. |
