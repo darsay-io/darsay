@@ -120,9 +120,10 @@ them — hydration builds its own isolated env per engine.
 
 </details>
 
-The vault root defaults to `./vault` (override with `--vault` or
-`$DARSAY_HOME`). Bundles are gitignored — they live on disk or in your
-backup tier, not in this repo.
+The vault root defaults to `~/darsay` (override with `--vault` or
+`$DARSAY_HOME`; `--vault` works before or after the subcommand). Bundles
+are gitignored in this checkout — they live on disk or in your backup
+tier, not in the git repo.
 
 ## The three verbs
 

@@ -88,11 +88,15 @@ def test_bundle_dir_requires_manifest(tmp_path):
 
 def test_vault_path_env_and_flag(monkeypatch, tmp_path):
     from argparse import Namespace
+    from pathlib import Path
 
     from darsay.cli import _vault_path
 
     monkeypatch.delenv("DARSAY_HOME", raising=False)
-    assert _vault_path(Namespace(vault=None)) == __import__("pathlib").Path("vault")
+    assert _vault_path(Namespace(vault=None)) == Path.home() / "darsay"
     assert _vault_path(Namespace(vault=str(tmp_path))) == tmp_path
+    assert _vault_path(Namespace(vault="~/custom")) == Path.home() / "custom"
     monkeypatch.setenv("DARSAY_HOME", str(tmp_path / "from-env"))
     assert _vault_path(Namespace(vault=None)) == tmp_path / "from-env"
+    # --vault wins over the env
+    assert _vault_path(Namespace(vault=str(tmp_path / "flag"))) == tmp_path / "flag"

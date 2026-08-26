@@ -58,10 +58,10 @@ darsay archive sshleifer/tiny-gpt2
 
 That pins `main` to a commit, copies every file, hashes them, checks the
 hashes against upstream, captures the license, and writes a bundle under
-`./vault`. When it finishes:
+`~/darsay` (override with `--vault` or `$DARSAY_HOME`). When it finishes:
 
 ```
-Bundle ready: vault/sshleifer--tiny-gpt2/<rev>
+Bundle ready: ~/darsay/sshleifer--tiny-gpt2/<rev>
   manifest:     …/manifest.json
   readme:       …/README.md
   verification: …/VERIFICATION.md
@@ -83,7 +83,7 @@ prefix (`sshleifer--tiny-gpt2`, `tiny-gpt2`, the revision).
 ### What just landed on disk
 
 ```
-vault/sshleifer--tiny-gpt2/<rev>/
+~/darsay/sshleifer--tiny-gpt2/<rev>/
 ├── model/            # the repo, frozen
 ├── manifest.json     # facts, never guesses
 ├── README.md         # generated view of those facts
@@ -154,9 +154,9 @@ Copy-paste for each of those: [Examples](../examples/README.md).
 
 ## If something feels wrong
 
-- **`No bundles in vault/`** — you are in a different working directory
-  than the one you archived into, or you passed `--vault` / `$DARSAY_HOME`.
-  `darsay` defaults to `./vault`.
+- **`No bundles in …/darsay/`** — you passed `--vault` / `$DARSAY_HOME`
+  when you archived, or you are looking at a leftover `./vault` from an
+  older darsay. The default is `~/darsay`; `list` prints the path it used.
 - **Disk verdict `insufficient`** — `estimate` is doing its job. Free
   space, or pick a smaller source.
 - **Archive paused with exit code 10** — a budget ran out. Rerun the

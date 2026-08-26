@@ -15,8 +15,9 @@ then come back. The ideas land harder after you have a bundle on disk.
 
 ## Vault
 
-A vault is a directory of bundles. Default: `./vault`. Override with
-`--vault` or `$DARSAY_HOME`.
+A vault is a directory of bundles. Default: `~/darsay`. Override with
+`--vault` or `$DARSAY_HOME`. `--vault` may come before or after the
+subcommand.
 
 ```
 vault/

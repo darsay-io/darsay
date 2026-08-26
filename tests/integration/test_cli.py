@@ -52,6 +52,23 @@ def test_list_empty_vault(vault, capsys):
     assert "No bundles" in capsys.readouterr().out
 
 
+def test_vault_flag_after_subcommand(vault, test_provider, capsys):
+    test_provider.add_repo("acme/toy", model_files())
+    archive_quiet("test:acme/toy", vault=vault)
+    assert main(["list", "--vault", str(vault)]) == 0
+    listed = capsys.readouterr().out
+    assert "test--acme--toy" in listed
+
+
+def test_implicit_vault_announces_on_stderr(monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv("DARSAY_HOME", raising=False)
+    monkeypatch.setattr("darsay.vault.default_vault", lambda: tmp_path / "darsay")
+    assert main(["list"]) == 0
+    captured = capsys.readouterr()
+    assert "No bundles" in captured.out
+    assert "default; set $DARSAY_HOME or --vault" in captured.err
+
+
 def test_info_ambiguous_prefix_errors(vault, test_provider, capsys):
     test_provider.add_repo("acme/toy", model_files())
     test_provider.add_repo("acme/other", model_files())

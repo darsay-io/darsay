@@ -1,10 +1,17 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
-from darsay.vault import bundle_id_for, iter_bundle_dirs, resolve_bundle
+from darsay.vault import (
+    bundle_id_for,
+    default_vault,
+    iter_bundle_dirs,
+    resolve_bundle,
+    using_implicit_vault,
+)
 
 
 def _write_bundle(vault, name: str, rev: str, bundle_id: str | None = None) -> None:
@@ -15,6 +22,16 @@ def _write_bundle(vault, name: str, rev: str, bundle_id: str | None = None) -> N
         json.dumps({"bundle_id": bid, "licensing": {"spdx_id": "mit"}}),
         encoding="utf-8",
     )
+
+
+def test_default_vault_home_and_env(monkeypatch, tmp_path):
+    monkeypatch.delenv("DARSAY_HOME", raising=False)
+    assert default_vault() == Path.home() / "darsay"
+    assert using_implicit_vault(None) is True
+    monkeypatch.setenv("DARSAY_HOME", str(tmp_path / "env-vault"))
+    assert default_vault() == tmp_path / "env-vault"
+    assert using_implicit_vault(None) is False
+    assert using_implicit_vault(str(tmp_path)) is False
 
 
 def test_iter_bundle_dirs_finds_manifest_and_ledger(tmp_path):

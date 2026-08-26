@@ -22,6 +22,10 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
 
 ### Changed
 
+- The default vault is `$DARSAY_HOME` or `~/darsay` (no longer `./vault`).
+  Commands that open the vault print the path on stderr when the default
+  is in use. `--vault` is accepted before or after the subcommand.
+
 - **Rename:** the package, CLI, and environment variables are now `darsay`
   (`darsay` / `$DARSAY_HOME` / `$DARSAY_RUNTIME` / `$DARSAY_PYTHON` /
   `$DARSAY_E2E`). This is a clean break: there are no `MODELVAULT_*`

@@ -45,8 +45,16 @@ from pathlib import Path
 from . import __version__
 
 
-def _vault_path(args) -> Path:
-    return Path(args.vault or os.environ.get("DARSAY_HOME") or "vault")
+def _vault_path(args, *, announce: bool = False) -> Path:
+    from .vault import announce_vault, default_vault, using_implicit_vault
+
+    if args.vault:
+        path = Path(args.vault).expanduser()
+    else:
+        path = default_vault()
+    if announce:
+        announce_vault(path, implicit=using_implicit_vault(args.vault))
+    return path
 
 
 def _bundle_dir(args, spec: str | None = None, *, require_manifest: bool = True) -> Path:
@@ -115,7 +123,7 @@ def cmd_estimate(args) -> int:
     est = estimate(
         args.source,
         revision=args.revision,
-        vault=_vault_path(args),
+        vault=_vault_path(args, announce=True),
         include=args.include,
         variants=args.variants,
         progress=(lambda *a: None) if args.json else print,
@@ -136,7 +144,7 @@ def cmd_archive(args) -> int:
         bundle = archive(
             args.source,
             revision=args.revision,
-            vault=_vault_path(args),
+            vault=_vault_path(args, announce=True),
             force=args.force,
             dry_run=args.dry_run,
             max_bytes=max_bytes,
@@ -178,7 +186,7 @@ def cmd_smoke(args) -> int:
 
 
 def cmd_list(args) -> int:
-    vault = _vault_path(args)
+    vault = _vault_path(args, announce=True)
     from .vault import bundle_id_for, iter_bundle_dirs
 
     bundle_dirs = iter_bundle_dirs(vault)
@@ -292,7 +300,7 @@ def cmd_export(args) -> int:
 def cmd_import(args) -> int:
     from .export import import_bundle
 
-    import_bundle(Path(args.file), _vault_path(args), force=args.force)
+    import_bundle(Path(args.file), _vault_path(args, announce=True), force=args.force)
     return 0
 
 
@@ -301,7 +309,7 @@ def cmd_assemble(args) -> int:
 
     bundle, plan = assemble_partials(
         [Path(path) for path in args.partials],
-        _vault_path(args),
+        _vault_path(args, announce=True),
     )
     ledger = json.loads((bundle / "transfer.json").read_text(encoding="utf-8"))
     from .sources import source_from_ledger
@@ -393,13 +401,23 @@ def cmd_regen(args) -> int:
 
 
 def main(argv=None) -> int:
+    vault_help = "vault root (default: $DARSAY_HOME or ~/darsay)"
+    # After the subcommand, SUPPRESS so a missing flag does not overwrite
+    # `darsay --vault DIR list` with None.
+    vault_after = argparse.ArgumentParser(add_help=False)
+    vault_after.add_argument("--vault", default=argparse.SUPPRESS, help=vault_help)
+
     parser = argparse.ArgumentParser(prog="darsay", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="version", version=f"darsay {__version__}")
-    parser.add_argument("--vault", help="vault root (default: $DARSAY_HOME or ./vault)")
+    parser.add_argument("--vault", default=None, help=vault_help)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p = sub.add_parser("estimate", help="preflight a source: size, params, disk headroom — no download")
+    def add_cmd(name, **kwargs):
+        kwargs.setdefault("parents", [vault_after])
+        return sub.add_parser(name, **kwargs)
+
+    p = add_cmd("estimate", help="preflight a source: size, params, disk headroom — no download")
     p.add_argument("source", help="e.g. huggingface:Qwen/Qwen3.8-27B, datasets/<owner>/<name>, or a huggingface.co URL")
     p.add_argument("--revision", help="branch, tag, or commit (default: main)")
     p.add_argument("--include", action="append", metavar="GLOB",
@@ -410,7 +428,7 @@ def main(argv=None) -> int:
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.set_defaults(func=cmd_estimate)
 
-    p = sub.add_parser("archive", help="download and archive a model or dataset as a bundle")
+    p = add_cmd("archive", help="download and archive a model or dataset as a bundle")
     p.add_argument("source", help="e.g. huggingface:Qwen/Qwen3-0.6B, datasets/<owner>/<name>, or a huggingface.co URL")
     p.add_argument("--revision", help="branch, tag, or commit (default: main; always pinned to the resolved commit)")
     p.add_argument("--force", action="store_true", help="re-archive over an existing bundle")
@@ -437,27 +455,27 @@ def main(argv=None) -> int:
 
     bundle_help = "path, bundle id (name@revision12 from `list`), or a unique prefix"
 
-    p = sub.add_parser("verify", help="re-hash a bundle and compare against its manifest")
+    p = add_cmd("verify", help="re-hash a bundle and compare against its manifest")
     p.add_argument("bundle", help=bundle_help)
     p.set_defaults(func=cmd_verify)
 
-    p = sub.add_parser("smoke", help="run smoke tests on a bundle")
+    p = add_cmd("smoke", help="run smoke tests on a bundle")
     p.add_argument("bundle", help=bundle_help)
     p.add_argument("--inference", action="store_true", help="also load the model and generate (needs torch)")
     p.set_defaults(func=cmd_smoke)
 
-    p = sub.add_parser("list", help="list bundles in the vault (id and copy-pasteable path)")
+    p = add_cmd("list", help="list bundles in the vault (id and copy-pasteable path)")
     p.set_defaults(func=cmd_list)
 
-    p = sub.add_parser("info", help="summarize a bundle")
+    p = add_cmd("info", help="summarize a bundle")
     p.add_argument("bundle", help=bundle_help)
     p.set_defaults(func=cmd_info)
 
-    p = sub.add_parser("regen", help="rebuild a bundle's README.md from manifest + curation.md")
+    p = add_cmd("regen", help="rebuild a bundle's README.md from manifest + curation.md")
     p.add_argument("bundle", help=bundle_help)
     p.set_defaults(func=cmd_regen)
 
-    p = sub.add_parser("hydrate", help="build (or reuse) a runnable local env for a bundle")
+    p = add_cmd("hydrate", help="build (or reuse) a runnable local env for a bundle")
     p.add_argument("bundle", help=bundle_help)
     p.add_argument("--engine", help="runtime engine (default: auto-detect from the payload)")
     p.add_argument("--python", help="interpreter for the env (default: $DARSAY_PYTHON or this python)")
@@ -466,7 +484,7 @@ def main(argv=None) -> int:
     p.add_argument("--dry-run", action="store_true", help="show the plan without touching anything")
     p.set_defaults(func=cmd_hydrate)
 
-    p = sub.add_parser("run", help="run a prompt against a bundle (hydrates first if needed; fully offline)")
+    p = add_cmd("run", help="run a prompt against a bundle (hydrates first if needed; fully offline)")
     p.add_argument("bundle", help=bundle_help)
     p.add_argument("prompt", nargs="?", help='prompt text (default: "Say hello in one short sentence.")')
     p.add_argument("--engine", help="runtime engine (default: the hydrated one, else auto-detect)")
@@ -482,25 +500,25 @@ def main(argv=None) -> int:
     p.add_argument("--weights", help="weights file if hydration is needed (single-file engines)")
     p.set_defaults(func=cmd_run)
 
-    p = sub.add_parser("dehydrate", help="remove a bundle's hydration record (envs are shared; prune via `envs --prune`)")
+    p = add_cmd("dehydrate", help="remove a bundle's hydration record (envs are shared; prune via `envs --prune`)")
     p.add_argument("bundle", help=bundle_help)
     p.set_defaults(func=cmd_dehydrate)
 
-    p = sub.add_parser("envs", help="list shared runtime envs and which bundles use them")
+    p = add_cmd("envs", help="list shared runtime envs and which bundles use them")
     p.add_argument("--prune", action="store_true", help="delete envs no hydrated bundle references")
     p.set_defaults(func=cmd_envs)
 
-    p = sub.add_parser("export", help="pack a bundle into a single deterministic .mvb.tar file")
+    p = add_cmd("export", help="pack a bundle into a single deterministic .mvb.tar file")
     p.add_argument("bundle", help=bundle_help)
     p.add_argument("-o", "--output-dir", default=".", help="directory for the .mvb.tar (default: cwd)")
     p.set_defaults(func=cmd_export)
 
-    p = sub.add_parser("import", help="unpack a .mvb.tar into the vault, verifying before registering")
+    p = add_cmd("import", help="unpack a .mvb.tar into the vault, verifying before registering")
     p.add_argument("file")
     p.add_argument("--force", action="store_true", help="replace an existing bundle at the destination")
     p.set_defaults(func=cmd_import)
 
-    p = sub.add_parser("assemble", help="combine matching partial bundles offline into this vault")
+    p = add_cmd("assemble", help="combine matching partial bundles offline into this vault")
     p.add_argument("partials", nargs="+", metavar="BUNDLE",
                    help="partial bundle directories with the same pinned revision")
     p.set_defaults(func=cmd_assemble)

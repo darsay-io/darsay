@@ -8,7 +8,32 @@ either — so the first column of ``list`` is a usable handle.
 from __future__ import annotations
 
 import json
+import os
+import sys
 from pathlib import Path
+
+DEFAULT_VAULT_NAME = "darsay"
+
+
+def default_vault() -> Path:
+    """``$DARSAY_HOME`` if set, otherwise ``~/darsay``."""
+    env = os.environ.get("DARSAY_HOME")
+    if env:
+        return Path(env).expanduser()
+    return Path.home() / DEFAULT_VAULT_NAME
+
+
+def using_implicit_vault(vault_flag: str | None) -> bool:
+    return not vault_flag and not os.environ.get("DARSAY_HOME")
+
+
+def announce_vault(vault: Path, *, implicit: bool) -> None:
+    """Tell the user where the vault is when they did not pick one."""
+    if implicit:
+        print(
+            f"Vault: {vault}  (default; set $DARSAY_HOME or --vault to override)",
+            file=sys.stderr,
+        )
 
 
 def iter_bundle_dirs(vault: Path) -> list[Path]:
