@@ -58,7 +58,7 @@ files any reader opens directly (see [DATASETS.md](DATASETS.md)).
 | Engine | Detected from | Installs | Runner |
 |---|---|---|---|
 | `transformers` (preferred) | `model/config.json` + safetensors/`.bin`/`.pt` weights | `torch`, `transformers>=X` (floor taken from the payload's own `config.json` `transformers_version`) | `runners/transformers_runner.py` — device auto (cuda → mps → cpu), chat template when the tokenizer ships one, greedy by default (`--sample` for the model's own sampling defaults) |
-| `llama-cpp` | `model/*.gguf` | `llama-cpp-python` | `runners/llama_cpp_runner.py` — GPU offload when available; with several GGUF files, pick one with `--weights model/foo.gguf` |
+| `llama-cpp` | `model/*.gguf` | `llama-cpp-python` | `runners/llama_cpp_runner.py` — GPU offload when available; context length from the GGUF (`n_ctx=0`); with several GGUF files, pick one with `--weights model/foo.gguf` |
 | `mlx` (macOS) | auto: `config.json` + `*.npz`; opt-in: `--engine mlx` on a safetensors snapshot | `mlx`, `mlx-lm` | `runners/mlx_runner.py` — Metal; same prompt / `--repl` contract |
 
 Auto-detection prefers the first matching registry entry; override with

@@ -108,15 +108,19 @@ def engine_supports_payload(engine: str, manifest: dict) -> tuple[bool, str | No
     if not suffixes:
         return True, None
     arch = (manifest.get("model_metadata") or {}).get("architecture")
+    loader = {
+        "transformers": "AutoModelForCausalLM",
+        "mlx": "mlx-lm generate",
+    }.get(engine, engine)
     if not arch:
         return True, (
-            f"{engine} runner loads AutoModelForCausalLM; payload architecture is unknown"
+            f"{engine} runner uses {loader}; payload architecture is unknown"
         )
     if any(str(arch).endswith(suffix) for suffix in suffixes):
         return True, None
     return False, (
         f"architecture {arch} is not a causal LM. `darsay run` / the {engine} "
-        "runner uses AutoModelForCausalLM. Point a compatible loader at model/, "
+        f"runner uses {loader}. Point a compatible loader at model/, "
         "or pass --ignore-preflight to try anyway."
     )
 
@@ -140,14 +144,17 @@ def preflight_run(
     have = available_ram_bytes() if ram_bytes is None else ram_bytes
     if needed and have is not None:
         have_gb = have / 1024**3
+        ram_label = "physical RAM" if sys.platform == "darwin" else "available RAM"
+        if ram_bytes is not None:
+            ram_label = "RAM"
         if have_gb < needed:
             issues.append({
                 "level": "error",
                 "code": "insufficient-ram",
                 "message": (
                     f"this payload wants ~{needed} GB RAM (weights × 1.2); "
-                    f"this machine reports {have_gb:.1f} GB. Archive a GGUF "
-                    "subset or pass --ignore-preflight."
+                    f"this machine reports {have_gb:.1f} GB {ram_label}. "
+                    "Archive a GGUF subset or pass --ignore-preflight."
                 ),
             })
         elif have_gb < needed * 1.3:
@@ -156,7 +163,7 @@ def preflight_run(
                 "code": "tight-ram",
                 "message": (
                     f"this payload wants ~{needed} GB RAM; this machine reports "
-                    f"{have_gb:.1f} GB — likely tight."
+                    f"{have_gb:.1f} GB {ram_label} — likely tight."
                 ),
             })
 
@@ -556,12 +563,12 @@ def hydrate_bundle(bundle_dir: Path, engine: str | None = None, python: str | No
     if probe.get("status") != "pass":
         progress(f"Hydration recorded with a FAILING probe — see {bundle_dir / HYDRATION_FILE}")
     else:
-        progress(f"Hydrated. Next: darsay run {bundle_dir}")
+        progress(f"Hydrated. Next: darsay run {manifest['bundle_id']}")
     return record
 
 
 _RELEVANT = ("torch", "transformers", "tokenizers", "safetensors", "accelerate",
-             "llama_cpp_python", "llama-cpp-python", "numpy")
+             "llama_cpp_python", "llama-cpp-python", "numpy", "mlx", "mlx-lm")
 
 
 def _relevant_packages(packages: dict[str, str]) -> dict[str, str]:

@@ -2,7 +2,7 @@
 
     pipx install darsay
     darsay archive Qwen/Qwen3-0.6B
-    darsay run     qwen--qwen3-0.6b "Say hello"
+    darsay run     qwen--qwen3-0.6b Say hello
 
 A vault is a folder of bundles. A bundle is one pinned revision:
 immutable payload, recorded facts, still loadable as-is.
@@ -480,7 +480,7 @@ def main(argv=None) -> int:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="version", version=f"darsay {__version__}")
     parser.add_argument("--vault", default=None, help=vault_help)
-    sub = parser.add_subparsers(dest="command", required=True)
+    sub = parser.add_subparsers(dest="command", required=False)
 
     def add_cmd(name, **kwargs):
         kwargs.setdefault("parents", [vault_after])
@@ -620,6 +620,9 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_assemble)
 
     args = parser.parse_args(argv)
+    if not getattr(args, "command", None):
+        parser.print_help()
+        return 0
     return args.func(args)
 
 

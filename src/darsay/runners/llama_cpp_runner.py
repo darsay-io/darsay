@@ -46,7 +46,8 @@ def generate(args) -> dict:
     print(f"[runner] loading {args.weights} (n_gpu_layers={n_gpu_layers})", file=sys.stderr)
 
     t0 = time.perf_counter()
-    llm = Llama(model_path=args.weights, n_ctx=4096, n_gpu_layers=n_gpu_layers,
+    # n_ctx=0 asks llama-cpp-python for the GGUF's trained context (0.3+).
+    llm = Llama(model_path=args.weights, n_ctx=0, n_gpu_layers=n_gpu_layers,
                 seed=args.seed if args.seed is not None else -1, verbose=False)
     load_seconds = time.perf_counter() - t0
 
@@ -96,7 +97,7 @@ def repl(args) -> dict:
     print(f"[runner] loading {args.weights} (n_gpu_layers={n_gpu_layers})", file=sys.stderr)
     t0 = time.perf_counter()
     llm = Llama(
-        model_path=args.weights, n_ctx=4096,
+        model_path=args.weights, n_ctx=0,
         n_gpu_layers=n_gpu_layers,
         seed=args.seed if args.seed is not None else -1, verbose=False,
     )

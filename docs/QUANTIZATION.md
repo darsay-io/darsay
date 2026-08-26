@@ -146,9 +146,8 @@ no network either, since the input is the archived payload.
 - [MANIFEST.md](MANIFEST.md) — `relationships.quantized_versions` /
   `gguf_repos`, the archive-time ecosystem snapshot that links master and
   satellite bundles; `source.subset` for `archive --include`.
-- The project README's [Estimate before you archive](../README.md#estimate-before-you-archive)
-  and [Quantized models: fidelity first](../README.md#quantized-models-fidelity-first)
-  sections for the short version.
+- The project [README](../README.md) three-verb loop and
+  [examples: price one quant](../examples/README.md#price-one-quant-from-a-pack-repo).
 
 ---
 

@@ -40,7 +40,7 @@ def probe(args) -> dict:
     }
 
 
-def _format_prompt(tokenizer, prompt: str, raw: bool, messages=None) -> str:
+def _format_prompt(tokenizer, prompt: str, raw: bool, messages=None) -> tuple[str, bool]:
     use_chat = (not raw) and getattr(tokenizer, "chat_template", None)
     if not use_chat:
         return prompt, False

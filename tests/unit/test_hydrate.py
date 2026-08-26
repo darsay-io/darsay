@@ -91,6 +91,10 @@ def test_engine_supports_causal_lm_and_rejects_vlm():
     ok, detail = engine_supports_payload("transformers", vlm)
     assert ok is False
     assert "not a causal LM" in detail
+    assert "AutoModelForCausalLM" in detail
+    mlx_ok, mlx_detail = engine_supports_payload("mlx", vlm)
+    assert mlx_ok is False
+    assert "mlx-lm" in mlx_detail
     unknown = {"model_metadata": {"architecture": None}}
     ok, detail = engine_supports_payload("transformers", unknown)
     assert ok is True
@@ -139,6 +143,10 @@ def test_pin_requirements_uses_recorded_versions():
     assert pinned == ["torch==2.2.0", "transformers==4.40.0"]
     # Unknown extras in the pin set are ignored; unmatched reqs stay loose.
     assert pin_requirements(["mlx"], {"torch": "2.2.0"}) == ["mlx"]
+    mlx_pinned = pin_requirements(
+        ["mlx", "mlx-lm"], {"mlx": "0.22.0", "mlx-lm": "0.21.0"},
+    )
+    assert mlx_pinned == ["mlx-lm==0.21.0", "mlx==0.22.0"]
 
 
 def test_resolve_requirements_uses_declared_floor(tmp_path):

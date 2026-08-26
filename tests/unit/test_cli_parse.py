@@ -15,6 +15,13 @@ def test_version_flag(capsys):
     assert f"darsay {__version__}" in capsys.readouterr().out
 
 
+def test_no_args_prints_help(capsys):
+    assert main([]) == 0
+    out = capsys.readouterr().out
+    assert "darsay archive" in out
+    assert "estimate" in out
+
+
 def test_help_lists_subcommands(capsys):
     with pytest.raises(SystemExit) as exc:
         main(["--help"])
