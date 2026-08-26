@@ -78,10 +78,12 @@ def test_shard_key():
 
 
 def test_bundle_dir_requires_manifest(tmp_path):
+    from argparse import Namespace
+
     from darsay.cli import _bundle_dir
 
     with pytest.raises(SystemExit, match="no manifest.json"):
-        _bundle_dir(str(tmp_path))
+        _bundle_dir(Namespace(vault=str(tmp_path), bundle=str(tmp_path)))
 
 
 def test_vault_path_env_and_flag(monkeypatch, tmp_path):

@@ -10,7 +10,7 @@
 pipx install darsay
 
 darsay archive Qwen/Qwen3-0.6B
-darsay run     vault/qwen--qwen3-0.6b/<rev> "Say hello"
+darsay run     qwen--qwen3-0.6b "Say hello"
 ```
 
 <p align="center">
@@ -166,7 +166,7 @@ darsay archive Qwen/Qwen3.8-27B                 # finish, verify, register
 **3. Run** — isolated env, fully offline, payload untouched.
 
 ```bash
-darsay run vault/qwen--qwen3-0.6b/<rev> "Say hello"
+darsay run qwen--qwen3-0.6b "Say hello"
 ```
 
 Or skip the tool and point any Hugging Face-compatible loader at the
@@ -230,10 +230,10 @@ archiving**; the bundle hash covers it alone.
 |---|---|
 | Price a source, download nothing | `darsay estimate Qwen/Qwen3.8-27B` |
 | Keep it | `darsay archive Qwen/Qwen3-0.6B` |
-| Talk to it | `darsay run vault/<bundle> "Say hello"` |
-| See what you have | `darsay list` |
-| Re-hash and compare | `darsay verify vault/<bundle>` |
-| Pack one file for a USB drive | `darsay export vault/<bundle> -o /backups` |
+| Talk to it | `darsay run qwen--qwen3-0.6b "Say hello"` |
+| See what you have | `darsay list` (id + path) |
+| Re-hash and compare | `darsay verify qwen--qwen3-0.6b` |
+| Pack one file for a USB drive | `darsay export qwen--qwen3-0.6b -o /backups` |
 | Bring that file back | `darsay import /backups/<file>.mvb.tar` |
 
 Source refs are provider-qualified — `huggingface:Qwen/Qwen3-0.6B`,
@@ -252,12 +252,12 @@ darsay archive  Qwen/Qwen3.8-27B --max-gb 10          # pause; rerun to resume
 darsay archive  Qwen/Qwen3.8-27B --dry-run            # verified / partial / missing
 darsay archive  Qwen/Qwen3.8-27B --shard 1/3 --max-gb 20
 darsay --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle>
-darsay smoke    vault/<bundle> [--inference]
-darsay info     vault/<bundle>
-darsay regen    vault/<bundle>                        # rebuild README after editing curation.md
-darsay hydrate  vault/<bundle> [--dry-run]
+darsay smoke    <bundle> [--inference]
+darsay info     <bundle>                              # path, id, or unique prefix
+darsay regen    <bundle>                              # rebuild README after editing curation.md
+darsay hydrate  <bundle> [--dry-run]
 darsay envs [--prune]
-darsay dehydrate vault/<bundle>
+darsay dehydrate <bundle>
 ```
 
 Adding another host is a source provider, not a new CLI:

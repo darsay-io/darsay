@@ -25,8 +25,10 @@ vault/
 └── .runtime/                        # disposable inference envs (not archival)
 ```
 
-There is no hidden database. `darsay list` is a walk of this tree.
-The vault is yours to rsync, restic, or put on a shelf.
+There is no hidden database. `darsay list` is a walk of this tree; it
+prints each bundle's id and a copy-pasteable path. `info` / `run` /
+`verify` accept that path, the id, or a unique prefix. The vault is yours
+to rsync, restic, or put on a shelf.
 
 ## Bundle
 

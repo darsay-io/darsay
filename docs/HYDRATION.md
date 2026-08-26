@@ -17,8 +17,8 @@ that a bundle that passed `verify` can produce tokens with one command,
 without ever touching the archived payload:
 
 ```bash
-darsay run vault/qwen--qwen3-0.6b/c1899de289a0            # hello prompt
-darsay run vault/qwen--qwen3-0.6b/c1899de289a0 "2+2=?"    # your prompt
+darsay run qwen--qwen3-0.6b            # hello prompt; id or unique prefix
+darsay run qwen--qwen3-0.6b "2+2=?"    # your prompt
 ```
 
 `run` hydrates automatically when needed. macOS and Linux are the supported

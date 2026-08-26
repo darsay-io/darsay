@@ -2,7 +2,7 @@
 
     pipx install darsay
     darsay archive Qwen/Qwen3-0.6B
-    darsay run     vault/qwen--qwen3-0.6b/<rev> "Say hello"
+    darsay run     qwen--qwen3-0.6b "Say hello"
 
 A vault is a folder of bundles. A bundle is one pinned revision:
 immutable payload, recorded facts, still loadable as-is.
@@ -11,18 +11,20 @@ immutable payload, recorded facts, still loadable as-is.
     darsay estimate datasets/<owner>/<name>       Hugging Face shorthand; same for a dataset
     darsay archive huggingface:Qwen/Qwen3-0.6B    download + hash + manifest + reports
     darsay archive datasets/<owner>/<name>        archive a dataset (payload under data/)
-    darsay verify  vault/<bundle>           re-hash and compare against manifest
-    darsay smoke   vault/<bundle> [--inference]
-    darsay list                             all bundles in the vault
-    darsay info    vault/<bundle>           quick manifest summary
-    darsay regen   vault/<bundle>           rebuild README.md after editing curation.md
-    darsay export  vault/<bundle> [-o DIR]  pack into a single deterministic .mvb.tar
-    darsay import  <file.mvb.tar>           unpack + verify into the vault
-    darsay assemble <partial> [<partial>…]  combine matching partials offline
-    darsay hydrate vault/<bundle>           build a runnable env for the bundle
-    darsay run     vault/<bundle> [PROMPT]  hydrate if needed, then generate (offline)
-    darsay dehydrate vault/<bundle>         drop the bundle's hydration record
-    darsay envs [--prune]                   list / clean up shared runtime envs
+    darsay verify  <bundle>           re-hash and compare against manifest
+    darsay smoke   <bundle> [--inference]
+    darsay list                       all bundles in the vault (id + path)
+    darsay info    <bundle>           quick manifest summary
+    darsay regen   <bundle>           rebuild README.md after editing curation.md
+    darsay export  <bundle> [-o DIR]  pack into a single deterministic .mvb.tar
+    darsay import  <file.mvb.tar>     unpack + verify into the vault
+    darsay assemble <partial> […]     combine matching partials offline
+    darsay hydrate <bundle>           build a runnable env for the bundle
+    darsay run     <bundle> [PROMPT]  hydrate if needed, then generate (offline)
+    darsay dehydrate <bundle>         drop the bundle's hydration record
+    darsay envs [--prune]             list / clean up shared runtime envs
+
+<bundle> is a path, a bundle id from `list` (name@revision12), or a unique prefix.
 
 Source refs are provider-qualified (`huggingface:Qwen/Qwen3-0.6B`,
 `huggingface:datasets/<owner>/<name>`). Unprefixed `owner/name`,
@@ -47,11 +49,14 @@ def _vault_path(args) -> Path:
     return Path(args.vault or os.environ.get("DARSAY_HOME") or "vault")
 
 
-def _bundle_dir(path_str: str) -> Path:
-    bundle = Path(path_str)
-    if not (bundle / "manifest.json").is_file():
-        sys.exit(f"error: no manifest.json in {bundle} — not a darsay bundle")
-    return bundle
+def _bundle_dir(args, spec: str | None = None, *, require_manifest: bool = True) -> Path:
+    from .vault import resolve_bundle
+
+    return resolve_bundle(
+        _vault_path(args),
+        spec if spec is not None else args.bundle,
+        require_manifest=require_manifest,
+    )
 
 
 def _positive_float(value: str) -> float:
@@ -158,14 +163,14 @@ def cmd_archive(args) -> int:
 def cmd_verify(args) -> int:
     from .verify import verify_bundle
 
-    report = verify_bundle(_bundle_dir(args.bundle))
+    report = verify_bundle(_bundle_dir(args))
     return 0 if report["result"] == "pass" else 1
 
 
 def cmd_smoke(args) -> int:
     from .smoke import run_smoke
 
-    results = run_smoke(_bundle_dir(args.bundle), inference=args.inference)
+    results = run_smoke(_bundle_dir(args), inference=args.inference)
     failed = any(r.get("status") == "fail" for r in results.values())
     print(json.dumps(results, indent=2))
     return 1 if failed else 0
@@ -173,10 +178,9 @@ def cmd_smoke(args) -> int:
 
 def cmd_list(args) -> int:
     vault = _vault_path(args)
-    bundle_dirs = {
-        path.parent for pattern in ("manifest.json", "transfer.json")
-        for path in vault.glob(f"*/*/{pattern}")
-    }
+    from .vault import bundle_id_for, iter_bundle_dirs
+
+    bundle_dirs = iter_bundle_dirs(vault)
     if not bundle_dirs:
         print(f"No bundles in {vault}/")
         return 0
@@ -185,12 +189,13 @@ def cmd_list(args) -> int:
     from .transfer import LedgerError, load_ledger, transfer_plan
 
     rows = []
-    for bundle_dir in sorted(bundle_dirs):
+    for bundle_dir in bundle_dirs:
         manifest_path = bundle_dir / "manifest.json"
         if manifest_path.is_file():
             m = json.loads(manifest_path.read_text(encoding="utf-8"))
             rows.append((
                 m["bundle_id"],
+                str(bundle_dir),
                 m["licensing"]["spdx_id"] or "?",
                 human_size(m["inventory"]["total_size_bytes"]),
                 m["security"]["integrity_status"],
@@ -214,7 +219,8 @@ def cmd_list(args) -> int:
             card = ledger.get("metadata", {}).get("card_data", {})
             license_id = card.get("license") if isinstance(card, dict) else None
             rows.append((
-                f"{bundle_dir.parent.name}@{ledger['revision'][:12]}",
+                bundle_id_for(bundle_dir),
+                str(bundle_dir),
                 license_id or "?",
                 human_size(sizes["total"]),
                 status,
@@ -222,15 +228,15 @@ def cmd_list(args) -> int:
             ))
         except (LedgerError, KeyError, OSError, TypeError, ValueError):
             rows.append((
-                f"{bundle_dir.parent.name}@{bundle_dir.name}",
+                bundle_id_for(bundle_dir),
+                str(bundle_dir),
                 "?",
                 "?",
                 "archiving: unreadable transfer ledger",
                 "?",
             ))
-    widths = [max(len(str(r[i])) for r in rows + [("BUNDLE", "LICENSE", "SIZE", "INTEGRITY", "ARCHIVED")])
-              for i in range(5)]
-    header = ("BUNDLE", "LICENSE", "SIZE", "INTEGRITY", "ARCHIVED")
+    header = ("BUNDLE", "PATH", "LICENSE", "SIZE", "INTEGRITY", "ARCHIVED")
+    widths = [max(len(str(r[i])) for r in rows + [header]) for i in range(6)]
     for row in [header] + rows:
         print("  ".join(str(v).ljust(w) for v, w in zip(row, widths)))
     return 0
@@ -240,7 +246,7 @@ def cmd_info(args) -> int:
     from .archiver import load_manifest, utc_now, write_manifest
     from .readme_gen import human_params, human_size
 
-    bundle = _bundle_dir(args.bundle)
+    bundle = _bundle_dir(args)
     m = load_manifest(bundle)
     print(f"{m['bundle_id']}  (schema v{m['schema_version']}, {m['artifact_type']})")
     src = m["source"]
@@ -277,7 +283,7 @@ def cmd_info(args) -> int:
 def cmd_export(args) -> int:
     from .export import export_bundle
 
-    out = export_bundle(_bundle_dir(args.bundle), Path(args.output_dir))
+    out = export_bundle(_bundle_dir(args), Path(args.output_dir))
     print(f"Export ready: {out}")
     return 0
 
@@ -315,7 +321,7 @@ def cmd_hydrate(args) -> int:
     from .hydrate import hydrate_bundle
 
     record = hydrate_bundle(
-        _bundle_dir(args.bundle),
+        _bundle_dir(args),
         engine=args.engine,
         python=args.python,
         weights=args.weights,
@@ -331,7 +337,7 @@ def cmd_run(args) -> int:
     from .hydrate import run_bundle
 
     record = run_bundle(
-        _bundle_dir(args.bundle),
+        _bundle_dir(args),
         prompt=args.prompt,
         engine=args.engine,
         max_new_tokens=args.max_new_tokens,
@@ -351,7 +357,7 @@ def cmd_run(args) -> int:
 def cmd_dehydrate(args) -> int:
     from .hydrate import dehydrate_bundle
 
-    dehydrate_bundle(_bundle_dir(args.bundle))
+    dehydrate_bundle(_bundle_dir(args))
     return 0
 
 
@@ -379,7 +385,7 @@ def cmd_regen(args) -> int:
     from .archiver import load_manifest
     from .readme_gen import write_bundle_readme
 
-    bundle = _bundle_dir(args.bundle)
+    bundle = _bundle_dir(args)
     write_bundle_readme(bundle, load_manifest(bundle))
     print(f"Regenerated {bundle / 'README.md'}")
     return 0
@@ -424,28 +430,30 @@ def main(argv=None) -> int:
                    help="advisory cooperative order: fetch byte-balanced lane N of T first")
     p.set_defaults(func=cmd_archive)
 
+    bundle_help = "path, bundle id (name@revision12 from `list`), or a unique prefix"
+
     p = sub.add_parser("verify", help="re-hash a bundle and compare against its manifest")
-    p.add_argument("bundle")
+    p.add_argument("bundle", help=bundle_help)
     p.set_defaults(func=cmd_verify)
 
     p = sub.add_parser("smoke", help="run smoke tests on a bundle")
-    p.add_argument("bundle")
+    p.add_argument("bundle", help=bundle_help)
     p.add_argument("--inference", action="store_true", help="also load the model and generate (needs torch)")
     p.set_defaults(func=cmd_smoke)
 
-    p = sub.add_parser("list", help="list bundles in the vault")
+    p = sub.add_parser("list", help="list bundles in the vault (id and copy-pasteable path)")
     p.set_defaults(func=cmd_list)
 
     p = sub.add_parser("info", help="summarize a bundle")
-    p.add_argument("bundle")
+    p.add_argument("bundle", help=bundle_help)
     p.set_defaults(func=cmd_info)
 
     p = sub.add_parser("regen", help="rebuild a bundle's README.md from manifest + curation.md")
-    p.add_argument("bundle")
+    p.add_argument("bundle", help=bundle_help)
     p.set_defaults(func=cmd_regen)
 
     p = sub.add_parser("hydrate", help="build (or reuse) a runnable local env for a bundle")
-    p.add_argument("bundle")
+    p.add_argument("bundle", help=bundle_help)
     p.add_argument("--engine", help="runtime engine (default: auto-detect from the payload)")
     p.add_argument("--python", help="interpreter for the env (default: $DARSAY_PYTHON or this python)")
     p.add_argument("--weights", help="payload weights file for single-file engines, e.g. model/foo.gguf")
@@ -454,7 +462,7 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_hydrate)
 
     p = sub.add_parser("run", help="run a prompt against a bundle (hydrates first if needed; fully offline)")
-    p.add_argument("bundle")
+    p.add_argument("bundle", help=bundle_help)
     p.add_argument("prompt", nargs="?", help='prompt text (default: "Say hello in one short sentence.")')
     p.add_argument("--engine", help="runtime engine (default: the hydrated one, else auto-detect)")
     p.add_argument("--max-new-tokens", type=int, default=256)
@@ -470,7 +478,7 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_run)
 
     p = sub.add_parser("dehydrate", help="remove a bundle's hydration record (envs are shared; prune via `envs --prune`)")
-    p.add_argument("bundle")
+    p.add_argument("bundle", help=bundle_help)
     p.set_defaults(func=cmd_dehydrate)
 
     p = sub.add_parser("envs", help="list shared runtime envs and which bundles use them")
@@ -478,7 +486,7 @@ def main(argv=None) -> int:
     p.set_defaults(func=cmd_envs)
 
     p = sub.add_parser("export", help="pack a bundle into a single deterministic .mvb.tar file")
-    p.add_argument("bundle")
+    p.add_argument("bundle", help=bundle_help)
     p.add_argument("-o", "--output-dir", default=".", help="directory for the .mvb.tar (default: cwd)")
     p.set_defaults(func=cmd_export)
 

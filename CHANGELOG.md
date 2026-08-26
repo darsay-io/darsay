@@ -9,6 +9,13 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Added
+
+- Bundle-taking commands (`info`, `run`, `verify`, `export`, …) accept a
+  filesystem path, a bundle id (`name@revision12`), or a unique prefix of
+  either. `darsay list` prints a `PATH` column so the id is a usable handle,
+  not just a label.
+
 ### Changed
 
 - **Rename:** the package, CLI, and environment variables are now `darsay`

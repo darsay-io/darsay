@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from darsay.cli import main
 from tests.integration.conftest import archive_quiet
 from tests.payloads import model_files
@@ -50,6 +52,15 @@ def test_list_empty_vault(vault, capsys):
     assert "No bundles" in capsys.readouterr().out
 
 
+def test_info_ambiguous_prefix_errors(vault, test_provider, capsys):
+    test_provider.add_repo("acme/toy", model_files())
+    test_provider.add_repo("acme/other", model_files())
+    archive_quiet("test:acme/toy", vault=vault)
+    archive_quiet("test:acme/other", vault=vault)
+    with pytest.raises(SystemExit, match="matches 2 bundles"):
+        main(["--vault", str(vault), "info", "acme"])
+
+
 def test_list_info_verify_regen_roundtrip(vault, test_provider, capsys):
     test_provider.add_repo("acme/toy", model_files())
     bundle = archive_quiet("test:acme/toy", vault=vault)
@@ -58,6 +69,12 @@ def test_list_info_verify_regen_roundtrip(vault, test_provider, capsys):
     listed = capsys.readouterr().out
     assert "test--acme--toy" in listed
     assert "apache-2.0" in listed
+    assert "PATH" in listed
+    assert str(bundle) in listed
+
+    assert main(["--vault", str(vault), "info", "test--acme--toy"]) == 0
+    by_id = capsys.readouterr().out
+    assert "test:acme/toy" in by_id
 
     assert main(["--vault", str(vault), "info", str(bundle)]) == 0
     info = capsys.readouterr().out

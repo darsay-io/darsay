@@ -39,18 +39,20 @@ pipx install darsay
 
 darsay archive sshleifer/tiny-gpt2
 darsay list
-darsay run vault/sshleifer--tiny-gpt2/<rev> "Hello"
+darsay run sshleifer--tiny-gpt2 "Hello"
 ```
 
-`list` prints the bundle id, including `<rev>` (first 12 of the pinned
-commit). `run` builds an isolated env the first time, then generates
-**offline**. The payload under `model/` is not touched.
+`list` prints the bundle id (`name@<rev>`, `<rev>` is the first 12 of the
+pinned commit) and a copy-pasteable path. `run` / `info` / `verify` accept
+that path, the id, or a unique prefix. `run` builds an isolated env the
+first time, then generates **offline**. The payload under `model/` is not
+touched.
 
 A model you would actually keep is the same shape:
 
 ```bash
 darsay archive Qwen/Qwen3-0.6B
-darsay run     vault/qwen--qwen3-0.6b/<rev> "Say hello"
+darsay run     qwen--qwen3-0.6b "Say hello"
 ```
 
 ---
@@ -260,7 +262,7 @@ is a view — never the other way around.
 # after archive:
 $EDITOR vault/qwen--qwen3-0.6b/<rev>/curation.md
 
-darsay regen vault/qwen--qwen3-0.6b/<rev>
+darsay regen qwen--qwen3-0.6b
 # rebuilds README.md from manifest + curation.md
 ```
 
@@ -273,7 +275,7 @@ territory; the tool will not invent it.
 ## Verify on a schedule
 
 ```bash
-darsay verify vault/qwen--qwen3-0.6b/<rev>
+darsay verify qwen--qwen3-0.6b
 ```
 
 Re-hashes every payload file, diffs against the manifest. Modified,

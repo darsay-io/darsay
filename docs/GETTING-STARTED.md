@@ -72,10 +72,13 @@ Find it later with:
 
 ```bash
 darsay list
-darsay info vault/sshleifer--tiny-gpt2/<rev>
+darsay info sshleifer--tiny-gpt2
 ```
 
-`<rev>` is the first 12 characters of the pinned commit. `list` prints it.
+`list` prints the bundle id (`name@<rev>`) and a copy-pasteable `PATH`.
+`<rev>` is the first 12 characters of the pinned commit. `info`, `run`,
+`verify`, and the other bundle commands accept the path, the id, or a unique
+prefix (`sshleifer--tiny-gpt2`, `tiny-gpt2`, the revision).
 
 ### What just landed on disk
 
@@ -128,7 +131,7 @@ Same three verbs. Larger bytes. Identical shape.
 ```bash
 darsay estimate Qwen/Qwen3-0.6B
 darsay archive  Qwen/Qwen3-0.6B
-darsay run      vault/qwen--qwen3-0.6b/<rev> "Say hello"
+darsay run      qwen--qwen3-0.6b "Say hello"
 ```
 
 Qwen3-0.6B is about 1.5 GiB. `estimate` tells you before you commit.
@@ -143,9 +146,9 @@ If a later source is gated, set `$HF_TOKEN` or run
 | You hit Ctrl-C | Rerun the same `archive` command. Completed files are kept |
 | You only want one GGUF from a pack | `darsay estimate REPO --include '*Q4_K_M*'` prices it; archive the published satellite repo, not the whole pack |
 | It is a dataset, not a model | `darsay archive datasets/owner/name` — payload lands in `data/` |
-| You want one file for a USB drive | `darsay export vault/<bundle> -o /backups` |
-| You want to know it still matches | `darsay verify vault/<bundle>` |
-| You wrote curator notes | edit `curation.md`, then `darsay regen vault/<bundle>` |
+| You want one file for a USB drive | `darsay export <bundle> -o /backups` |
+| You want to know it still matches | `darsay verify <bundle>` |
+| You wrote curator notes | edit `curation.md`, then `darsay regen <bundle>` |
 
 Copy-paste for each of those: [Examples](../examples/README.md).
 
