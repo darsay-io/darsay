@@ -7,43 +7,73 @@ Bundle ids come from ``darsay list --ids``.
 from __future__ import annotations
 
 COMMANDS = (
-    "estimate archive verify smoke list info regen hydrate run dehydrate "
-    "envs export import assemble rm du complete"
+    "estimate",
+    "archive",
+    "verify",
+    "smoke",
+    "list",
+    "info",
+    "regen",
+    "hydrate",
+    "run",
+    "dehydrate",
+    "envs",
+    "export",
+    "import",
+    "assemble",
+    "rm",
+    "du",
+    "complete",
 )
 BUNDLE_COMMANDS = (
-    "verify smoke info regen hydrate run dehydrate export rm"
+    "verify",
+    "smoke",
+    "info",
+    "regen",
+    "hydrate",
+    "run",
+    "dehydrate",
+    "export",
+    "rm",
 )
-
-
 def script_for(shell: str) -> str:
     if shell == "zsh":
-        return _ZSH
+        return _zsh()
     if shell == "bash":
-        return _BASH
+        return _bash()
     if shell == "fish":
-        return _FISH
+        return _fish()
     raise SystemExit(f"error: unknown shell {shell!r} (bash, zsh, or fish)")
 
 
-_ZSH = r"""#compdef darsay
+def _zsh() -> str:
+    cmds = " ".join(COMMANDS)
+    bundle_case = "|".join(BUNDLE_COMMANDS)
+    return f"""#compdef darsay
 # eval "$(darsay complete zsh)"
 
-_darsay_ids() {
+_darsay_ids() {{
   local -a ids
-  ids=(${(f)"$(darsay list --ids 2>/dev/null)"})
+  ids=(${{(f)"$(darsay list --ids 2>/dev/null)"}})
   _describe 'bundle' ids
-}
+}}
 
-_darsay() {
+_darsay() {{
   local -a cmds
-  cmds=(estimate archive verify smoke list info regen hydrate run dehydrate envs export import assemble rm du complete)
+  cmds=({cmds})
   if (( CURRENT == 2 )); then
     _describe 'command' cmds
     return
   fi
   case $words[2] in
-    verify|smoke|info|regen|hydrate|run|dehydrate|export|rm)
+    {bundle_case})
       _darsay_ids
+      ;;
+    import)
+      _files -g '*.mvb.tar'
+      ;;
+    assemble)
+      _files -/
       ;;
     complete)
       _values 'shell' bash zsh fish
@@ -52,41 +82,52 @@ _darsay() {
       _files
       ;;
   esac
-}
+}}
 
 compdef _darsay darsay
 """
 
-_BASH = r"""# eval "$(darsay complete bash)"
 
-_darsay() {
-  local cur cmds
+def _bash() -> str:
+    cmds = " ".join(COMMANDS)
+    bundle_case = "|".join(BUNDLE_COMMANDS)
+    return f"""# eval "$(darsay complete bash)"
+
+_darsay() {{
+  local cur
   COMPREPLY=()
-  cur="${COMP_WORDS[COMP_CWORD]}"
-  cmds="estimate archive verify smoke list info regen hydrate run dehydrate envs export import assemble rm du complete"
-  if [[ ${COMP_CWORD} -eq 1 ]]; then
-    COMPREPLY=( $(compgen -W "${cmds}" -- "${cur}") )
+  cur="${{COMP_WORDS[COMP_CWORD]}}"
+  cmds="{cmds}"
+  if [[ ${{COMP_CWORD}} -eq 1 ]]; then
+    COMPREPLY=( $(compgen -W "${{cmds}}" -- "${{cur}}") )
     return 0
   fi
-  case "${COMP_WORDS[1]}" in
-    verify|smoke|info|regen|hydrate|run|dehydrate|export|rm)
+  case "${{COMP_WORDS[1]}}" in
+    {bundle_case})
       local ids
       ids="$(darsay list --ids 2>/dev/null)"
-      COMPREPLY=( $(compgen -W "${ids}" -- "${cur}") )
+      COMPREPLY=( $(compgen -W "${{ids}}" -- "${{cur}}") )
+      ;;
+    import)
+      COMPREPLY=( $(compgen -f -X '!*.mvb.tar' -- "${{cur}}") )
       ;;
     complete)
-      COMPREPLY=( $(compgen -W "bash zsh fish" -- "${cur}") )
+      COMPREPLY=( $(compgen -W "bash zsh fish" -- "${{cur}}") )
       ;;
   esac
-}
+}}
 
 complete -F _darsay darsay
 """
 
-_FISH = r"""# darsay complete fish > ~/.config/fish/completions/darsay.fish
 
-complete -c darsay -f
-complete -c darsay -n "__fish_use_subcommand" -a "estimate archive verify smoke list info regen hydrate run dehydrate envs export import assemble rm du complete"
-complete -c darsay -n "__fish_seen_subcommand_from verify smoke info regen hydrate run dehydrate export rm" -a "(darsay list --ids 2>/dev/null)"
+def _fish() -> str:
+    cmds = " ".join(COMMANDS)
+    bundle = " ".join(BUNDLE_COMMANDS)
+    return f"""# darsay complete fish > ~/.config/fish/completions/darsay.fish
+
+complete -c darsay -n "__fish_use_subcommand" -a "{cmds}"
+complete -c darsay -n "__fish_seen_subcommand_from {bundle}" -a "(darsay list --ids 2>/dev/null)"
+complete -c darsay -n "__fish_seen_subcommand_from import" -F -a "*.mvb.tar"
 complete -c darsay -n "__fish_seen_subcommand_from complete" -a "bash zsh fish"
 """

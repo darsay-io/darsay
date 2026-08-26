@@ -60,3 +60,15 @@ def test_verify_heals_integrity_after_restore(vault, test_provider):
     # The compromise is still in the append-only log.
     changes = load_manifest(bundle)["security"]["unexpected_changes"]
     assert any(c["type"] == "modified" for c in changes)
+
+
+def test_verify_does_not_heal_upstream_mismatch(vault, test_provider):
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    manifest = load_manifest(bundle)
+    manifest["security"]["integrity_status"] = "upstream-mismatch"
+    (bundle / "manifest.json").write_text(
+        json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
+    assert verify_bundle(bundle, progress=silent)["result"] == "pass"
+    assert load_manifest(bundle)["security"]["integrity_status"] == "upstream-mismatch"

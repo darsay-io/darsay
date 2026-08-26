@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from darsay.complete import script_for
+from darsay.complete import COMMANDS, BUNDLE_COMMANDS, script_for
 
 
 def test_script_for_known_shells():
@@ -11,7 +11,14 @@ def test_script_for_known_shells():
     assert "darsay list --ids" in zsh
     bash = script_for("bash")
     assert "complete -F _darsay darsay" in bash
+    assert "*.mvb.tar" in bash
     fish = script_for("fish")
     assert "darsay.fish" in fish
+    for name in COMMANDS:
+        assert name in zsh
+        assert name in bash
+        assert name in fish
+    for name in BUNDLE_COMMANDS:
+        assert name in zsh
     with pytest.raises(SystemExit, match="unknown shell"):
         script_for("powershell")

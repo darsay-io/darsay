@@ -40,7 +40,9 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
   `transformers`. `--force` refreshes to current PyPI.
 - `darsay rm` deletes bundles (confirmation unless `--yes`). `darsay du`
   reports on-disk size of bundles and `.runtime`. `list --json` / `--ids`
-  for scripts. `darsay complete bash|zsh|fish` prints a completion script.
+  for scripts (`on_disk_bytes` vs `payload_bytes`). `darsay complete
+  bash|zsh|fish` prints a completion script (generated from the command
+  list so it cannot drift).
 
 - **Rename:** the package, CLI, and environment variables are now `darsay`
   (`darsay` / `$DARSAY_HOME` / `$DARSAY_RUNTIME` / `$DARSAY_PYTHON` /

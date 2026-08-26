@@ -76,6 +76,8 @@ def test_list_json_and_ids(vault, test_provider, capsys):
     assert data[0]["bundle_id"].startswith("test--acme--toy")
     assert data[0]["path"] == str(bundle)
     assert data[0]["partial"] is False
+    assert "on_disk_bytes" in data[0]
+    assert data[0]["payload_bytes"] > 0
     assert main(["--vault", str(vault), "list", "--ids"]) == 0
     assert "test--acme--toy@" in capsys.readouterr().out
 
@@ -99,6 +101,7 @@ def test_du_counts_bundle_bytes(vault, test_provider, capsys):
     assert data["bundles_bytes"] > 0
     assert data["total_bytes"] >= data["bundles_bytes"]
     assert data["bundles"][0]["bundle_id"].startswith("test--acme--toy")
+    assert data["bundles"][0]["on_disk_bytes"] > 0
 
 
 def test_complete_scripts(capsys):

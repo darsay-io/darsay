@@ -273,14 +273,15 @@ def cmd_du(args) -> int:
     records = bundle_records(vault)
     runtime = Path(os.environ.get("DARSAY_RUNTIME") or vault / ".runtime")
     runtime_bytes = dir_size(runtime)
-    bundles_bytes = sum(r.get("size_bytes") or 0 for r in records)
+    bundles_bytes = sum(r.get("on_disk_bytes") or 0 for r in records)
     payload = {
         "vault": str(vault),
         "bundles": [
             {
                 "bundle_id": r["bundle_id"],
                 "path": r["path"],
-                "bytes": r.get("size_bytes") or 0,
+                "on_disk_bytes": r.get("on_disk_bytes") or 0,
+                "payload_bytes": r.get("payload_bytes"),
                 "partial": r.get("partial", False),
             }
             for r in records
@@ -299,7 +300,7 @@ def cmd_du(args) -> int:
     print(f"Vault {vault}")
     for rec in records:
         note = "  (partial)" if rec.get("partial") else ""
-        print(f"  {human_size(rec.get('size_bytes') or 0):>10}  {rec['bundle_id']}{note}")
+        print(f"  {human_size(rec.get('on_disk_bytes') or 0):>10}  {rec['bundle_id']}{note}")
     print(f"  {human_size(runtime_bytes):>10}  .runtime")
     print(f"  {human_size(payload['total_bytes']):>10}  total")
     return 0
