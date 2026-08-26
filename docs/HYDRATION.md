@@ -61,6 +61,13 @@ files any reader opens directly (see [DATASETS.md](DATASETS.md)).
 Auto-detection prefers the first matching registry entry; override with
 `--engine`.
 
+`hydrate` / `run` preflight the payload before installing packages:
+the transformers runner only serves `*ForCausalLM` architectures, and
+RAM is compared to `runtime.estimated_min_ram_gb` (weights × 1.2). A
+mismatch exits non-zero *before* downloading torch. Pass
+`--ignore-preflight` to try anyway. The first hydrate of an engine
+prints the expected install size (torch + transformers is often 1–2 GiB).
+
 ## Environments
 
 Envs are **shared, content-addressed venvs**: keyed by

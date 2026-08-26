@@ -2,10 +2,29 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from darsay.hydrate import dehydrate_bundle, hydrate_bundle, list_envs, prune_envs
 from tests.conftest import silent
 from tests.integration.conftest import archive_quiet
 from tests.payloads import model_files
+
+
+def test_hydrate_preflight_rejects_non_causal_architecture(vault, test_provider, tmp_path, monkeypatch):
+    files = model_files()
+    config = json.loads(files["config.json"])
+    config["architectures"] = ["ToyForConditionalGeneration"]
+    files["config.json"] = json.dumps(config).encode()
+    test_provider.add_repo("acme/vlm", files)
+    bundle = archive_quiet("test:acme/vlm", vault=vault)
+    monkeypatch.setenv("DARSAY_RUNTIME", str(tmp_path / "runtime"))
+    with pytest.raises(SystemExit, match="not a causal LM"):
+        hydrate_bundle(bundle, dry_run=True, progress=silent)
+    record = hydrate_bundle(
+        bundle, dry_run=True, ignore_preflight=True, progress=silent,
+    )
+    assert record["dry_run"] is True
+    assert any(i["code"] == "unsupported-architecture" for i in record["preflight"])
 
 
 def test_hydrate_dry_run_creates_nothing(vault, test_provider, monkeypatch, tmp_path):

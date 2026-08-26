@@ -25,6 +25,10 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
 - The default vault is `$DARSAY_HOME` or `~/darsay` (no longer `./vault`).
   Commands that open the vault print the path on stderr when the default
   is in use. `--vault` is accepted before or after the subcommand.
+- `hydrate` / `run` preflight the payload: refuse non-causal-LM
+  architectures on the transformers runner, compare estimated RAM to
+  this machine, and announce the first-time package install. Override
+  with `--ignore-preflight`.
 
 - **Rename:** the package, CLI, and environment variables are now `darsay`
   (`darsay` / `$DARSAY_HOME` / `$DARSAY_RUNTIME` / `$DARSAY_PYTHON` /

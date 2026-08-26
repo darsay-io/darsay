@@ -336,6 +336,7 @@ def cmd_hydrate(args) -> int:
         weights=args.weights,
         force=args.force,
         dry_run=args.dry_run,
+        ignore_preflight=args.ignore_preflight,
     )
     if record.get("dry_run"):
         return 0
@@ -359,6 +360,7 @@ def cmd_run(args) -> int:
         timeout=args.timeout,
         python=args.python,
         weights=args.weights,
+        ignore_preflight=args.ignore_preflight,
     )
     return 0 if record["status"] == "pass" else 1
 
@@ -482,6 +484,8 @@ def main(argv=None) -> int:
     p.add_argument("--weights", help="payload weights file for single-file engines, e.g. model/foo.gguf")
     p.add_argument("--force", action="store_true", help="rebuild the env even if it exists")
     p.add_argument("--dry-run", action="store_true", help="show the plan without touching anything")
+    p.add_argument("--ignore-preflight", action="store_true",
+                   help="try anyway if the architecture or RAM check fails")
     p.set_defaults(func=cmd_hydrate)
 
     p = add_cmd("run", help="run a prompt against a bundle (hydrates first if needed; fully offline)")
@@ -498,6 +502,8 @@ def main(argv=None) -> int:
     p.add_argument("--timeout", type=float, help="kill the run after N seconds")
     p.add_argument("--python", help="interpreter if hydration is needed")
     p.add_argument("--weights", help="weights file if hydration is needed (single-file engines)")
+    p.add_argument("--ignore-preflight", action="store_true",
+                   help="try anyway if the architecture or RAM check fails")
     p.set_defaults(func=cmd_run)
 
     p = add_cmd("dehydrate", help="remove a bundle's hydration record (envs are shared; prune via `envs --prune`)")

@@ -48,6 +48,8 @@ ENGINES = {
         "requirements": ["torch", "transformers"],
         "runner": "transformers_runner.py",
         "weights_globs": None,  # loads the payload directory itself
+        "architecture_suffixes": ("ForCausalLM",),
+        "install_hint": "first hydrate installs torch + transformers (often 1–2 GiB)",
     },
     "llama-cpp": {
         "label": "llama.cpp via llama-cpp-python (GGUF weights)",
@@ -55,8 +57,108 @@ ENGINES = {
         "requirements": ["llama-cpp-python"],
         "runner": "llama_cpp_runner.py",
         "weights_globs": ["model/*.gguf"],
+        "architecture_suffixes": None,  # GGUF embeds the architecture
+        "install_hint": "first hydrate installs llama-cpp-python",
     },
 }
+
+
+def available_ram_bytes() -> int | None:
+    """Physical RAM when the OS tells us; None if unknown. No extra deps."""
+    try:
+        if sys.platform == "darwin":
+            out = subprocess.run(
+                ["sysctl", "-n", "hw.memsize"],
+                capture_output=True, text=True,
+            )
+            if out.returncode == 0 and out.stdout.strip().isdigit():
+                return int(out.stdout.strip())
+        if sys.platform.startswith("linux"):
+            for line in Path("/proc/meminfo").read_text().splitlines():
+                if line.startswith("MemAvailable:"):
+                    parts = line.split()
+                    return int(parts[1]) * 1024  # kB
+    except (OSError, ValueError):
+        return None
+    return None
+
+
+def engine_supports_payload(engine: str, manifest: dict) -> tuple[bool, str | None]:
+    """Whether this engine's runner can serve the payload. Honest, not guessed."""
+    spec = ENGINES[engine]
+    suffixes = spec.get("architecture_suffixes")
+    if not suffixes:
+        return True, None
+    arch = (manifest.get("model_metadata") or {}).get("architecture")
+    if not arch:
+        return True, (
+            f"{engine} runner loads AutoModelForCausalLM; payload architecture is unknown"
+        )
+    if any(str(arch).endswith(suffix) for suffix in suffixes):
+        return True, None
+    return False, (
+        f"architecture {arch} is not a causal LM. `darsay run` / the {engine} "
+        "runner uses AutoModelForCausalLM. Point a compatible loader at model/, "
+        "or pass --ignore-preflight to try anyway."
+    )
+
+
+def preflight_run(
+    manifest: dict,
+    engine: str,
+    *,
+    env_exists: bool,
+    ram_bytes: int | None = None,
+) -> list[dict]:
+    """Capability / resource issues before installing an env or loading weights."""
+    issues: list[dict] = []
+    ok, detail = engine_supports_payload(engine, manifest)
+    if not ok:
+        issues.append({"level": "error", "code": "unsupported-architecture", "message": detail})
+    elif detail:
+        issues.append({"level": "warning", "code": "unknown-architecture", "message": detail})
+
+    needed = (manifest.get("runtime") or {}).get("estimated_min_ram_gb")
+    have = available_ram_bytes() if ram_bytes is None else ram_bytes
+    if needed and have is not None:
+        have_gb = have / 1024**3
+        if have_gb < needed:
+            issues.append({
+                "level": "error",
+                "code": "insufficient-ram",
+                "message": (
+                    f"this payload wants ~{needed} GB RAM (weights × 1.2); "
+                    f"this machine reports {have_gb:.1f} GB. Archive a GGUF "
+                    "subset or pass --ignore-preflight."
+                ),
+            })
+        elif have_gb < needed * 1.3:
+            issues.append({
+                "level": "warning",
+                "code": "tight-ram",
+                "message": (
+                    f"this payload wants ~{needed} GB RAM; this machine reports "
+                    f"{have_gb:.1f} GB — likely tight."
+                ),
+            })
+
+    if not env_exists:
+        hint = ENGINES[engine].get("install_hint")
+        if hint:
+            issues.append({"level": "info", "code": "env-install", "message": hint})
+    return issues
+
+
+def _emit_preflight(issues: list[dict], progress, *, ignore: bool) -> None:
+    for issue in issues:
+        progress(f"preflight {issue['level']}: {issue['message']}")
+    errors = [i for i in issues if i["level"] == "error"]
+    if errors and not ignore:
+        raise SystemExit(
+            "error: preflight failed — "
+            + errors[0]["message"]
+            + " (pass --ignore-preflight to try anyway)"
+        )
 
 
 # ---------------------------------------------------------------- paths & keys
@@ -309,7 +411,7 @@ def write_hydration(bundle_dir: Path, record: dict) -> None:
 
 def hydrate_bundle(bundle_dir: Path, engine: str | None = None, python: str | None = None,
                    weights: str | None = None, force: bool = False, dry_run: bool = False,
-                   progress=print) -> dict:
+                   ignore_preflight: bool = False, progress=print) -> dict:
     from .archiver import load_manifest, utc_now, write_manifest
     from .schema import payload_root as manifest_payload_root
 
@@ -325,6 +427,8 @@ def hydrate_bundle(bundle_dir: Path, engine: str | None = None, python: str | No
     key = _env_key(chosen, py_minor, requirements)
     env_dir = root / "envs" / key
     env_exists = (env_dir / "env.json").is_file()
+    issues = preflight_run(manifest, chosen, env_exists=env_exists)
+    _emit_preflight(issues, progress, ignore=ignore_preflight)
 
     if dry_run:
         progress(f"Plan for {manifest['bundle_id']}:")
@@ -337,7 +441,7 @@ def hydrate_bundle(bundle_dir: Path, engine: str | None = None, python: str | No
         progress(f"  installer:    {_installer()[0]}")
         progress(f"  then:         probe env offline, write {HYDRATION_FILE}")
         return {"dry_run": True, "engine": chosen, "env_key": key, "env_exists": env_exists,
-                "requirements": requirements}
+                "requirements": requirements, "preflight": issues}
 
     env_record = ensure_env(chosen, requirements, python, root, force=force, progress=progress)
 
@@ -391,7 +495,7 @@ def run_bundle(bundle_dir: Path, prompt: str | None = None, engine: str | None =
                device: str = "auto", dtype: str = "auto", trust_remote_code: bool = False,
                seed: int | None = None, timeout: float | None = None,
                python: str | None = None, weights: str | None = None,
-               progress=print) -> dict:
+               ignore_preflight: bool = False, progress=print) -> dict:
     from .archiver import load_manifest, utc_now, write_manifest
 
     hydration = load_hydration(bundle_dir)
@@ -403,8 +507,15 @@ def run_bundle(bundle_dir: Path, prompt: str | None = None, engine: str | None =
     )
     if stale:
         progress("Bundle not hydrated for this configuration — hydrating first ...")
-        hydration = hydrate_bundle(bundle_dir, engine=engine, python=python,
-                                   weights=weights, progress=progress)
+        hydration = hydrate_bundle(
+            bundle_dir, engine=engine, python=python, weights=weights,
+            ignore_preflight=ignore_preflight, progress=progress,
+        )
+    else:
+        issues = preflight_run(
+            load_manifest(bundle_dir), hydration["engine"], env_exists=True,
+        )
+        _emit_preflight(issues, progress, ignore=ignore_preflight)
 
     from .schema import payload_root as manifest_payload_root
 

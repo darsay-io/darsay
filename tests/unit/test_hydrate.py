@@ -7,6 +7,8 @@ from darsay.hydrate import (
     _env_key,
     _offline_env,
     detect_engines,
+    engine_supports_payload,
+    preflight_run,
     resolve_requirements,
     runtime_root,
     select_engine,
@@ -56,6 +58,41 @@ def test_select_weights_gguf():
         select_weights(manifest, "llama-cpp", None)
     assert select_weights(manifest, "llama-cpp", "model/a.gguf") == "model/a.gguf"
     assert select_weights(manifest, "transformers", None) is None
+
+
+def test_engine_supports_causal_lm_and_rejects_vlm():
+    causal = {"model_metadata": {"architecture": "Qwen3ForCausalLM"}}
+    assert engine_supports_payload("transformers", causal) == (True, None)
+    vlm = {"model_metadata": {"architecture": "Qwen3VLForConditionalGeneration"}}
+    ok, detail = engine_supports_payload("transformers", vlm)
+    assert ok is False
+    assert "not a causal LM" in detail
+    unknown = {"model_metadata": {"architecture": None}}
+    ok, detail = engine_supports_payload("transformers", unknown)
+    assert ok is True
+    assert "unknown" in detail
+    assert engine_supports_payload("llama-cpp", vlm)[0] is True
+
+
+def test_preflight_run_architecture_ram_and_install():
+    manifest = {
+        "model_metadata": {"architecture": "ToyForCausalLM"},
+        "runtime": {"estimated_min_ram_gb": 24.0},
+    }
+    issues = preflight_run(
+        manifest, "transformers", env_exists=False, ram_bytes=8 * 1024**3,
+    )
+    codes = {i["code"]: i["level"] for i in issues}
+    assert codes["insufficient-ram"] == "error"
+    assert codes["env-install"] == "info"
+
+    vlm = {
+        "model_metadata": {"architecture": "ToyForConditionalGeneration"},
+        "runtime": {"estimated_min_ram_gb": 0.0},
+    }
+    vlm_issues = preflight_run(vlm, "transformers", env_exists=True, ram_bytes=64 * 1024**3)
+    assert any(i["code"] == "unsupported-architecture" for i in vlm_issues)
+    assert not any(i["code"] == "env-install" for i in vlm_issues)
 
 
 def test_env_key_is_content_addressed():
