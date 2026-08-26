@@ -58,7 +58,9 @@ class TestProvider(SourceProvider):
                 "tags": [],
                 "gated": kwargs.get("gated", False),
                 "created_at": "2026-01-01T00:00:00+00:00",
-                "last_modified": kwargs.get("last_modified", "2026-01-01T00:00:00+00:00"),
+                "last_modified": kwargs.get(
+                    "last_modified", "2026-01-01T00:00:00+00:00"
+                ),
                 "downloads": 0,
                 "likes": 0,
             },
@@ -91,7 +93,9 @@ class TestProvider(SourceProvider):
         publisher, _, name = repo_id.partition("/")
         slug = repo_id.replace("/", "--").lower()
         bundle_name = (
-            f"{self.name}--datasets--{slug}" if artifact_type == "dataset" else f"{self.name}--{slug}"
+            f"{self.name}--datasets--{slug}"
+            if artifact_type == "dataset"
+            else f"{self.name}--{slug}"
         )
         path = f"datasets/{repo_id}" if artifact_type == "dataset" else repo_id
         return SourceRef(
@@ -177,7 +181,9 @@ class TestProvider(SourceProvider):
         dest.parent.mkdir(parents=True, exist_ok=True)
         if tqdm_class is not None:
             bar = tqdm_class(total=len(data), desc=relative)
-            updater = getattr(bar, "update_transfer", None) or getattr(bar, "update", None)
+            updater = getattr(bar, "update_transfer", None) or getattr(
+                bar, "update", None
+            )
             if updater is not None:
                 updater(len(data))
             closer = getattr(bar, "close", None)

@@ -20,7 +20,9 @@ from darsay.hydrate import (
 
 
 def test_detect_transformers_and_llama_cpp():
-    assert detect_engines(["model/config.json", "model/model.safetensors"]) == ["transformers"]
+    assert detect_engines(["model/config.json", "model/model.safetensors"]) == [
+        "transformers"
+    ]
     assert detect_engines(["model/toy.gguf"]) == ["llama-cpp"]
     both = detect_engines(
         ["model/config.json", "model/model.safetensors", "model/toy.gguf"]
@@ -42,9 +44,14 @@ def test_select_engine_mlx_opt_in_on_safetensors():
         }
     }
     assert select_engine(manifest, None) == "transformers"
-    assert detect_engines([f["path"] for f in manifest["inventory"]["files"]]) == ["transformers"]
+    assert detect_engines([f["path"] for f in manifest["inventory"]["files"]]) == [
+        "transformers"
+    ]
     npz = detect_engines(["model/config.json", "model/weights.npz"])
-    apple_silicon = sys.platform == "darwin" and platform.machine() in {"arm64", "aarch64"}
+    apple_silicon = sys.platform == "darwin" and platform.machine() in {
+        "arm64",
+        "aarch64",
+    }
     if apple_silicon:
         assert select_engine(manifest, "mlx") == "mlx"
         assert "mlx" in npz
@@ -114,7 +121,10 @@ def test_preflight_run_architecture_ram_and_install():
         "runtime": {"estimated_min_ram_gb": 24.0},
     }
     issues = preflight_run(
-        manifest, "transformers", env_exists=False, ram_bytes=8 * 1024**3,
+        manifest,
+        "transformers",
+        env_exists=False,
+        ram_bytes=8 * 1024**3,
     )
     codes = {i["code"]: i["level"] for i in issues}
     assert codes["insufficient-ram"] == "error"
@@ -124,7 +134,9 @@ def test_preflight_run_architecture_ram_and_install():
         "model_metadata": {"architecture": "ToyForConditionalGeneration"},
         "runtime": {"estimated_min_ram_gb": 0.0},
     }
-    vlm_issues = preflight_run(vlm, "transformers", env_exists=True, ram_bytes=64 * 1024**3)
+    vlm_issues = preflight_run(
+        vlm, "transformers", env_exists=True, ram_bytes=64 * 1024**3
+    )
     assert any(i["code"] == "unsupported-architecture" for i in vlm_issues)
     assert not any(i["code"] == "env-install" for i in vlm_issues)
 
@@ -150,7 +162,8 @@ def test_pin_requirements_uses_recorded_versions():
     # Unknown extras in the pin set are ignored; unmatched reqs stay loose.
     assert pin_requirements(["mlx"], {"torch": "2.2.0"}) == ["mlx"]
     mlx_pinned = pin_requirements(
-        ["mlx", "mlx-lm"], {"mlx": "0.22.0", "mlx-lm": "0.21.0"},
+        ["mlx", "mlx-lm"],
+        {"mlx": "0.22.0", "mlx-lm": "0.21.0"},
     )
     assert mlx_pinned == ["mlx-lm==0.21.0", "mlx==0.22.0"]
 
@@ -186,7 +199,11 @@ def test_every_engine_ships_a_runner():
     import darsay
 
     root = Path(darsay.__file__).parent / "runners"
-    missing = [spec["runner"] for spec in ENGINES.values() if not (root / spec["runner"]).is_file()]
+    missing = [
+        spec["runner"]
+        for spec in ENGINES.values()
+        if not (root / spec["runner"]).is_file()
+    ]
     assert missing == []
 
 

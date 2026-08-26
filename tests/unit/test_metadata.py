@@ -2,7 +2,11 @@ from __future__ import annotations
 
 import json
 
-from darsay.metadata import estimate_runtime, extract_dataset_metadata, extract_model_metadata
+from darsay.metadata import (
+    estimate_runtime,
+    extract_dataset_metadata,
+    extract_model_metadata,
+)
 from tests.payloads import dataset_files, make_safetensors, model_files
 
 
@@ -45,7 +49,9 @@ def test_extract_dataset_metadata_declared_not_measured(tmp_path):
         {"path": "data/train.jsonl", "size": 2},
         {"path": "data/README.md", "size": 1},
     ]
-    meta = extract_dataset_metadata(payload, {"language": "en", "task_categories": "text"}, records)
+    meta = extract_dataset_metadata(
+        payload, {"language": "en", "task_categories": "text"}, records
+    )
     assert meta["declared"]["example_count_total"] == 2
     assert meta["declared"]["sources"] == ["dataset_infos.json"]
     # jsonl is not measured; parquet-only, and pyarrow may be absent.

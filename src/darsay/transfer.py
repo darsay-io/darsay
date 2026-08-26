@@ -19,8 +19,7 @@ import sys
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from contextlib import contextmanager
-from datetime import datetime
+from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
 
 from .hashing import hash_file, iter_payload_files
@@ -118,10 +117,19 @@ def load_ledger(bundle_dir: Path) -> dict:
         raise LedgerError(
             f"unsupported transfer ledger version {ledger.get('transfer_version')!r} in {path}"
         )
-    required = ("repo_id", "repo_type", "revision", "revision_ref", "expected", "metadata")
+    required = (
+        "repo_id",
+        "repo_type",
+        "revision",
+        "revision_ref",
+        "expected",
+        "metadata",
+    )
     missing = [key for key in required if key not in ledger]
     if missing:
-        raise LedgerError(f"incomplete transfer ledger {path}: missing {', '.join(missing)}")
+        raise LedgerError(
+            f"incomplete transfer ledger {path}: missing {', '.join(missing)}"
+        )
     ledger.setdefault("files", {})
     ledger.setdefault("sessions", [])
     ledger.setdefault("events", [])
@@ -219,16 +227,14 @@ def transfer_lock(bundle_dir: Path, progress=print):
             if stale:
                 kind = "copied" if copied else "stale"
                 progress(f"Reclaiming {kind} transfer lock: {path}")
-                try:
+                with suppress(FileNotFoundError):
                     path.unlink()
-                except FileNotFoundError:
-                    pass
                 continue
             raise SystemExit(
                 f"error: archive already in progress for {bundle_dir} "
                 f"(pid {owner.get('pid', '?')} on {owner.get('host', '?')}, "
                 f"started {owner.get('started', '?')})"
-            )
+            ) from None
     try:
         yield
     finally:
@@ -272,7 +278,10 @@ def find_resume(
             except LedgerError:
                 orphans.append(child)
                 continue
-            if ledger["repo_id"] != source.locator or ledger["repo_type"] != source.artifact_type:
+            if (
+                ledger["repo_id"] != source.locator
+                or ledger["repo_type"] != source.artifact_type
+            ):
                 continue
             if ledger["revision_ref"] == requested or ledger["revision"] == requested:
                 matches.append((child, ledger))
@@ -292,7 +301,8 @@ def find_resume(
     if len(orphans) > 1:
         raise SystemExit(
             f"error: multiple ledger-less partial archives exist for {source.canonical}; "
-            "specify a revision or resolve them manually: " + ", ".join(map(str, orphans))
+            "specify a revision or resolve them manually: "
+            + ", ".join(map(str, orphans))
         )
     return None
 
@@ -306,12 +316,14 @@ def new_ledger(snapshot, include: list[str] | None = None) -> dict:
         files, subset = select_subset(files, include)
     expected = []
     for spec in files:
-        expected.append({
-            "path": spec.path,
-            "size": spec.size,
-            "lfs_sha256": spec.sha256,
-            "git_sha1": spec.git_sha1,
-        })
+        expected.append(
+            {
+                "path": spec.path,
+                "size": spec.size,
+                "lfs_sha256": spec.sha256,
+                "git_sha1": spec.git_sha1,
+            }
+        )
     expected.sort(key=lambda item: item["path"])
     source = snapshot.source
     ledger = {
@@ -334,7 +346,9 @@ def new_ledger(snapshot, include: list[str] | None = None) -> dict:
     return ledger
 
 
-def begin_session(bundle_dir: Path, ledger: dict, shard: tuple[int, int] | None = None) -> dict:
+def begin_session(
+    bundle_dir: Path, ledger: dict, shard: tuple[int, int] | None = None
+) -> dict:
     session = {
         "started": _utc_now(),
         "ended": None,
@@ -360,12 +374,18 @@ def finish_session(bundle_dir: Path, ledger: dict, session: dict, reason: str) -
 
 
 def record_event(ledger: dict, path: str | None, event: str, detail: str) -> None:
-    ledger["events"].append({"at": _utc_now(), "path": path, "event": event, "detail": detail})
+    ledger["events"].append(
+        {"at": _utc_now(), "path": path, "event": event, "detail": detail}
+    )
 
 
 def _payload_path(payload_dir: Path, relative: str) -> Path:
     rel = PurePosixPath(relative)
-    if rel.is_absolute() or not rel.parts or any(part in ("", ".", "..") for part in rel.parts):
+    if (
+        rel.is_absolute()
+        or not rel.parts
+        or any(part in ("", ".", "..") for part in rel.parts)
+    ):
         raise SystemExit(f"error: unsafe path in pinned Hub inventory: {relative!r}")
     return payload_dir.joinpath(*rel.parts)
 
@@ -404,7 +424,9 @@ def _discard_payload_file(path: Path, payload_dir: Path) -> None:
         parent = parent.parent
 
 
-def _partial_bytes(payload_dir: Path, expected: dict, ledger: dict | None = None) -> int:
+def _partial_bytes(
+    payload_dir: Path, expected: dict, ledger: dict | None = None
+) -> int:
     """Best-effort byte count for provider incomplete files."""
     from .sources import get_provider
 
@@ -428,7 +450,9 @@ def reconcile(
 
     for relative in sorted(set(present_by_path) - set(expected_by_path)):
         path = present_by_path[relative]
-        record_event(ledger, relative, "unexpected_file", "removed; not in pinned transfer set")
+        record_event(
+            ledger, relative, "unexpected_file", "removed; not in pinned transfer set"
+        )
         if apply:
             _discard_payload_file(path, payload_dir)
             save_ledger(bundle_dir, ledger)
@@ -439,7 +463,9 @@ def reconcile(
         path = _payload_path(payload_dir, relative)
         state = ledger["files"].get(relative) or {}
         expected_size = expected.get("size")
-        size_matches = path.is_file() and (expected_size is None or path.stat().st_size == expected_size)
+        size_matches = path.is_file() and (
+            expected_size is None or path.stat().st_size == expected_size
+        )
 
         if state.get("status") == "verified" and size_matches:
             if not rehash:
@@ -474,7 +500,9 @@ def reconcile(
                 save_ledger(bundle_dir, ledger)
             continue
         if state.get("status") == "verified" and not path.is_file():
-            record_event(ledger, relative, "verified_file_missing", "demoted to missing")
+            record_event(
+                ledger, relative, "verified_file_missing", "demoted to missing"
+            )
         elif path.is_file() and not size_matches:
             actual_size = path.stat().st_size
             record_event(
@@ -486,7 +514,9 @@ def reconcile(
             if apply:
                 _discard_payload_file(path, payload_dir)
         elif path.is_file():
-            record = _verified_record(expected, path, "adopted", int(state.get("attempts") or 0))
+            record = _verified_record(
+                expected, path, "adopted", int(state.get("attempts") or 0)
+            )
             if record["verified_against_upstream"] is not False:
                 ledger["files"][relative] = record
                 adopted_files += 1
@@ -496,7 +526,12 @@ def reconcile(
                 if apply:
                     save_ledger(bundle_dir, ledger)
                 continue
-            record_event(ledger, relative, "digest_mismatch", "local bytes did not match upstream; removed")
+            record_event(
+                ledger,
+                relative,
+                "digest_mismatch",
+                "local bytes did not match upstream; removed",
+            )
             if apply:
                 _discard_payload_file(path, payload_dir)
 
@@ -508,7 +543,9 @@ def reconcile(
             save_ledger(bundle_dir, ledger)
 
     if adopted_files:
-        progress(f"Adopted {adopted_files} existing files ({adopted_bytes} bytes) after hashing")
+        progress(
+            f"Adopted {adopted_files} existing files ({adopted_bytes} bytes) after hashing"
+        )
     return transfer_plan(payload_dir, ledger)
 
 
@@ -524,7 +561,9 @@ def transfer_plan(payload_dir: Path, ledger: dict) -> dict:
             counts["verified"] += 1
             bytes_by_state["verified"] += size
             continue
-        partial = min(_partial_bytes(payload_dir, expected, ledger), size) if size else 0
+        partial = (
+            min(_partial_bytes(payload_dir, expected, ledger), size) if size else 0
+        )
         if partial:
             counts["partial"] += 1
             bytes_by_state["partial"] += partial
@@ -594,14 +633,23 @@ def transfer_groups(
 ) -> list[tuple[int | None, list[dict]]]:
     """Return deterministic byte-balanced lane groups in participant order."""
     if shard is None:
-        return [(None, sorted(expected, key=lambda item: (item.get("size") or 0, item["path"])))]
+        return [
+            (
+                None,
+                sorted(
+                    expected, key=lambda item: (item.get("size") or 0, item["path"])
+                ),
+            )
+        ]
 
     participant, total_lanes = shard
     lanes: list[list[dict]] = [[] for _ in range(total_lanes)]
     lane_bytes = [0] * total_lanes
     # Longest-processing-time balancing is deterministic and keeps typical
     # equal-sized weight shards evenly distributed by bytes, not file count.
-    for item in sorted(expected, key=lambda value: (-(value.get("size") or 0), value["path"])):
+    for item in sorted(
+        expected, key=lambda value: (-(value.get("size") or 0), value["path"])
+    ):
         lane = min(
             range(total_lanes),
             key=lambda number: (lane_bytes[number], len(lanes[number]), number),
@@ -625,7 +673,9 @@ def print_shard_plan(ledger: dict, shard: tuple[int, int], progress=print) -> No
     assigned_bytes = sum(item.get("size") or 0 for item in assigned)
     total_bytes = sum(item.get("size") or 0 for item in ledger["expected"])
     percent = (assigned_bytes * 100 / total_bytes) if total_bytes else 0
-    order = " -> ".join(str(number + 1) for number, _items in groups if number is not None)
+    order = " -> ".join(
+        str(number + 1) for number, _items in groups if number is not None
+    )
     progress(
         f"Cooperative shard {shard[0]}/{shard[1]}: lane {lane + 1} first "
         f"({len(assigned)} files, {human_size(assigned_bytes)}, {percent:.1f}% of bytes); "
@@ -636,7 +686,9 @@ def print_shard_plan(ledger: dict, shard: tuple[int, int], progress=print) -> No
             "  WARNING: fewer files than cooperative lanes; this bundle cannot "
             "distribute useful starting work across every participant"
         )
-    lane_sizes = [sum(item.get("size") or 0 for item in items) for _lane, items in groups]
+    lane_sizes = [
+        sum(item.get("size") or 0 for item in items) for _lane, items in groups
+    ]
     ideal = total_bytes / shard[1] if shard[1] else 0
     if ideal and max(lane_sizes) > ideal * 1.5:
         progress(
@@ -704,12 +756,14 @@ def _download_one(
             )
         except OSError as exc:
             _discard_payload_file(path, payload_dir)
-            events.append({
-                "at": _utc_now(),
-                "path": relative,
-                "event": "local_source_error",
-                "detail": f"{candidate['bundle_id']} could not be copied: {exc}",
-            })
+            events.append(
+                {
+                    "at": _utc_now(),
+                    "path": relative,
+                    "event": "local_source_error",
+                    "detail": f"{candidate['bundle_id']} could not be copied: {exc}",
+                }
+            )
             continue
         if record["verified_against_upstream"] is not False:
             record["local_copy_method"] = method
@@ -720,12 +774,14 @@ def _download_one(
                 "retries": retries,
                 "bytes_local_sources": record["size"],
             }
-        events.append({
-            "at": _utc_now(),
-            "path": relative,
-            "event": "local_source_mismatch",
-            "detail": f"{candidate['bundle_id']} failed re-verification; falling back",
-        })
+        events.append(
+            {
+                "at": _utc_now(),
+                "path": relative,
+                "event": "local_source_mismatch",
+                "detail": f"{candidate['bundle_id']} failed re-verification; falling back",
+            }
+        )
         _discard_payload_file(path, payload_dir)
 
     from .sources import get_provider, source_from_ledger
@@ -752,23 +808,27 @@ def _download_one(
         record = _verified_record(expected, path, "network", attempts)
         if record["verified_against_upstream"] is not False:
             break
-        events.append({
-            "at": _utc_now(),
-            "path": relative,
-            "event": "digest_mismatch",
-            "detail": f"download attempt {attempts} did not match pinned upstream digest",
-        })
+        events.append(
+            {
+                "at": _utc_now(),
+                "path": relative,
+                "event": "digest_mismatch",
+                "detail": f"download attempt {attempts} did not match pinned upstream digest",
+            }
+        )
         if retry == 0:
             retries += 1
             _discard_payload_file(path, payload_dir)
     assert record is not None
     if record["verified_against_upstream"] is False:
-        events.append({
-            "at": _utc_now(),
-            "path": relative,
-            "event": "persistent_digest_mismatch",
-            "detail": "second download mismatch; retained and marked as an upstream verification failure",
-        })
+        events.append(
+            {
+                "at": _utc_now(),
+                "path": relative,
+                "event": "persistent_digest_mismatch",
+                "detail": "second download mismatch; retained and marked as an upstream verification failure",
+            }
+        )
     return {
         "path": relative,
         "record": record,
@@ -831,16 +891,20 @@ def local_source_index(bundle_dir: Path, ledger: dict) -> dict[str, list[dict]]:
                 ):
                     continue
                 source = manifest_path.parent.joinpath(*relative.parts)
-                index.setdefault(digest, []).append({
-                    "bundle_id": bundle_id,
-                    "path": source,
-                })
+                index.setdefault(digest, []).append(
+                    {
+                        "bundle_id": bundle_id,
+                        "path": source,
+                    }
+                )
         except (json.JSONDecodeError, KeyError, OSError, TypeError):
             continue
     return index
 
 
-def _record_download_result(bundle_dir: Path, ledger: dict, session: dict, result: dict) -> None:
+def _record_download_result(
+    bundle_dir: Path, ledger: dict, session: dict, result: dict
+) -> None:
     """Main-thread commit point for a worker's completed file."""
     ledger["events"].extend(result["events"])
     ledger["files"][result["path"]] = result["record"]
@@ -896,7 +960,9 @@ def _transfer_small_files(
             else:
                 source = result["record"]["source"]
                 suffix = f" from {source}" if source.startswith("local:") else ""
-                progress(f"Verified {expected['path']} ({result['record']['size']} bytes){suffix}")
+                progress(
+                    f"Verified {expected['path']} ({result['record']['size']} bytes){suffix}"
+                )
                 _record_download_result(bundle_dir, ledger, session, result)
                 if stop_controller is not None:
                     try:
@@ -931,15 +997,23 @@ def transfer_all(
     with provider.transfer_session(payload_dir):
         for lane, assigned in groups:
             remaining = [
-                expected for expected in assigned
-                if (ledger["files"].get(expected["path"]) or {}).get("status") != "verified"
+                expected
+                for expected in assigned
+                if (ledger["files"].get(expected["path"]) or {}).get("status")
+                != "verified"
             ]
             if not remaining:
                 continue
             if lane is not None:
                 progress(f"Cooperative lane {lane + 1}/{shard[1]} ...")
-            small = [item for item in remaining if (item.get("size") or 0) < SMALL_FILE_LIMIT]
-            large = [item for item in remaining if (item.get("size") or 0) >= SMALL_FILE_LIMIT]
+            small = [
+                item for item in remaining if (item.get("size") or 0) < SMALL_FILE_LIMIT
+            ]
+            large = [
+                item
+                for item in remaining
+                if (item.get("size") or 0) >= SMALL_FILE_LIMIT
+            ]
             _transfer_small_files(
                 small,
                 bundle_dir,
@@ -974,13 +1048,16 @@ def transfer_all(
 
 
 def _same_transfer_set(left: dict, right: dict) -> bool:
-    if not all(left.get(key) == right.get(key) for key in (
-        "transfer_version",
-        "repo_id",
-        "repo_type",
-        "revision",
-        "expected",
-    )):
+    if not all(
+        left.get(key) == right.get(key)
+        for key in (
+            "transfer_version",
+            "repo_id",
+            "repo_type",
+            "revision",
+            "expected",
+        )
+    ):
         return False
     aliases = {"huggingface", "hf"}
     left_p = left.get("provider") or "huggingface"
@@ -1006,7 +1083,11 @@ def _merge_transfer_caches(
         if not source_cache.is_dir():
             continue
         for source in sorted(source_cache.rglob("*")):
-            if not source.is_file() or source.is_symlink() or source.name.endswith(".lock"):
+            if (
+                not source.is_file()
+                or source.is_symlink()
+                or source.name.endswith(".lock")
+            ):
                 continue
             relative = source.relative_to(source_cache)
             current = candidates.get(relative)
@@ -1073,7 +1154,9 @@ def assemble_partials(
 
     with transfer_lock(destination, progress=progress):
         if (destination / "manifest.json").is_file():
-            raise SystemExit(f"error: destination is already a registered bundle: {destination}")
+            raise SystemExit(
+                f"error: destination is already a registered bundle: {destination}"
+            )
         if ledger_path(destination).is_file():
             ledger = load_ledger(destination)
             if not _same_transfer_set(seed, ledger):
@@ -1116,11 +1199,13 @@ def assemble_partials(
                     _copy_local_file(source_file, destination_file)
                     copied_payload_files += 1
 
-                hosts = sorted({
-                    str(item.get("host"))
-                    for item in source_ledger.get("sessions", [])
-                    if item.get("host")
-                })
+                hosts = sorted(
+                    {
+                        str(item.get("host"))
+                        for item in source_ledger.get("sessions", [])
+                        if item.get("host")
+                    }
+                )
                 host_note = ", ".join(hosts) if hosts else "unknown host"
                 record_event(
                     ledger,
@@ -1148,7 +1233,9 @@ def assemble_partials(
                 finish_session(destination, ledger, session, "error")
             raise
 
-        plan = add_disk_preflight(destination, transfer_plan(destination_payload, ledger))
+        plan = add_disk_preflight(
+            destination, transfer_plan(destination_payload, ledger)
+        )
         progress(
             f"Assembled {copied_payload_files} payload files and {copied_cache_files} cache files "
             f"({copied_partial_bytes} partial bytes copied)"
@@ -1167,15 +1254,17 @@ def file_records(ledger: dict, payload_root: str) -> tuple[list[dict], list[str]
             raise LedgerError(f"cannot register: {expected['path']} is not verified")
         if state.get("verified_against_upstream") is False:
             mismatches.append(expected["path"])
-        records.append({
-            "path": f"{payload_root}/{expected['path']}",
-            "size": state["size"],
-            "sha256": state["sha256"],
-            "blake3": state.get("blake3"),
-            "upstream_lfs_sha256": expected.get("lfs_sha256"),
-            "upstream_git_sha1": expected.get("git_sha1"),
-            "verified_against_upstream": state.get("verified_against_upstream"),
-        })
+        records.append(
+            {
+                "path": f"{payload_root}/{expected['path']}",
+                "size": state["size"],
+                "sha256": state["sha256"],
+                "blake3": state.get("blake3"),
+                "upstream_lfs_sha256": expected.get("lfs_sha256"),
+                "upstream_git_sha1": expected.get("git_sha1"),
+                "verified_against_upstream": state.get("verified_against_upstream"),
+            }
+        )
     return records, mismatches
 
 
@@ -1187,15 +1276,19 @@ def transfer_summary(ledger: dict) -> dict:
         "completed": sessions[-1].get("ended") if sessions else None,
         "bytes_network": sum(int(s.get("bytes_network") or 0) for s in sessions),
         "bytes_adopted": sum(int(s.get("bytes_adopted") or 0) for s in sessions),
-        "bytes_local_sources": sum(int(s.get("bytes_local_sources") or 0) for s in sessions),
+        "bytes_local_sources": sum(
+            int(s.get("bytes_local_sources") or 0) for s in sessions
+        ),
         "retries": sum(int(s.get("retries") or 0) for s in sessions),
     }
 
 
 def local_mirrors(ledger: dict) -> list[str]:
     """Return stable local-source provenance for the registered manifest."""
-    return sorted({
-        state["source"]
-        for state in ledger.get("files", {}).values()
-        if str(state.get("source") or "").startswith("local:")
-    })
+    return sorted(
+        {
+            state["source"]
+            for state in ledger.get("files", {}).values()
+            if str(state.get("source") or "").startswith("local:")
+        }
+    )

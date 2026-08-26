@@ -88,7 +88,8 @@ def available_ram_bytes() -> int | None:
         if sys.platform == "darwin":
             out = subprocess.run(
                 ["sysctl", "-n", "hw.memsize"],
-                capture_output=True, text=True,
+                capture_output=True,
+                text=True,
             )
             if out.returncode == 0 and out.stdout.strip().isdigit():
                 return int(out.stdout.strip())
@@ -114,9 +115,7 @@ def engine_supports_payload(engine: str, manifest: dict) -> tuple[bool, str | No
         "mlx": "mlx-lm generate",
     }.get(engine, engine)
     if not arch:
-        return True, (
-            f"{engine} runner uses {loader}; payload architecture is unknown"
-        )
+        return True, (f"{engine} runner uses {loader}; payload architecture is unknown")
     if any(str(arch).endswith(suffix) for suffix in suffixes):
         return True, None
     return False, (
@@ -137,9 +136,13 @@ def preflight_run(
     issues: list[dict] = []
     ok, detail = engine_supports_payload(engine, manifest)
     if not ok:
-        issues.append({"level": "error", "code": "unsupported-architecture", "message": detail})
+        issues.append(
+            {"level": "error", "code": "unsupported-architecture", "message": detail}
+        )
     elif detail:
-        issues.append({"level": "warning", "code": "unknown-architecture", "message": detail})
+        issues.append(
+            {"level": "warning", "code": "unknown-architecture", "message": detail}
+        )
 
     needed = (manifest.get("runtime") or {}).get("estimated_min_ram_gb")
     have = available_ram_bytes() if ram_bytes is None else ram_bytes
@@ -149,24 +152,28 @@ def preflight_run(
         if ram_bytes is not None:
             ram_label = "RAM"
         if have_gb < needed:
-            issues.append({
-                "level": "error",
-                "code": "insufficient-ram",
-                "message": (
-                    f"this payload wants ~{needed} GB RAM (weights × 1.2); "
-                    f"this machine reports {have_gb:.1f} GB {ram_label}. "
-                    "Archive a GGUF subset or pass --ignore-preflight."
-                ),
-            })
+            issues.append(
+                {
+                    "level": "error",
+                    "code": "insufficient-ram",
+                    "message": (
+                        f"this payload wants ~{needed} GB RAM (weights × 1.2); "
+                        f"this machine reports {have_gb:.1f} GB {ram_label}. "
+                        "Archive a GGUF subset or pass --ignore-preflight."
+                    ),
+                }
+            )
         elif have_gb < needed * 1.3:
-            issues.append({
-                "level": "warning",
-                "code": "tight-ram",
-                "message": (
-                    f"this payload wants ~{needed} GB RAM; this machine reports "
-                    f"{have_gb:.1f} GB {ram_label} — likely tight."
-                ),
-            })
+            issues.append(
+                {
+                    "level": "warning",
+                    "code": "tight-ram",
+                    "message": (
+                        f"this payload wants ~{needed} GB RAM; this machine reports "
+                        f"{have_gb:.1f} GB {ram_label} — likely tight."
+                    ),
+                }
+            )
 
     if not env_exists:
         hint = ENGINES[engine].get("install_hint")
@@ -175,13 +182,19 @@ def preflight_run(
     if (
         engine == "transformers"
         and _platform_ok(ENGINES["mlx"])
-        and _engine_applies(ENGINES["mlx"], [f["path"] for f in manifest.get("inventory", {}).get("files", [])], "compatible")
+        and _engine_applies(
+            ENGINES["mlx"],
+            [f["path"] for f in manifest.get("inventory", {}).get("files", [])],
+            "compatible",
+        )
     ):
-        issues.append({
-            "level": "info",
-            "code": "mlx-available",
-            "message": "Apple Silicon: --engine mlx is often faster and a smaller install",
-        })
+        issues.append(
+            {
+                "level": "info",
+                "code": "mlx-available",
+                "message": "Apple Silicon: --engine mlx is often faster and a smaller install",
+            }
+        )
     return issues
 
 
@@ -198,6 +211,7 @@ def _emit_preflight(issues: list[dict], progress, *, ignore: bool) -> None:
 
 
 # ---------------------------------------------------------------- paths & keys
+
 
 def runtime_root(bundle_dir: Path) -> Path:
     """Envs live next to the vault that holds the bundle (vault/<name>/<rev>),
@@ -224,6 +238,7 @@ def _runner_path(engine: str) -> Path:
 
 
 # ------------------------------------------------------------ engine selection
+
 
 def _matches(inventory_paths: list[str], patterns: list[str]) -> list[str]:
     return sorted({p for p in inventory_paths for pat in patterns if fnmatch(p, pat)})
@@ -264,7 +279,9 @@ def select_engine(manifest: dict, requested: str | None) -> str:
     detected = detect_engines(inventory_paths)
     if requested:
         if requested not in ENGINES:
-            raise SystemExit(f"error: unknown engine {requested!r} (known: {', '.join(ENGINES)})")
+            raise SystemExit(
+                f"error: unknown engine {requested!r} (known: {', '.join(ENGINES)})"
+            )
         spec = ENGINES[requested]
         if not _platform_ok(spec):
             where = ", ".join(spec.get("platforms") or [])
@@ -274,7 +291,9 @@ def select_engine(manifest: dict, requested: str | None) -> str:
                 f"error: engine {requested!r} is supported on {where or 'no platforms'}{extra} "
                 f"(this OS is {sys.platform}, machine {platform.machine()})"
             )
-        if requested in detected or _engine_applies(spec, inventory_paths, "compatible"):
+        if requested in detected or _engine_applies(
+            spec, inventory_paths, "compatible"
+        ):
             return requested
         raise SystemExit(
             f"error: engine {requested!r} does not match this payload "
@@ -341,16 +360,21 @@ def resolve_requirements(engine: str, payload_root: Path) -> list[str]:
     reqs = list(ENGINES[engine]["requirements"])
     if engine == "transformers":
         try:
-            config = json.loads((payload_root / "config.json").read_text(encoding="utf-8"))
+            config = json.loads(
+                (payload_root / "config.json").read_text(encoding="utf-8")
+            )
         except (OSError, json.JSONDecodeError):
             config = {}
         declared = config.get("transformers_version")
         if declared:
-            reqs = [f"transformers>={declared}" if r == "transformers" else r for r in reqs]
+            reqs = [
+                f"transformers>={declared}" if r == "transformers" else r for r in reqs
+            ]
     return sorted(reqs)
 
 
 # ------------------------------------------------------------- env management
+
 
 def _pick_python(explicit: str | None) -> str:
     return explicit or os.environ.get("DARSAY_PYTHON") or sys.executable
@@ -360,10 +384,13 @@ def _python_version(python_exe: str) -> tuple[str, str]:
     """(full version, major.minor) of an interpreter, by asking it."""
     out = subprocess.run(
         [python_exe, "-c", "import sys; print('%d.%d.%d' % sys.version_info[:3])"],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
     )
     if out.returncode != 0:
-        raise SystemExit(f"error: cannot run python interpreter {python_exe!r}: {out.stderr.strip()}")
+        raise SystemExit(
+            f"error: cannot run python interpreter {python_exe!r}: {out.stderr.strip()}"
+        )
     full = out.stdout.strip()
     return full, full.rsplit(".", 1)[0]
 
@@ -375,16 +402,31 @@ def _installer() -> tuple[str, str | None]:
 
 def _installed_packages(python_bin: Path) -> dict[str, str]:
     out = subprocess.run(
-        [str(python_bin), "-m", "pip", "list", "--format", "json", "--disable-pip-version-check"],
-        capture_output=True, text=True,
+        [
+            str(python_bin),
+            "-m",
+            "pip",
+            "list",
+            "--format",
+            "json",
+            "--disable-pip-version-check",
+        ],
+        capture_output=True,
+        text=True,
     )
     if out.returncode != 0:
         return {}
     return {p["name"]: p["version"] for p in json.loads(out.stdout)}
 
 
-def ensure_env(engine: str, requirements: list[str], python: str | None,
-               root: Path, force: bool = False, progress=print) -> dict:
+def ensure_env(
+    engine: str,
+    requirements: list[str],
+    python: str | None,
+    root: Path,
+    force: bool = False,
+    progress=print,
+) -> dict:
     """Create (or reuse) the shared env for (engine, python, requirements).
     Returns the env record; on install failure removes the half-built env and
     exits non-zero — a broken env is never registered."""
@@ -398,7 +440,9 @@ def ensure_env(engine: str, requirements: list[str], python: str | None,
 
     if marker.is_file() and not force:
         record = json.loads(marker.read_text(encoding="utf-8"))
-        progress(f"Reusing env {key} ({record['python']}, {len(record['packages'])} packages)")
+        progress(
+            f"Reusing env {key} ({record['python']}, {len(record['packages'])} packages)"
+        )
         return record
 
     if env_dir.exists():  # half-built leftover, or --force
@@ -411,16 +455,29 @@ def ensure_env(engine: str, requirements: list[str], python: str | None,
     try:
         if installer == "uv":
             _run_or_die([uv_path, "venv", "--python", python_exe, str(env_dir)])
-            _run_or_die([uv_path, "pip", "install", "--python", str(env_python(env_dir))] + requirements)
+            _run_or_die(
+                [uv_path, "pip", "install", "--python", str(env_python(env_dir))]
+                + requirements
+            )
         else:
             _run_or_die([python_exe, "-m", "venv", str(env_dir)])
-            _run_or_die([str(env_python(env_dir)), "-m", "pip", "install",
-                         "--disable-pip-version-check"] + requirements)
+            _run_or_die(
+                [
+                    str(env_python(env_dir)),
+                    "-m",
+                    "pip",
+                    "install",
+                    "--disable-pip-version-check",
+                ]
+                + requirements
+            )
     except SystemExit:
         shutil.rmtree(env_dir, ignore_errors=True)
         progress(f"Install failed; removed {env_dir}.")
-        progress("Hint: a different interpreter may have wheels — retry with "
-                 "--python /path/to/python3.x (or set $DARSAY_PYTHON).")
+        progress(
+            "Hint: a different interpreter may have wheels — retry with "
+            "--python /path/to/python3.x (or set $DARSAY_PYTHON)."
+        )
         raise
 
     record = {
@@ -449,26 +506,34 @@ def _run_or_die(cmd: list[str]) -> None:
 
 # ---------------------------------------------------------- runner invocation
 
+
 def _offline_env() -> dict:
     env = dict(os.environ)
-    env.update({
-        "HF_HUB_OFFLINE": "1",           # a passing run proves the payload is self-sufficient
-        "TRANSFORMERS_OFFLINE": "1",
-        "TOKENIZERS_PARALLELISM": "false",
-        "PYTHONUNBUFFERED": "1",
-    })
+    env.update(
+        {
+            "HF_HUB_OFFLINE": "1",  # a passing run proves the payload is self-sufficient
+            "TRANSFORMERS_OFFLINE": "1",
+            "TOKENIZERS_PARALLELISM": "false",
+            "PYTHONUNBUFFERED": "1",
+        }
+    )
     return env
 
 
-def _invoke_runner(env_record: dict, engine: str, runner_args: list[str],
-                   timeout: float | None = None) -> tuple[int, dict | None]:
+def _invoke_runner(
+    env_record: dict, engine: str, runner_args: list[str], timeout: float | None = None
+) -> tuple[int, dict | None]:
     """Run the engine's standalone script inside the env; stdio is inherited so
     the user sees progress live, the JSON result comes back via a temp file."""
     with tempfile.NamedTemporaryFile("r", suffix=".json", delete=False) as tf:
         json_out = tf.name
     try:
-        cmd = [env_record["python_executable"], str(_runner_path(engine)),
-               "--json-out", json_out] + runner_args
+        cmd = [
+            env_record["python_executable"],
+            str(_runner_path(engine)),
+            "--json-out",
+            json_out,
+        ] + runner_args
         sys.stdout.flush()  # keep progress lines ordered before the runner's inherited stdout
         try:
             rc = subprocess.run(cmd, env=_offline_env(), timeout=timeout).returncode
@@ -485,6 +550,7 @@ def _invoke_runner(env_record: dict, engine: str, runner_args: list[str],
 
 # ------------------------------------------------------------------- hydrate
 
+
 def load_hydration(bundle_dir: Path) -> dict | None:
     path = bundle_dir / HYDRATION_FILE
     if not path.is_file():
@@ -494,12 +560,20 @@ def load_hydration(bundle_dir: Path) -> dict | None:
 
 def write_hydration(bundle_dir: Path, record: dict) -> None:
     (bundle_dir / HYDRATION_FILE).write_text(
-        json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+        json.dumps(record, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
-def hydrate_bundle(bundle_dir: Path, engine: str | None = None, python: str | None = None,
-                   weights: str | None = None, force: bool = False, dry_run: bool = False,
-                   ignore_preflight: bool = False, progress=print) -> dict:
+def hydrate_bundle(
+    bundle_dir: Path,
+    engine: str | None = None,
+    python: str | None = None,
+    weights: str | None = None,
+    force: bool = False,
+    dry_run: bool = False,
+    ignore_preflight: bool = False,
+    progress=print,
+) -> dict:
     from .archiver import load_manifest, utc_now, write_manifest
     from .schema import payload_root as manifest_payload_root
 
@@ -522,7 +596,9 @@ def hydrate_bundle(bundle_dir: Path, engine: str | None = None, python: str | No
         if candidate.is_file():
             prev_marker = candidate
     if prev_marker is not None:
-        requirements = json.loads(prev_marker.read_text(encoding="utf-8"))["requirements"]
+        requirements = json.loads(prev_marker.read_text(encoding="utf-8"))[
+            "requirements"
+        ]
     else:
         requirements = install_spec
     key = _env_key(chosen, py_minor, requirements)
@@ -538,21 +614,34 @@ def hydrate_bundle(bundle_dir: Path, engine: str | None = None, python: str | No
             progress(f"  weights:      {weights_path}")
         progress(f"  requirements: {', '.join(requirements)}")
         progress(f"  python:       {python_exe} ({py_full})")
-        progress(f"  env:          {env_dir} ({'exists, will reuse' if env_exists else 'will create'})")
+        progress(
+            f"  env:          {env_dir} ({'exists, will reuse' if env_exists else 'will create'})"
+        )
         progress(f"  installer:    {_installer()[0]}")
         progress(f"  then:         probe env offline, write {HYDRATION_FILE}")
-        return {"dry_run": True, "engine": chosen, "env_key": key, "env_exists": env_exists,
-                "requirements": requirements, "preflight": issues,
-                "rebuild_from_pins": bool(pinned) and not env_exists}
+        return {
+            "dry_run": True,
+            "engine": chosen,
+            "env_key": key,
+            "env_exists": env_exists,
+            "requirements": requirements,
+            "preflight": issues,
+            "rebuild_from_pins": bool(pinned) and not env_exists,
+        }
 
-    env_record = ensure_env(chosen, requirements, python, root, force=force, progress=progress)
+    env_record = ensure_env(
+        chosen, requirements, python, root, force=force, progress=progress
+    )
 
     progress("Probing env against the payload (offline) ...")
     probe_args = ["--probe", "--model-dir", str(payload_root)]
     if weights_path:
         probe_args += ["--weights", str(bundle_dir / weights_path)]
     rc, probe = _invoke_runner(env_record, chosen, probe_args)
-    probe = probe or {"status": "fail", "error": f"probe produced no result (exit {rc})"}
+    probe = probe or {
+        "status": "fail",
+        "error": f"probe produced no result (exit {rc})",
+    }
     progress(f"  probe: {probe.get('status')}")
 
     now = utc_now()
@@ -562,8 +651,18 @@ def hydrate_bundle(bundle_dir: Path, engine: str | None = None, python: str | No
         "engine": chosen,
         "weights": weights_path,
         "hydrated_at": now,
-        "env": {k: env_record[k] for k in ("key", "path", "python", "python_executable",
-                                           "created_at", "installer", "requirements")},
+        "env": {
+            k: env_record[k]
+            for k in (
+                "key",
+                "path",
+                "python",
+                "python_executable",
+                "created_at",
+                "installer",
+                "requirements",
+            )
+        },
         "engine_packages": _relevant_packages(env_record["packages"]),
         "probe": {"at": now, **probe},
         "runs": previous.get("runs", []),
@@ -574,30 +673,57 @@ def hydrate_bundle(bundle_dir: Path, engine: str | None = None, python: str | No
     write_manifest(bundle_dir, manifest)
 
     if probe.get("status") != "pass":
-        progress(f"Hydration recorded with a FAILING probe — see {bundle_dir / HYDRATION_FILE}")
+        progress(
+            f"Hydration recorded with a FAILING probe — see {bundle_dir / HYDRATION_FILE}"
+        )
     else:
         progress(f"Hydrated. Next: darsay run {manifest['bundle_id']}")
     return record
 
 
-_RELEVANT = ("torch", "transformers", "tokenizers", "safetensors", "accelerate",
-             "llama_cpp_python", "llama-cpp-python", "numpy", "mlx", "mlx-lm")
+_RELEVANT = (
+    "torch",
+    "transformers",
+    "tokenizers",
+    "safetensors",
+    "accelerate",
+    "llama_cpp_python",
+    "llama-cpp-python",
+    "numpy",
+    "mlx",
+    "mlx-lm",
+)
 
 
 def _relevant_packages(packages: dict[str, str]) -> dict[str, str]:
-    return {k: v for k, v in packages.items() if k.lower().replace("_", "-") in
-            {r.replace("_", "-") for r in _RELEVANT}}
+    return {
+        k: v
+        for k, v in packages.items()
+        if k.lower().replace("_", "-") in {r.replace("_", "-") for r in _RELEVANT}
+    }
 
 
 # ----------------------------------------------------------------------- run
 
-def run_bundle(bundle_dir: Path, prompt: str | None = None, engine: str | None = None,
-               max_new_tokens: int = 256, raw: bool = False, sample: bool = False,
-               device: str = "auto", dtype: str = "auto", trust_remote_code: bool = False,
-               seed: int | None = None, timeout: float | None = None,
-               python: str | None = None, weights: str | None = None,
-               ignore_preflight: bool = False, repl: bool = False,
-               progress=print) -> dict:
+
+def run_bundle(
+    bundle_dir: Path,
+    prompt: str | None = None,
+    engine: str | None = None,
+    max_new_tokens: int = 256,
+    raw: bool = False,
+    sample: bool = False,
+    device: str = "auto",
+    dtype: str = "auto",
+    trust_remote_code: bool = False,
+    seed: int | None = None,
+    timeout: float | None = None,
+    python: str | None = None,
+    weights: str | None = None,
+    ignore_preflight: bool = False,
+    repl: bool = False,
+    progress=print,
+) -> dict:
     from .archiver import load_manifest, utc_now, write_manifest
 
     hydration = load_hydration(bundle_dir)
@@ -610,12 +736,18 @@ def run_bundle(bundle_dir: Path, prompt: str | None = None, engine: str | None =
     if stale:
         progress("Bundle not hydrated for this configuration — hydrating first ...")
         hydration = hydrate_bundle(
-            bundle_dir, engine=engine, python=python, weights=weights,
-            ignore_preflight=ignore_preflight, progress=progress,
+            bundle_dir,
+            engine=engine,
+            python=python,
+            weights=weights,
+            ignore_preflight=ignore_preflight,
+            progress=progress,
         )
     else:
         issues = preflight_run(
-            load_manifest(bundle_dir), hydration["engine"], env_exists=True,
+            load_manifest(bundle_dir),
+            hydration["engine"],
+            env_exists=True,
         )
         _emit_preflight(issues, progress, ignore=ignore_preflight)
 
@@ -627,8 +759,14 @@ def run_bundle(bundle_dir: Path, prompt: str | None = None, engine: str | None =
         prompt = prompt if prompt is not None else DEFAULT_PROMPT
 
     payload_dir = bundle_dir / manifest_payload_root(load_manifest(bundle_dir))
-    runner_args = ["--model-dir", str(payload_dir),
-                   "--max-new-tokens", str(max_new_tokens), "--device", device]
+    runner_args = [
+        "--model-dir",
+        str(payload_dir),
+        "--max-new-tokens",
+        str(max_new_tokens),
+        "--device",
+        device,
+    ]
     if prompt:
         runner_args += ["--prompt", prompt]
     if repl:
@@ -648,7 +786,10 @@ def run_bundle(bundle_dir: Path, prompt: str | None = None, engine: str | None =
 
     progress(f"Running {chosen} inference (offline) ...\n")
     rc, result = _invoke_runner(env_record, chosen, runner_args, timeout=timeout)
-    result = result or {"status": "fail", "error": f"runner produced no result (exit {rc})"}
+    result = result or {
+        "status": "fail",
+        "error": f"runner produced no result (exit {rc})",
+    }
     ok = rc == 0 and result.get("status") == "pass"
 
     now = utc_now()
@@ -701,7 +842,9 @@ def run_bundle(bundle_dir: Path, prompt: str | None = None, engine: str | None =
         if extras:
             line += f" ({', '.join(extras)})"
         progress(line)
-        progress(f"Recorded in {bundle_dir / HYDRATION_FILE} and manifest runtime.tested_hardware")
+        progress(
+            f"Recorded in {bundle_dir / HYDRATION_FILE} and manifest runtime.tested_hardware"
+        )
     else:
         progress(f"Run FAILED: {run_record['error'] or 'see runner output above'}")
         progress(f"Recorded in {bundle_dir / HYDRATION_FILE}")
@@ -711,8 +854,11 @@ def run_bundle(bundle_dir: Path, prompt: str | None = None, engine: str | None =
 def _chip() -> str | None:
     try:
         if sys.platform == "darwin":
-            out = subprocess.run(["sysctl", "-n", "machdep.cpu.brand_string"],
-                                 capture_output=True, text=True)
+            out = subprocess.run(
+                ["sysctl", "-n", "machdep.cpu.brand_string"],
+                capture_output=True,
+                text=True,
+            )
             return out.stdout.strip() or None
         if sys.platform.startswith("linux"):
             for line in Path("/proc/cpuinfo").read_text().splitlines():
@@ -723,7 +869,9 @@ def _chip() -> str | None:
     return None
 
 
-def _record_tested_hardware(manifest: dict, run_record: dict, result: dict, now: str) -> None:
+def _record_tested_hardware(
+    manifest: dict, run_record: dict, result: dict, now: str
+) -> None:
     """One entry per (host, device, engine), refreshed on each successful run."""
     entry = {
         "at": now,
@@ -738,12 +886,16 @@ def _record_tested_hardware(manifest: dict, run_record: dict, result: dict, now:
         "via": "darsay run",
     }
     tested = manifest["runtime"].get("tested_hardware") or []
-    keyfn = lambda e: (e.get("host"), e.get("device"), e.get("engine"))
+
+    def keyfn(e):
+        return (e.get("host"), e.get("device"), e.get("engine"))
+
     tested = [e for e in tested if keyfn(e) != keyfn(entry)] + [entry]
     manifest["runtime"]["tested_hardware"] = tested
 
 
 # ------------------------------------------------------------- env lifecycle
+
 
 def dehydrate_bundle(bundle_dir: Path, progress=print) -> None:
     path = bundle_dir / HYDRATION_FILE
@@ -771,14 +923,16 @@ def list_envs(vault: Path, progress=print) -> list[dict]:
     envs = []
     for marker in sorted(root.glob("envs/*/env.json")):
         record = json.loads(marker.read_text(encoding="utf-8"))
-        envs.append({
-            "key": record["key"],
-            "path": str(marker.parent),
-            "python": record["python"],
-            "size_bytes": _dir_size(marker.parent),
-            "created_at": record["created_at"],
-            "used_by": refs.get(record["key"], []),
-        })
+        envs.append(
+            {
+                "key": record["key"],
+                "path": str(marker.parent),
+                "python": record["python"],
+                "size_bytes": _dir_size(marker.parent),
+                "created_at": record["created_at"],
+                "used_by": refs.get(record["key"], []),
+            }
+        )
     return envs
 
 
@@ -788,7 +942,9 @@ def prune_envs(vault: Path, progress=print) -> int:
     freed = 0
     for env in list_envs(vault):
         if not env["used_by"]:
-            progress(f"Removing unreferenced env {env['key']} ({human_size(env['size_bytes'])})")
+            progress(
+                f"Removing unreferenced env {env['key']} ({human_size(env['size_bytes'])})"
+            )
             shutil.rmtree(env["path"])
             freed += env["size_bytes"]
     if freed:

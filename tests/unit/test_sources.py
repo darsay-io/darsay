@@ -5,7 +5,12 @@ from pathlib import Path
 
 import pytest
 
-from darsay.sources import get_provider, parse_source, provider_names, source_from_ledger
+from darsay.sources import (
+    get_provider,
+    parse_source,
+    provider_names,
+    source_from_ledger,
+)
 
 SRC = Path(__file__).resolve().parents[2] / "src" / "darsay"
 _PLUGIN_CONSUMERS = (

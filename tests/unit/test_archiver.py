@@ -26,7 +26,9 @@ def test_parse_repo_ref_model_and_dataset():
 
 def test_hub_url():
     assert hub_url("Qwen/Qwen3-0.6B") == "https://huggingface.co/Qwen/Qwen3-0.6B"
-    assert hub_url("owner/name", "dataset") == "https://huggingface.co/datasets/owner/name"
+    assert (
+        hub_url("owner/name", "dataset") == "https://huggingface.co/datasets/owner/name"
+    )
 
 
 def test_bundle_name_for_stable_huggingface_layout():
@@ -129,7 +131,9 @@ def test_load_manifest_missing_kind_is_implied_on_1x(tmp_path):
 
 
 def test_write_manifest_preserves_unknown_top_level(tmp_path):
-    write_manifest(tmp_path, _minimal_manifest(future_field=1, identity={"model_name": "toy"}))
+    write_manifest(
+        tmp_path, _minimal_manifest(future_field=1, identity={"model_name": "toy"})
+    )
     raw = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
     assert raw["future_field"] == 1
     keys = list(raw)

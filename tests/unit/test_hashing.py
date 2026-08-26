@@ -38,10 +38,16 @@ def test_hash_file_blake3_optional(tmp_path):
 
 def test_bundle_hash_is_sorted_and_deterministic():
     a = bundle_hash(
-        [{"path": "model/b.bin", "sha256": "bb"}, {"path": "model/a.bin", "sha256": "aa"}]
+        [
+            {"path": "model/b.bin", "sha256": "bb"},
+            {"path": "model/a.bin", "sha256": "aa"},
+        ]
     )
     b = bundle_hash(
-        [{"path": "model/a.bin", "sha256": "aa"}, {"path": "model/b.bin", "sha256": "bb"}]
+        [
+            {"path": "model/a.bin", "sha256": "aa"},
+            {"path": "model/b.bin", "sha256": "bb"},
+        ]
     )
     assert a["value"] == b["value"]
     assert a["algorithm"] == "sha256-of-sorted-sha256-lines"

@@ -22,7 +22,9 @@ except ImportError:
     HAVE_BLAKE3 = False
 
 
-def hash_file(path: Path, with_blake3: bool = True, with_git_sha1: bool = False) -> dict:
+def hash_file(
+    path: Path, with_blake3: bool = True, with_git_sha1: bool = False
+) -> dict:
     """Hash one file in a single pass. Returns {"sha256": ..., "blake3": ...?, "git_sha1": ...?}."""
     sha256 = hashlib.sha256()
     b3 = _blake3.blake3() if (with_blake3 and HAVE_BLAKE3) else None
@@ -64,7 +66,10 @@ def iter_payload_files(payload_root: Path):
 
 def bundle_hash(file_records: list[dict], payload_root: str = "model") -> dict:
     """Deterministic hash over the payload: sha256 of 'sha256  path' lines, sorted by path."""
-    lines = [f"{r['sha256']}  {r['path']}" for r in sorted(file_records, key=lambda r: r["path"])]
+    lines = [
+        f"{r['sha256']}  {r['path']}"
+        for r in sorted(file_records, key=lambda r: r["path"])
+    ]
     digest = hashlib.sha256(("\n".join(lines) + "\n").encode("utf-8")).hexdigest()
     return {
         "algorithm": "sha256-of-sorted-sha256-lines",

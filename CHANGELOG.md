@@ -49,6 +49,9 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
   [concepts](docs/CONCEPTS.md), and [examples cookbook](examples/README.md).
   A personal Homebrew tap lives at
   [`jeremynorris/homebrew-darsay`](https://github.com/jeremynorris/homebrew-darsay).
+- Ruff as the project linter and formatter. The `dev` extra installs it;
+  CI runs `ruff check` and `ruff format --check`. Config is `[tool.ruff]`
+  in `pyproject.toml`.
 
 ### Changed
 

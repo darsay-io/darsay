@@ -45,7 +45,10 @@ def test_iter_bundle_dirs_finds_manifest_and_ledger(tmp_path):
 
 def test_bundle_id_for_manifest_and_partial(tmp_path):
     _write_bundle(tmp_path, "acme--toy", "aaaaaaaaaaaa", "acme--toy@aaaaaaaaaaaa")
-    assert bundle_id_for(tmp_path / "acme--toy" / "aaaaaaaaaaaa") == "acme--toy@aaaaaaaaaaaa"
+    assert (
+        bundle_id_for(tmp_path / "acme--toy" / "aaaaaaaaaaaa")
+        == "acme--toy@aaaaaaaaaaaa"
+    )
     orphan = tmp_path / "acme--other" / "bbbbbbbbbbbb"
     orphan.mkdir(parents=True)
     assert bundle_id_for(orphan) == "acme--other@bbbbbbbbbbbb"
@@ -117,22 +120,24 @@ def test_bundle_records_source_address_and_remaining(tmp_path):
     bundle = tmp_path / "acme--toy" / "aaaaaaaaaaaa"
     bundle.mkdir(parents=True)
     (bundle / "manifest.json").write_text(
-        json.dumps({
-            "bundle_id": "acme--toy@aaaaaaaaaaaa",
-            "artifact_type": "model",
-            "licensing": {"spdx_id": "mit"},
-            "inventory": {"total_size_bytes": 10},
-            "security": {"integrity_status": "verified-against-upstream"},
-            "archive": {"date_archived": "2026-08-01T00:00:00+00:00"},
-            "source": {
-                "origin": "huggingface",
-                "provider": "huggingface",
-                "address": "huggingface:acme/toy",
-                "repo_id": "acme/toy",
-                "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "revision_ref": "main",
-            },
-        }),
+        json.dumps(
+            {
+                "bundle_id": "acme--toy@aaaaaaaaaaaa",
+                "artifact_type": "model",
+                "licensing": {"spdx_id": "mit"},
+                "inventory": {"total_size_bytes": 10},
+                "security": {"integrity_status": "verified-against-upstream"},
+                "archive": {"date_archived": "2026-08-01T00:00:00+00:00"},
+                "source": {
+                    "origin": "huggingface",
+                    "provider": "huggingface",
+                    "address": "huggingface:acme/toy",
+                    "repo_id": "acme/toy",
+                    "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                    "revision_ref": "main",
+                },
+            }
+        ),
         encoding="utf-8",
     )
     rows = bundle_records(tmp_path)
@@ -146,13 +151,15 @@ def test_resolve_miss_hints_catalog(tmp_path):
     cat = tmp_path / "catalogs" / "summer"
     cat.mkdir(parents=True)
     (cat / "catalog.json").write_text(
-        json.dumps({
-            "catalog_schema_version": "1.0.0",
-            "kind": "darsay.catalog",
-            "id": "summer",
-            "title": "summer",
-            "entries": [],
-        }),
+        json.dumps(
+            {
+                "catalog_schema_version": "1.0.0",
+                "kind": "darsay.catalog",
+                "id": "summer",
+                "title": "summer",
+                "entries": [],
+            }
+        ),
         encoding="utf-8",
     )
     with pytest.raises(SystemExit, match="darsay list summer") as exc:

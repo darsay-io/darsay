@@ -79,7 +79,9 @@ def bundle_name_for(repo_id: str, repo_type: str = "model") -> str:
     return parse_source(loc).bundle_name
 
 
-def bundle_dir_for(vault: Path, source: str | SourceRef, revision: str, repo_type: str | None = None) -> Path:
+def bundle_dir_for(
+    vault: Path, source: str | SourceRef, revision: str, repo_type: str | None = None
+) -> Path:
     """Return the bundle directory for a source + pinned revision.
 
     Pass a SourceRef or source ref. ``repo_type`` qualifies a bare locator
@@ -102,7 +104,9 @@ def write_manifest(bundle_dir: Path, manifest: dict) -> None:
         if key not in MANIFEST_TOP_KEYS and not str(key).startswith("_"):
             payload[key] = value
     path = bundle_dir / "manifest.json"
-    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    path.write_text(
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 def load_manifest(bundle_dir: Path) -> dict:
@@ -120,7 +124,9 @@ def load_manifest(bundle_dir: Path) -> dict:
         raise SystemExit(f"error: unreadable manifest at {path}: not a JSON object")
     version = data.get("schema_version")
     if not version:
-        raise SystemExit(f"error: unreadable manifest at {path}: schema_version missing")
+        raise SystemExit(
+            f"error: unreadable manifest at {path}: schema_version missing"
+        )
     try:
         major = parse_schema_major(version)
     except ValueError:
@@ -192,8 +198,8 @@ def archive(
 ) -> Path | None:
     """Archive a source through pin → reconcile → transfer → register."""
     from .transfer import (
-        LedgerError,
         CleanStop,
+        LedgerError,
         PartialTransfer,
         StopController,
         add_disk_preflight,
@@ -202,11 +208,11 @@ def archive(
         finish_session,
         load_ledger,
         new_ledger,
+        print_plan,
+        print_shard_plan,
         reconcile,
         record_event,
         save_ledger,
-        print_plan,
-        print_shard_plan,
         transfer_all,
         transfer_lock,
         transfer_plan,
@@ -228,7 +234,9 @@ def archive(
         snapshot = None
     else:
         pin_revision = orphan_dir.name if orphan_dir is not None else revision
-        progress(f"Resolving {ref.canonical} @ {pin_revision or provider.default_revision} ...")
+        progress(
+            f"Resolving {ref.canonical} @ {pin_revision or provider.default_revision} ..."
+        )
         try:
             snapshot = provider.pin(ref, pin_revision, require_access=True)
         except SourceGatedError as exc:
@@ -249,7 +257,10 @@ def archive(
                 existing = json.loads(manifest_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError, TypeError):
                 existing = {}
-            if isinstance(existing, dict) and existing.get("artifact_type") == "dataset":
+            if (
+                isinstance(existing, dict)
+                and existing.get("artifact_type") == "dataset"
+            ):
                 next_hint = f"`darsay info {bundle_id}`"
             raise SystemExit(
                 f"error: bundle already exists: {bundle_dir}\n"
@@ -322,7 +333,9 @@ def archive(
                 if shard is not None:
                     print_shard_plan(ledger, shard, progress=progress)
                 if plan["disk"]["verdict"] == "insufficient":
-                    progress("WARNING: disk preflight is insufficient; transfer may end with ENOSPC")
+                    progress(
+                        "WARNING: disk preflight is insufficient; transfer may end with ENOSPC"
+                    )
                 stop_controller.check(session)
                 plan = transfer_all(
                     bundle_dir,
@@ -335,13 +348,17 @@ def archive(
                     shard=shard,
                 )
                 if not plan["complete"]:
-                    raise RuntimeError("transfer ended without verifying every pinned file")
+                    raise RuntimeError(
+                        "transfer ended without verifying every pinned file"
+                    )
 
                 finish_session(bundle_dir, ledger, session, "complete")
                 session_finished = True
                 return _register_bundle(bundle_dir, payload_dir, ledger, progress)
             except CleanStop as stop:
-                plan = add_disk_preflight(bundle_dir, transfer_plan(payload_dir, ledger))
+                plan = add_disk_preflight(
+                    bundle_dir, transfer_plan(payload_dir, ledger)
+                )
                 if plan["complete"]:
                     finish_session(bundle_dir, ledger, session, "complete")
                     session_finished = True
@@ -350,7 +367,9 @@ def archive(
                 finish_session(bundle_dir, ledger, session, stop.reason)
                 session_finished = True
                 print_plan(plan, progress=progress)
-                raise PartialTransfer(bundle_dir, stop.reason, stop.detail, plan)
+                raise PartialTransfer(
+                    bundle_dir, stop.reason, stop.detail, plan
+                ) from stop
             except SourceGatedError as exc:
                 record_event(
                     ledger,
@@ -380,9 +399,12 @@ def archive_model(
     return archive(loc, revision=revision, vault=vault, force=force, **kwargs)
 
 
-def _register_bundle(bundle_dir: Path, payload_dir: Path, ledger: dict, progress) -> Path:
+def _register_bundle(
+    bundle_dir: Path, payload_dir: Path, ledger: dict, progress
+) -> Path:
     """Run completion-time extraction and register from pinned ledger facts."""
-    from .transfer import file_records as ledger_file_records, local_mirrors, transfer_summary
+    from .transfer import file_records as ledger_file_records
+    from .transfer import local_mirrors, transfer_summary
 
     source = source_from_ledger(ledger)
     provider = get_provider(source.provider)
@@ -484,8 +506,11 @@ def _register_bundle(bundle_dir: Path, payload_dir: Path, ledger: dict, progress
             },
             "files": file_records,
         },
-        **({"dataset_metadata": dataset_metadata} if repo_type == "dataset"
-           else {"model_metadata": model_metadata, "runtime": runtime}),
+        **(
+            {"dataset_metadata": dataset_metadata}
+            if repo_type == "dataset"
+            else {"model_metadata": model_metadata, "runtime": runtime}
+        ),
         "validation": {
             "checksum_verification": {
                 "at": now,
@@ -495,9 +520,14 @@ def _register_bundle(bundle_dir: Path, payload_dir: Path, ledger: dict, progress
                 "upstream_mismatches": upstream_mismatches,
             },
             "completeness": completeness,
-            "smoke_tests": ({"structure": {"status": "not-run"}} if repo_type == "dataset"
-                            else {"tokenizer": {"status": "not-run"},
-                                  "inference": {"status": "not-run"}}),
+            "smoke_tests": (
+                {"structure": {"status": "not-run"}}
+                if repo_type == "dataset"
+                else {
+                    "tokenizer": {"status": "not-run"},
+                    "inference": {"status": "not-run"},
+                }
+            ),
         },
         "relationships": relationships,
         "archive": {
@@ -512,7 +542,9 @@ def _register_bundle(bundle_dir: Path, payload_dir: Path, ledger: dict, progress
             "last_accessed": now,
         },
         "security": {
-            "integrity_status": "verified-against-upstream" if not upstream_mismatches else "upstream-mismatch",
+            "integrity_status": "verified-against-upstream"
+            if not upstream_mismatches
+            else "upstream-mismatch",
             "unexpected_changes": [],
             "trust_level": "unreviewed",
             "reviewed_by": None,
@@ -532,14 +564,25 @@ def _register_bundle(bundle_dir: Path, payload_dir: Path, ledger: dict, progress
     _write_curation_template(bundle_dir, manifest)
 
     from .readme_gen import write_bundle_readme
+
     write_bundle_readme(bundle_dir, manifest)
 
     from .verify import write_verification_report
-    write_verification_report(bundle_dir, manifest["validation"]["checksum_verification"], completeness, first_run=True)
 
-    progress(f"Archived {bundle_id}: {len(file_records)} files, {total_size / 1024**2:.1f} MiB")
+    write_verification_report(
+        bundle_dir,
+        manifest["validation"]["checksum_verification"],
+        completeness,
+        first_run=True,
+    )
+
+    progress(
+        f"Archived {bundle_id}: {len(file_records)} files, {total_size / 1024**2:.1f} MiB"
+    )
     if upstream_mismatches:
-        progress(f"WARNING: {len(upstream_mismatches)} files did not match upstream checksums!")
+        progress(
+            f"WARNING: {len(upstream_mismatches)} files did not match upstream checksums!"
+        )
     return bundle_dir
 
 
@@ -548,7 +591,7 @@ def _write_curation_template(bundle_dir: Path, manifest: dict) -> None:
     if path.exists():
         return
     path.write_text(
-        f"""# Curation notes — {manifest['bundle_id']}
+        f"""# Curation notes — {manifest["bundle_id"]}
 
 _This is the curator's file: edit it freely. `darsay regen` folds it into
 README.md; nothing here is machine-generated after this template._

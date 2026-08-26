@@ -6,7 +6,13 @@ import sys
 import pytest
 
 from darsay.archiver import load_manifest
-from darsay.hydrate import dehydrate_bundle, hydrate_bundle, list_envs, prune_envs, run_bundle
+from darsay.hydrate import (
+    dehydrate_bundle,
+    hydrate_bundle,
+    list_envs,
+    prune_envs,
+    run_bundle,
+)
 from tests.conftest import silent
 from tests.integration.conftest import archive_quiet
 from tests.payloads import model_files
@@ -65,7 +71,9 @@ def test_run_bundle_records_pass_without_installing(vault, test_provider, monkey
     assert (bundle / "model" / "model.safetensors").read_bytes() == payload
 
 
-def test_hydrate_preflight_rejects_non_causal_architecture(vault, test_provider, tmp_path, monkeypatch):
+def test_hydrate_preflight_rejects_non_causal_architecture(
+    vault, test_provider, tmp_path, monkeypatch
+):
     files = model_files()
     config = json.loads(files["config.json"])
     config["architectures"] = ["ToyForConditionalGeneration"]
@@ -76,13 +84,18 @@ def test_hydrate_preflight_rejects_non_causal_architecture(vault, test_provider,
     with pytest.raises(SystemExit, match="not a causal LM"):
         hydrate_bundle(bundle, dry_run=True, progress=silent)
     record = hydrate_bundle(
-        bundle, dry_run=True, ignore_preflight=True, progress=silent,
+        bundle,
+        dry_run=True,
+        ignore_preflight=True,
+        progress=silent,
     )
     assert record["dry_run"] is True
     assert any(i["code"] == "unsupported-architecture" for i in record["preflight"])
 
 
-def test_hydrate_dry_run_rebuilds_from_pinned_packages(vault, test_provider, monkeypatch, tmp_path):
+def test_hydrate_dry_run_rebuilds_from_pinned_packages(
+    vault, test_provider, monkeypatch, tmp_path
+):
     test_provider.add_repo("acme/toy", model_files())
     bundle = archive_quiet("test:acme/toy", vault=vault)
     runtime = tmp_path / "runtime"

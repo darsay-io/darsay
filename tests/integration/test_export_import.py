@@ -61,10 +61,14 @@ def test_import_registers_after_verify(vault, test_provider, tmp_path):
     dest = import_bundle(tar_path, vault, progress=silent)
     imported = load_manifest(dest)
     original = load_manifest(bundle)
-    assert imported["inventory"]["bundle_hash"]["value"] == original["inventory"]["bundle_hash"]["value"]
-    assert imported["archive"]["imported"]["file_sha256"] == hash_file(
-        tar_path, with_blake3=False
-    )["sha256"]
+    assert (
+        imported["inventory"]["bundle_hash"]["value"]
+        == original["inventory"]["bundle_hash"]["value"]
+    )
+    assert (
+        imported["archive"]["imported"]["file_sha256"]
+        == hash_file(tar_path, with_blake3=False)["sha256"]
+    )
 
 
 def test_import_failure_registers_nothing(vault, test_provider, tmp_path):

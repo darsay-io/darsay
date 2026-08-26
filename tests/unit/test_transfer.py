@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import pytest
 
+from darsay.providers.base import FileSpec, Snapshot, SourceRef
 from darsay.transfer import (
+    TRANSFER_VERSION,
     CleanStop,
     LedgerError,
     NetworkCounter,
     StopController,
-    TRANSFER_VERSION,
     _digest_matches,
     _lock_was_copied,
     _payload_path,
@@ -19,7 +20,6 @@ from darsay.transfer import (
     transfer_plan,
     transfer_summary,
 )
-from darsay.providers.base import FileSpec, Snapshot, SourceRef
 
 
 def _source() -> SourceRef:
@@ -187,10 +187,22 @@ def test_transfer_summary_aggregates_sessions():
     ledger = {
         "pinned_at": "t0",
         "sessions": [
-            {"started": "t1", "ended": "t2", "bytes_network": 10, "bytes_adopted": 5,
-             "bytes_local_sources": 1, "retries": 2},
-            {"started": "t3", "ended": "t4", "bytes_network": 3, "bytes_adopted": 0,
-             "bytes_local_sources": 0, "retries": 1},
+            {
+                "started": "t1",
+                "ended": "t2",
+                "bytes_network": 10,
+                "bytes_adopted": 5,
+                "bytes_local_sources": 1,
+                "retries": 2,
+            },
+            {
+                "started": "t3",
+                "ended": "t4",
+                "bytes_network": 3,
+                "bytes_adopted": 0,
+                "bytes_local_sources": 0,
+                "retries": 1,
+            },
         ],
     }
     summary = transfer_summary(ledger)

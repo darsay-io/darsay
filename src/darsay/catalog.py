@@ -26,14 +26,31 @@ SLUG_RE = re.compile(r"^[a-z][a-z0-9._-]{0,63}$")
 DESIRE_MIN, DESIRE_MAX = 1, 9
 MIN_REV_PREFIX = 12
 _HEX_REV = re.compile(r"^[0-9a-f]+$", re.IGNORECASE)
-DIGEST_KEYS = frozenset({
-    "as_of", "artifact_type", "revision", "revision_ref",
-    "payload_bytes", "file_count", "license", "gated",
-    "parameters", "dominant_dtype", "unknown_size_count",
-})
+DIGEST_KEYS = frozenset(
+    {
+        "as_of",
+        "artifact_type",
+        "revision",
+        "revision_ref",
+        "payload_bytes",
+        "file_count",
+        "license",
+        "gated",
+        "parameters",
+        "dominant_dtype",
+        "unknown_size_count",
+    }
+)
 _CATALOG_TOP_KEYS = (
-    "catalog_schema_version", "kind", "id", "title", "curator", "note",
-    "created", "updated", "entries",
+    "catalog_schema_version",
+    "kind",
+    "id",
+    "title",
+    "curator",
+    "note",
+    "created",
+    "updated",
+    "entries",
 )
 _HIDE_IF_EMPTY = frozenset({"DESIRE", "NOTE"})
 
@@ -116,7 +133,9 @@ def estimate_digest(est: dict) -> dict:
         "license": est["source"]["license"],
         "gated": est["source"]["gated"],
         "parameters": params.get("total") if isinstance(params, dict) else None,
-        "dominant_dtype": params.get("dominant_dtype") if isinstance(params, dict) else None,
+        "dominant_dtype": params.get("dominant_dtype")
+        if isinstance(params, dict)
+        else None,
         "unknown_size_count": est["payload"]["unknown_size_count"],
     }
     assert set(digest) == DIGEST_KEYS
@@ -180,12 +199,15 @@ def resolve_catalog(vault: Path, spec: str) -> Path:
     if found is not None:
         catalog = load_catalog(found)
         parent_name = found.parent.name
-        if found.parent != Path(raw).expanduser() and SLUG_RE.fullmatch(fold_slug(raw)):
-            if fold_slug(parent_name) != fold_slug(catalog["id"]):
-                raise SystemExit(
-                    f"error: catalog directory {parent_name!r} does not match "
-                    f"id {catalog['id']!r}"
-                )
+        if (
+            found.parent != Path(raw).expanduser()
+            and SLUG_RE.fullmatch(fold_slug(raw))
+            and fold_slug(parent_name) != fold_slug(catalog["id"])
+        ):
+            raise SystemExit(
+                f"error: catalog directory {parent_name!r} does not match "
+                f"id {catalog['id']!r}"
+            )
         return found
     path = Path(raw).expanduser()
     if raw.startswith((".", "~")) or path.is_absolute():
@@ -223,7 +245,9 @@ def catalog_is_vault_named(vault: Path, path: Path) -> bool:
     return len(rel.parts) == 2 and rel.parts[1] == "catalog.json"
 
 
-def require_writable(vault: Path, path: Path, write_flag: bool, *, hint: str | None = None) -> None:
+def require_writable(
+    vault: Path, path: Path, write_flag: bool, *, hint: str | None = None
+) -> None:
     if catalog_is_vault_named(vault, path):
         return
     if write_flag:
@@ -251,17 +275,23 @@ def load_catalog(path: Path) -> dict:
         raise SystemExit(f"error: unreadable catalog at {path}: not a JSON object")
     version = data.get("catalog_schema_version")
     if not version:
-        raise SystemExit(f"error: unreadable catalog at {path}: catalog_schema_version missing")
+        raise SystemExit(
+            f"error: unreadable catalog at {path}: catalog_schema_version missing"
+        )
     try:
         major = int(str(version).split(".", 1)[0])
     except ValueError:
-        raise SystemExit(f"error: unreadable catalog at {path}: catalog_schema_version {version!r}") from None
+        raise SystemExit(
+            f"error: unreadable catalog at {path}: catalog_schema_version {version!r}"
+        ) from None
     if major > 1:
         raise SystemExit(
             f"error: catalog schema {version} is newer than this darsay (supports 1.x)"
         )
     if data.get("kind") != CATALOG_KIND:
-        raise SystemExit(f"error: unreadable catalog at {path}: kind is not {CATALOG_KIND!r}")
+        raise SystemExit(
+            f"error: unreadable catalog at {path}: kind is not {CATALOG_KIND!r}"
+        )
     ident = data.get("id")
     if not isinstance(ident, str) or not SLUG_RE.fullmatch(fold_slug(ident)):
         raise SystemExit(f"error: unreadable catalog at {path}: invalid id")
@@ -269,34 +299,46 @@ def load_catalog(path: Path) -> dict:
     if entries is None:
         entries = []
     if not isinstance(entries, list):
-        raise SystemExit(f"error: unreadable catalog at {path}: entries must be an array")
+        raise SystemExit(
+            f"error: unreadable catalog at {path}: entries must be an array"
+        )
     cleaned = []
     for i, entry in enumerate(entries):
         if not isinstance(entry, dict):
-            raise SystemExit(f"error: unreadable catalog at {path}: entry {i} is not an object")
+            raise SystemExit(
+                f"error: unreadable catalog at {path}: entry {i} is not an object"
+            )
         source = entry.get("source")
         if not isinstance(source, str) or not source.strip():
-            raise SystemExit(f"error: unreadable catalog at {path}: entry {i} missing source")
+            raise SystemExit(
+                f"error: unreadable catalog at {path}: entry {i} missing source"
+            )
         desire = entry.get("desire")
-        if desire is not None and (not isinstance(desire, int) or desire < DESIRE_MIN or desire > DESIRE_MAX):
+        if desire is not None and (
+            not isinstance(desire, int) or desire < DESIRE_MIN or desire > DESIRE_MAX
+        ):
             raise SystemExit(
                 f"error: unreadable catalog at {path}: entry {i} desire must be {DESIRE_MIN}–{DESIRE_MAX} or null"
             )
         include = entry.get("include")
-        if include is not None:
-            if not isinstance(include, list) or not all(isinstance(g, str) for g in include):
-                raise SystemExit(
-                    f"error: unreadable catalog at {path}: entry {i} include must be a list of strings or null"
-                )
-        cleaned.append({
-            "source": source,
-            "revision": entry.get("revision"),
-            "include": include,
-            "desire": desire,
-            "note": entry.get("note"),
-            "added": entry.get("added"),
-            "estimate": project_stored_estimate(entry.get("estimate")),
-        })
+        if include is not None and (
+            not isinstance(include, list)
+            or not all(isinstance(g, str) for g in include)
+        ):
+            raise SystemExit(
+                f"error: unreadable catalog at {path}: entry {i} include must be a list of strings or null"
+            )
+        cleaned.append(
+            {
+                "source": source,
+                "revision": entry.get("revision"),
+                "include": include,
+                "desire": desire,
+                "note": entry.get("note"),
+                "added": entry.get("added"),
+                "estimate": project_stored_estimate(entry.get("estimate")),
+            }
+        )
         try:
             try_parse_source(source)
         except SystemExit as exc:
@@ -324,7 +366,8 @@ def load_catalog(path: Path) -> dict:
 def save_catalog(path: Path, catalog: dict) -> None:
     """Write catalog.json. Does not touch curation.md."""
     payload = {
-        "catalog_schema_version": catalog.get("catalog_schema_version") or CATALOG_SCHEMA_VERSION,
+        "catalog_schema_version": catalog.get("catalog_schema_version")
+        or CATALOG_SCHEMA_VERSION,
         "kind": CATALOG_KIND,
         "id": catalog["id"],
         "title": catalog.get("title") or catalog["id"],
@@ -402,7 +445,7 @@ def _write_catalog_curation_template(catalog_dir: Path, catalog: dict) -> None:
     if path.exists():
         return
     path.write_text(
-        f"""# Curation notes — {catalog['title']}
+        f"""# Curation notes — {catalog["title"]}
 
 _This is the curator's file: edit it freely. `darsay catalog regen` folds it
 into README.md; nothing here is machine-generated after this template._
@@ -433,7 +476,12 @@ def upsert_entry(
     key = entry_key(ref.canonical, revision, include)
     now = utc_now()
     for existing in catalog["entries"]:
-        if entry_key(existing["source"], existing.get("revision"), existing.get("include")) == key:
+        if (
+            entry_key(
+                existing["source"], existing.get("revision"), existing.get("include")
+            )
+            == key
+        ):
             changed = False
             if desire is not None and existing.get("desire") != desire:
                 existing["desire"] = desire
@@ -481,12 +529,14 @@ def drop_entry(
     candidates = source_matches
     if include_given:
         candidates = [
-            i for i in candidates
+            i
+            for i in candidates
             if include_key(catalog["entries"][i].get("include")) == include_key(include)
         ]
     if revision_given:
         candidates = [
-            i for i in candidates
+            i
+            for i in candidates
             if (catalog["entries"][i].get("revision") or "") == (revision or "")
         ]
     if not include_given and not revision_given and len(source_matches) > 1:
@@ -506,7 +556,9 @@ def drop_entry(
             + "\n  pass --include GLOB to choose a subset, or --full for the full-repo row"
         )
     if len(candidates) != 1:
-        raise SystemExit(f"error: {canonical} does not match a unique entry in {catalog['id']}")
+        raise SystemExit(
+            f"error: {canonical} does not match a unique entry in {catalog['id']}"
+        )
     removed = catalog["entries"].pop(candidates[0])
     catalog["updated"] = utc_now()
     return removed
@@ -526,15 +578,17 @@ def adopt_entries(dest: dict, other: dict) -> tuple[int, int]:
         if key in existing:
             skipped += 1
             continue
-        dest["entries"].append({
-            "source": parsed.canonical if parsed is not None else entry["source"],
-            "revision": entry.get("revision"),
-            "include": list(entry["include"]) if entry.get("include") else None,
-            "desire": entry.get("desire"),
-            "note": entry.get("note"),
-            "added": utc_now(),
-            "estimate": entry.get("estimate"),
-        })
+        dest["entries"].append(
+            {
+                "source": parsed.canonical if parsed is not None else entry["source"],
+                "revision": entry.get("revision"),
+                "include": list(entry["include"]) if entry.get("include") else None,
+                "desire": entry.get("desire"),
+                "note": entry.get("note"),
+                "added": utc_now(),
+                "estimate": entry.get("estimate"),
+            }
+        )
         existing.add(key)
         adopted += 1
     if adopted:
@@ -624,7 +678,8 @@ def _best_possession(entry: dict, matches: list[dict]) -> dict:
         "payload_bytes": payload,
         "on_disk_bytes": best.get("on_disk_bytes"),
         "remaining_bytes": remaining,
-        "license": best.get("license") or (est.get("license") if isinstance(est, dict) else None),
+        "license": best.get("license")
+        or (est.get("license") if isinstance(est, dict) else None),
         "gated": gated,
         "percent": best.get("percent"),
         "matched_revision": best.get("revision"),
@@ -644,23 +699,25 @@ def overlay(catalog: dict, records: list[dict], *, progress=None) -> list[dict]:
                 f"warning: unknown source provider in {entry['source']!r} — listing as unmatched",
                 file=sys.stderr,
             )
-            rows.append({
-                **entry,
-                "status": "unknown",
-                "bundle_id": None,
-                "path": None,
-                "partial": False,
-                "integrity": None,
-                "payload_bytes": None,
-                "on_disk_bytes": 0,
-                "remaining_bytes": None,
-                "license": None,
-                "gated": False,
-                "percent": None,
-                "matched_revision": None,
-                "matched_include": None,
-                "estimate_stale": False,
-            })
+            rows.append(
+                {
+                    **entry,
+                    "status": "unknown",
+                    "bundle_id": None,
+                    "path": None,
+                    "partial": False,
+                    "integrity": None,
+                    "payload_bytes": None,
+                    "on_disk_bytes": 0,
+                    "remaining_bytes": None,
+                    "license": None,
+                    "gated": False,
+                    "percent": None,
+                    "matched_revision": None,
+                    "matched_include": None,
+                    "estimate_stale": False,
+                }
+            )
             continue
         matches = [r for r in records if row_matches_entry(r, entry)]
         rows.append(_best_possession(entry, matches))
@@ -675,28 +732,30 @@ def vault_as_rows(records: list[dict]) -> list[dict]:
         remaining = rec.get("remaining_bytes")
         if status == "have":
             remaining = 0
-        rows.append({
-            "status": status,
-            "desire": None,
-            "source": rec.get("source_address") or "—",
-            "revision": rec.get("revision"),
-            "include": rec.get("include"),
-            "note": None,
-            "bundle_id": rec.get("bundle_id"),
-            "path": rec.get("path"),
-            "partial": rec.get("partial"),
-            "integrity": rec.get("integrity"),
-            "payload_bytes": rec.get("payload_bytes"),
-            "on_disk_bytes": rec.get("on_disk_bytes"),
-            "remaining_bytes": remaining,
-            "license": rec.get("license"),
-            "gated": False,
-            "percent": rec.get("percent"),
-            "matched_revision": rec.get("revision"),
-            "matched_include": rec.get("include"),
-            "estimate_stale": False,
-            "estimate": None,
-        })
+        rows.append(
+            {
+                "status": status,
+                "desire": None,
+                "source": rec.get("source_address") or "—",
+                "revision": rec.get("revision"),
+                "include": rec.get("include"),
+                "note": None,
+                "bundle_id": rec.get("bundle_id"),
+                "path": rec.get("path"),
+                "partial": rec.get("partial"),
+                "integrity": rec.get("integrity"),
+                "payload_bytes": rec.get("payload_bytes"),
+                "on_disk_bytes": rec.get("on_disk_bytes"),
+                "remaining_bytes": remaining,
+                "license": rec.get("license"),
+                "gated": False,
+                "percent": rec.get("percent"),
+                "matched_revision": rec.get("revision"),
+                "matched_include": rec.get("include"),
+                "estimate_stale": False,
+                "estimate": None,
+            }
+        )
     return rows
 
 
@@ -710,6 +769,7 @@ def next_entry(rows: list[dict], *, desire: bool) -> dict | None:
     if not unfinished:
         return None
     if desire:
+
         def key(row):
             d = row.get("desire")
             return (
@@ -718,6 +778,7 @@ def next_entry(rows: list[dict], *, desire: bool) -> dict | None:
                 -(d or 0),
                 row.get("source") or "",
             )
+
         return sorted(unfinished, key=key)[0]
     partials = [r for r in unfinished if r.get("status") == "partial"]
     if not partials:
@@ -750,6 +811,7 @@ def next_idle_message(catalog: dict, rows: list[dict]) -> tuple[str, bool]:
 
 def sort_rows(rows: list[dict], sort: str) -> list[dict]:
     if sort == "next":
+
         def key(row):
             status = row.get("status")
             group = {"partial": 0, "want": 1, "have": 2}.get(status, 3)
@@ -760,14 +822,29 @@ def sort_rows(rows: list[dict], sort: str) -> list[dict]:
                 -(d or 0),
                 (row.get("source") or "").lower(),
             )
+
         return sorted(rows, key=key)
     if sort == "desire":
         return sorted(
             rows,
-            key=lambda r: (r.get("desire") is None, -(r.get("desire") or 0), (r.get("source") or "").lower()),
+            key=lambda r: (
+                r.get("desire") is None,
+                -(r.get("desire") or 0),
+                (r.get("source") or "").lower(),
+            ),
         )
     if sort == "size":
-        return sorted(rows, key=lambda r: (-(r.get("remaining_bytes") if r.get("remaining_bytes") is not None else -1), (r.get("source") or "").lower()))
+        return sorted(
+            rows,
+            key=lambda r: (
+                -(
+                    r.get("remaining_bytes")
+                    if r.get("remaining_bytes") is not None
+                    else -1
+                ),
+                (r.get("source") or "").lower(),
+            ),
+        )
     if sort == "name":
         return sorted(rows, key=lambda r: (r.get("source") or "").lower())
     if sort == "status":
@@ -930,7 +1007,7 @@ def _print_table(header: tuple[str, ...], cells: list[tuple[str, ...]]) -> None:
     rows = [header, *cells]
     widths = [max(len(str(r[i])) for r in rows) for i in range(len(header))]
     for row in rows:
-        print("  ".join(str(v).ljust(w) for v, w in zip(row, widths)))
+        print("  ".join(str(v).ljust(w) for v, w in zip(row, widths, strict=True)))
 
 
 def print_catalog_table(rows: list[dict], *, header_line: str | None = None) -> None:
@@ -949,7 +1026,9 @@ def print_catalog_table(rows: list[dict], *, header_line: str | None = None) -> 
     raw = [[fmt(r) for _, fmt in specs] for r in rows]
     keep = []
     for i, (name, _) in enumerate(specs):
-        if name in _HIDE_IF_EMPTY and (not raw or all(row[i] in ("—", "") for row in raw)):
+        if name in _HIDE_IF_EMPTY and (
+            not raw or all(row[i] in ("—", "") for row in raw)
+        ):
             continue
         keep.append(i)
     header = tuple(specs[i][0] for i in keep)
@@ -962,17 +1041,21 @@ def print_catalog_index(catalogs: list[dict]) -> None:
     cells = []
     for cat in catalogs:
         updated = (cat.get("updated") or "")[:10] or "—"
-        cells.append((
-            cat["id"],
-            cat.get("title") or cat["id"],
-            cat.get("curator") or "—",
-            str(len(cat.get("entries") or [])),
-            updated,
-        ))
+        cells.append(
+            (
+                cat["id"],
+                cat.get("title") or cat["id"],
+                cat.get("curator") or "—",
+                str(len(cat.get("entries") or [])),
+                updated,
+            )
+        )
     _print_table(header, cells)
 
 
-def realize_from_overlay(row: dict, entry: dict | None = None) -> tuple[str, str | None, list[str] | None]:
+def realize_from_overlay(
+    row: dict, entry: dict | None = None
+) -> tuple[str, str | None, list[str] | None]:
     """Partial → matched row's full revision + include. Want → entry fields."""
     entry = entry or row
     source = entry["source"]
@@ -1056,12 +1139,16 @@ def write_catalog_readme(catalog_dir: Path, catalog: dict) -> None:
             size = "?"
         else:
             as_of = (est.get("as_of") or "")[:10]
-            size = f"{human_size(est['payload_bytes'])}" + (f" (as of {as_of})" if as_of else "")
+            size = f"{human_size(est['payload_bytes'])}" + (
+                f" (as of {as_of})" if as_of else ""
+            )
         license_s = est.get("license") or "?"
         if est.get("gated"):
             license_s = f"{license_s} (gated)" if license_s != "?" else "? (gated)"
         note = entry.get("note") or ""
-        lines.append(f"| {desire_s} | {href} | {artifact} | {size} | {license_s} | {note} |")
+        lines.append(
+            f"| {desire_s} | {href} | {artifact} | {size} | {license_s} | {note} |"
+        )
     lines += [
         "",
         "Sizes are last-estimated facts, not live Hub queries. Overlay against a vault:",

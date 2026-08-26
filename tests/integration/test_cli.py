@@ -51,7 +51,9 @@ def test_cli_list_partial_bundle(vault, test_provider, capsys):
     assert "remaining" in listed
 
 
-def test_run_joins_unquoted_prompt_and_accepts_repl_flag(vault, test_provider, monkeypatch):
+def test_run_joins_unquoted_prompt_and_accepts_repl_flag(
+    vault, test_provider, monkeypatch
+):
     test_provider.add_repo("acme/toy", model_files())
     bundle = archive_quiet("test:acme/toy", vault=vault)
     seen = {}
@@ -226,7 +228,9 @@ def test_cli_archive_budget_exit_10(vault, test_provider):
     assert rc == 10
 
 
-def test_archive_next_hint_is_run_for_models_info_for_datasets(vault, test_provider, capsys):
+def test_archive_next_hint_is_run_for_models_info_for_datasets(
+    vault, test_provider, capsys
+):
     from tests.payloads import dataset_files
 
     test_provider.add_repo("acme/toy", model_files())
@@ -271,7 +275,20 @@ def test_catalog_index_ids_and_add_estimate(vault, test_provider, capsys):
     assert main(["--vault", str(vault), "catalog"]) == 0
     empty = capsys.readouterr().out
     assert "No catalogs" in empty
-    assert main(["--vault", str(vault), "catalog", "new", "summer", "--title", "Summer 2026"]) == 0
+    assert (
+        main(
+            [
+                "--vault",
+                str(vault),
+                "catalog",
+                "new",
+                "summer",
+                "--title",
+                "Summer 2026",
+            ]
+        )
+        == 0
+    )
     capsys.readouterr()
     assert main(["--vault", str(vault), "catalog"]) == 0
     listed = capsys.readouterr().out
@@ -279,10 +296,22 @@ def test_catalog_index_ids_and_add_estimate(vault, test_provider, capsys):
     assert "Summer 2026" in listed
     assert main(["--vault", str(vault), "catalog", "--ids"]) == 0
     assert capsys.readouterr().out.strip() == "summer"
-    assert main([
-        "--vault", str(vault), "catalog", "add", "summer", "test:acme/toy",
-        "--desire", "8", "--estimate",
-    ]) == 0
+    assert (
+        main(
+            [
+                "--vault",
+                str(vault),
+                "catalog",
+                "add",
+                "summer",
+                "test:acme/toy",
+                "--desire",
+                "8",
+                "--estimate",
+            ]
+        )
+        == 0
+    )
     added = capsys.readouterr().out
     assert "Added test:acme/toy" in added
     catalog = json.loads((vault / "catalogs" / "summer" / "catalog.json").read_text())
@@ -290,7 +319,9 @@ def test_catalog_index_ids_and_add_estimate(vault, test_provider, capsys):
     assert "checked_path" not in catalog["entries"][0]["estimate"]
 
 
-def test_hydrate_dry_run_dehydrate_and_envs_via_cli(vault, test_provider, tmp_path, monkeypatch, capsys):
+def test_hydrate_dry_run_dehydrate_and_envs_via_cli(
+    vault, test_provider, tmp_path, monkeypatch, capsys
+):
     test_provider.add_repo("acme/toy", model_files())
     bundle = archive_quiet("test:acme/toy", vault=vault)
     runtime = tmp_path / "runtime"
@@ -303,13 +334,15 @@ def test_hydrate_dry_run_dehydrate_and_envs_via_cli(vault, test_provider, tmp_pa
     assert not (bundle / "hydration.json").exists()
 
     (bundle / "hydration.json").write_text(
-        json.dumps({
-            "hydration_schema": 1,
-            "bundle_id": "x",
-            "engine": "transformers",
-            "env": {"key": "fake"},
-            "runs": [],
-        })
+        json.dumps(
+            {
+                "hydration_schema": 1,
+                "bundle_id": "x",
+                "engine": "transformers",
+                "env": {"key": "fake"},
+                "runs": [],
+            }
+        )
         + "\n"
     )
     assert main(["--vault", str(vault), "dehydrate", "acme--toy"]) == 0
@@ -351,19 +384,21 @@ def test_cli_run_records_via_stubbed_runner(vault, test_provider, monkeypatch, c
     test_provider.add_repo("acme/toy", model_files())
     bundle = archive_quiet("test:acme/toy", vault=vault)
     (bundle / "hydration.json").write_text(
-        json.dumps({
-            "hydration_schema": 1,
-            "bundle_id": load_manifest(bundle)["bundle_id"],
-            "engine": "transformers",
-            "weights": None,
-            "env": {
-                "key": "transformers-py3.14-deadbeef",
-                "path": "/tmp/fake-env",
-                "python": "3.14.0",
-                "python_executable": sys.executable,
-            },
-            "runs": [],
-        })
+        json.dumps(
+            {
+                "hydration_schema": 1,
+                "bundle_id": load_manifest(bundle)["bundle_id"],
+                "engine": "transformers",
+                "weights": None,
+                "env": {
+                    "key": "transformers-py3.14-deadbeef",
+                    "path": "/tmp/fake-env",
+                    "python": "3.14.0",
+                    "python_executable": sys.executable,
+                },
+                "runs": [],
+            }
+        )
         + "\n"
     )
 

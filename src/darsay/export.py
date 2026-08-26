@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import shutil
 import tarfile
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 
@@ -67,7 +68,9 @@ def export_bundle(bundle_dir: Path, output_dir: Path, progress=print) -> Path:
 
     manifest = load_manifest(bundle_dir)
     bundle_id = manifest["bundle_id"]
-    mtime = int(datetime.fromisoformat(manifest["archive"]["date_archived"]).timestamp())
+    mtime = int(
+        datetime.fromisoformat(manifest["archive"]["date_archived"]).timestamp()
+    )
 
     marker = {
         "mvb_format_version": MVB_FORMAT_VERSION,
@@ -91,11 +94,15 @@ def export_bundle(bundle_dir: Path, output_dir: Path, progress=print) -> Path:
     with tarfile.open(out_path, "w", format=tarfile.GNU_FORMAT) as tar:
         import io
 
-        tar.addfile(_tarinfo(f"{bundle_id}/{MARKER_NAME}", len(marker_bytes), mtime),
-                    io.BytesIO(marker_bytes))
+        tar.addfile(
+            _tarinfo(f"{bundle_id}/{MARKER_NAME}", len(marker_bytes), mtime),
+            io.BytesIO(marker_bytes),
+        )
         for rel, abs_path in files:
             with open(abs_path, "rb") as f:
-                tar.addfile(_tarinfo(f"{bundle_id}/{rel}", abs_path.stat().st_size, mtime), f)
+                tar.addfile(
+                    _tarinfo(f"{bundle_id}/{rel}", abs_path.stat().st_size, mtime), f
+                )
 
     from . import __version__
 
@@ -109,7 +116,11 @@ def export_bundle(bundle_dir: Path, output_dir: Path, progress=print) -> Path:
         "written_by": {"tool": "darsay", "version": __version__},
     }
     exports_path = bundle_dir / "exports.json"
-    data = json.loads(exports_path.read_text(encoding="utf-8")) if exports_path.exists() else {"exports": []}
+    data = (
+        json.loads(exports_path.read_text(encoding="utf-8"))
+        if exports_path.exists()
+        else {"exports": []}
+    )
     data["exports"].append(record)
     exports_path.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
@@ -122,7 +133,9 @@ def _read_marker(tar_path: Path) -> dict:
     with tarfile.open(tar_path, "r") as tar:
         first = tar.next()
         if first is None or Path(first.name).name != MARKER_NAME:
-            raise SystemExit(f"error: {tar_path} is not a darsay export (missing leading {MARKER_NAME})")
+            raise SystemExit(
+                f"error: {tar_path} is not a darsay export (missing leading {MARKER_NAME})"
+            )
         marker = json.load(tar.extractfile(first))
     major = str(marker.get("mvb_format_version", "")).split(".")[0]
     if major != MVB_FORMAT_VERSION.split(".")[0]:
@@ -138,9 +151,7 @@ def _read_marker(tar_path: Path) -> dict:
     try:
         schema_major = parse_schema_major(embedded)
     except ValueError:
-        raise SystemExit(
-            f"error: export marker schema_version {embedded!r}"
-        ) from None
+        raise SystemExit(f"error: export marker schema_version {embedded!r}") from None
     if schema_major > MANIFEST_SCHEMA_MAJOR:
         raise SystemExit(
             f"error: embedded manifest schema {embedded} is newer than this darsay "
@@ -149,7 +160,9 @@ def _read_marker(tar_path: Path) -> dict:
     return marker
 
 
-def import_bundle(tar_path: Path, vault: Path, force: bool = False, progress=print) -> Path:
+def import_bundle(
+    tar_path: Path, vault: Path, force: bool = False, progress=print
+) -> Path:
     from .archiver import load_manifest, utc_now, write_manifest
     from .verify import verify_bundle
 
@@ -163,7 +176,9 @@ def import_bundle(tar_path: Path, vault: Path, force: bool = False, progress=pri
         raise SystemExit(f"error: {dest} already exists (use --force to replace)")
 
     file_sha256 = hash_file(tar_path, with_blake3=False)["sha256"]
-    progress(f"Importing {bundle_id} (format {marker['mvb_format_version']}, file sha256 {file_sha256[:16]}…)")
+    progress(
+        f"Importing {bundle_id} (format {marker['mvb_format_version']}, file sha256 {file_sha256[:16]}…)"
+    )
 
     staging = vault / name / f".import-{rev}"
     shutil.rmtree(staging, ignore_errors=True)
@@ -177,7 +192,9 @@ def import_bundle(tar_path: Path, vault: Path, force: bool = False, progress=pri
 
         manifest = load_manifest(root)
         if manifest["bundle_id"] != bundle_id:
-            raise SystemExit(f"error: marker/manifest bundle_id mismatch: {bundle_id} vs {manifest['bundle_id']}")
+            raise SystemExit(
+                f"error: marker/manifest bundle_id mismatch: {bundle_id} vs {manifest['bundle_id']}"
+            )
 
         progress("Verifying payload against embedded manifest ...")
         from .schema import payload_root
@@ -186,10 +203,14 @@ def import_bundle(tar_path: Path, vault: Path, force: bool = False, progress=pri
         expected = {r["path"]: r["sha256"] for r in manifest["inventory"]["files"]}
         actual = {}
         for rel, abs_path in iter_payload_files(root / payload_name):
-            actual[f"{payload_name}/{rel}"] = hash_file(abs_path, with_blake3=False)["sha256"]
+            actual[f"{payload_name}/{rel}"] = hash_file(abs_path, with_blake3=False)[
+                "sha256"
+            ]
         bad = sorted(p for p in expected if actual.get(p) != expected[p])
         extra = sorted(set(actual) - set(expected))
-        recomputed = bundle_hash([{"path": p, "sha256": s} for p, s in actual.items()], payload_name)
+        recomputed = bundle_hash(
+            [{"path": p, "sha256": s} for p, s in actual.items()], payload_name
+        )
         if bad or extra or recomputed["value"] != marker["bundle_hash"]["value"]:
             raise SystemExit(
                 "error: import verification FAILED — bundle not registered "
@@ -218,10 +239,8 @@ def import_bundle(tar_path: Path, vault: Path, force: bool = False, progress=pri
         root.rename(dest)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
-        try:
+        with suppress(OSError):
             staging.parent.rmdir()  # drop vault/<name>/ if a failed import left it empty
-        except OSError:
-            pass
 
     # Full verify stamps VERIFICATION.md / verification.json at the new location.
     verify_bundle(dest, progress=progress)

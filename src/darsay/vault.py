@@ -58,47 +58,51 @@ def bundle_records(vault: Path) -> list[dict]:
             try:
                 m = json.loads(manifest_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError):
-                rows.append({
-                    "bundle_id": bundle_id_for(bundle_dir),
-                    "path": str(bundle_dir),
-                    "license": "?",
-                    "on_disk_bytes": on_disk,
-                    "payload_bytes": None,
-                    "size": human_size(on_disk),
-                    "integrity": "unreadable manifest",
-                    "archived": "?",
-                    "partial": False,
-                    "status": "have",
-                    "source_address": None,
-                    "revision": None,
-                    "revision_ref": None,
-                    "include": None,
-                    "remaining_bytes": None,
-                    "percent": None,
-                })
+                rows.append(
+                    {
+                        "bundle_id": bundle_id_for(bundle_dir),
+                        "path": str(bundle_dir),
+                        "license": "?",
+                        "on_disk_bytes": on_disk,
+                        "payload_bytes": None,
+                        "size": human_size(on_disk),
+                        "integrity": "unreadable manifest",
+                        "archived": "?",
+                        "partial": False,
+                        "status": "have",
+                        "source_address": None,
+                        "revision": None,
+                        "revision_ref": None,
+                        "include": None,
+                        "remaining_bytes": None,
+                        "percent": None,
+                    }
+                )
                 continue
             payload_bytes = m["inventory"]["total_size_bytes"]
             src = m.get("source") or {}
             include = (src.get("subset") or {}).get("include")
-            rows.append({
-                "bundle_id": m["bundle_id"],
-                "path": str(bundle_dir),
-                "license": m["licensing"]["spdx_id"] or "?",
-                "on_disk_bytes": on_disk,
-                "payload_bytes": payload_bytes,
-                "size": human_size(payload_bytes),
-                "integrity": m["security"]["integrity_status"],
-                "archived": m["archive"]["date_archived"][:10],
-                "partial": False,
-                "artifact_type": m.get("artifact_type"),
-                "status": "have",
-                "source_address": _source_address_from_manifest(m),
-                "revision": src.get("revision"),
-                "revision_ref": src.get("revision_ref"),
-                "include": include,
-                "remaining_bytes": 0,
-                "percent": None,
-            })
+            rows.append(
+                {
+                    "bundle_id": m["bundle_id"],
+                    "path": str(bundle_dir),
+                    "license": m["licensing"]["spdx_id"] or "?",
+                    "on_disk_bytes": on_disk,
+                    "payload_bytes": payload_bytes,
+                    "size": human_size(payload_bytes),
+                    "integrity": m["security"]["integrity_status"],
+                    "archived": m["archive"]["date_archived"][:10],
+                    "partial": False,
+                    "artifact_type": m.get("artifact_type"),
+                    "status": "have",
+                    "source_address": _source_address_from_manifest(m),
+                    "revision": src.get("revision"),
+                    "revision_ref": src.get("revision_ref"),
+                    "include": include,
+                    "remaining_bytes": 0,
+                    "percent": None,
+                }
+            )
             continue
         try:
             ledger = load_ledger(bundle_dir)
@@ -116,44 +120,48 @@ def bundle_records(vault: Path) -> list[dict]:
             card = ledger.get("metadata", {}).get("card_data", {})
             license_id = card.get("license") if isinstance(card, dict) else None
             include = (ledger.get("subset") or {}).get("include")
-            rows.append({
-                "bundle_id": bundle_id_for(bundle_dir),
-                "path": str(bundle_dir),
-                "license": license_id or "?",
-                "on_disk_bytes": on_disk,
-                "payload_bytes": sizes["total"],
-                "size": human_size(sizes["total"]),
-                "integrity": status,
-                "archived": ledger["pinned_at"][:10],
-                "partial": True,
-                "artifact_type": ledger.get("repo_type"),
-                "status": "partial",
-                "source_address": _source_address_from_ledger(ledger),
-                "revision": ledger.get("revision"),
-                "revision_ref": ledger.get("revision_ref"),
-                "include": include,
-                "remaining_bytes": sizes["remaining_network"],
-                "percent": percent,
-            })
+            rows.append(
+                {
+                    "bundle_id": bundle_id_for(bundle_dir),
+                    "path": str(bundle_dir),
+                    "license": license_id or "?",
+                    "on_disk_bytes": on_disk,
+                    "payload_bytes": sizes["total"],
+                    "size": human_size(sizes["total"]),
+                    "integrity": status,
+                    "archived": ledger["pinned_at"][:10],
+                    "partial": True,
+                    "artifact_type": ledger.get("repo_type"),
+                    "status": "partial",
+                    "source_address": _source_address_from_ledger(ledger),
+                    "revision": ledger.get("revision"),
+                    "revision_ref": ledger.get("revision_ref"),
+                    "include": include,
+                    "remaining_bytes": sizes["remaining_network"],
+                    "percent": percent,
+                }
+            )
         except (LedgerError, KeyError, OSError, TypeError, ValueError):
-            rows.append({
-                "bundle_id": bundle_id_for(bundle_dir),
-                "path": str(bundle_dir),
-                "license": "?",
-                "on_disk_bytes": on_disk,
-                "payload_bytes": None,
-                "size": human_size(on_disk) if on_disk else "?",
-                "integrity": "archiving: unreadable transfer ledger",
-                "archived": "?",
-                "partial": True,
-                "status": "partial",
-                "source_address": None,
-                "revision": None,
-                "revision_ref": None,
-                "include": None,
-                "remaining_bytes": None,
-                "percent": None,
-            })
+            rows.append(
+                {
+                    "bundle_id": bundle_id_for(bundle_dir),
+                    "path": str(bundle_dir),
+                    "license": "?",
+                    "on_disk_bytes": on_disk,
+                    "payload_bytes": None,
+                    "size": human_size(on_disk) if on_disk else "?",
+                    "integrity": "archiving: unreadable transfer ledger",
+                    "archived": "?",
+                    "partial": True,
+                    "status": "partial",
+                    "source_address": None,
+                    "revision": None,
+                    "revision_ref": None,
+                    "include": None,
+                    "remaining_bytes": None,
+                    "percent": None,
+                }
+            )
     return rows
 
 
@@ -274,19 +282,29 @@ def resolve_bundle(
         elif len(needle) >= 3 and any(needle in key for key in keys):
             substring.append(rec)
 
-    for pool, kind in ((exact, "exact"), (_dedupe(prefix), "prefix"), (_dedupe(substring), "substring")):
+    for pool, kind in (
+        (exact, "exact"),
+        (_dedupe(prefix), "prefix"),
+        (_dedupe(substring), "substring"),
+    ):
         hits = _dedupe(pool)
         if len(hits) == 1:
             return _require(hits[0][0], require_manifest=require_manifest)
         if len(hits) > 1:
-            listed = "\n".join(f"  {bundle_id}  {directory}" for directory, bundle_id in hits)
+            listed = "\n".join(
+                f"  {bundle_id}  {directory}" for directory, bundle_id in hits
+            )
             raise SystemExit(
                 f"error: {raw!r} matches {len(hits)} bundles ({kind}):\n{listed}\n"
                 "  use a longer prefix, the bundle id from `darsay list`, or a path from `darsay list --json` / `darsay info`"
             )
     extra = ""
     folded = raw.strip().casefold()
-    if folded and all(c.isalnum() or c in "._-" for c in folded) and folded[0].isalpha():
+    if (
+        folded
+        and all(c.isalnum() or c in "._-" for c in folded)
+        and folded[0].isalpha()
+    ):
         catalog_file = vault / "catalogs" / folded / "catalog.json"
         if catalog_file.is_file():
             extra = (

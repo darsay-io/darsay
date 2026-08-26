@@ -46,7 +46,11 @@ def test_select_subset_keeps_matches_and_sidecars():
         item["path"] for item in subset["full_files"]
     )
     assert {item["path"] for item in subset["full_files"]} == {
-        "Q4_K_M.gguf", "Q8_0.gguf", "config.json", "LICENSE", "extra.bin",
+        "Q4_K_M.gguf",
+        "Q8_0.gguf",
+        "config.json",
+        "LICENSE",
+        "extra.bin",
     }
 
 

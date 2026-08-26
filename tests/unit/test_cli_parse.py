@@ -115,7 +115,6 @@ def test_vault_path_env_and_flag(monkeypatch, tmp_path):
 
 
 def test_list_accepts_catalog_and_sort():
-    from argparse import ArgumentParser
     # Drive the real parser via main --help-equivalent by parsing through main's error paths
     with pytest.raises(SystemExit):
         main(["list", "--sort", "nope"])
@@ -127,6 +126,7 @@ def test_list_accepts_catalog_and_sort():
 
 def test_archive_next_parse_orders(tmp_path):
     from darsay.cli import main as _main
+
     vault = ["--vault", str(tmp_path)]
     with pytest.raises(SystemExit, match="no catalog matching"):
         _main([*vault, "archive", "--next", "summer"])

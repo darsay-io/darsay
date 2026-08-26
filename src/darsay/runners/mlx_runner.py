@@ -15,12 +15,15 @@ from pathlib import Path
 
 
 def write_result(path: str, data: dict) -> None:
-    Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    Path(path).write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 def versions() -> dict:
     import mlx
     import mlx_lm
+
     return {
         "mlx": getattr(mlx, "__version__", None),
         "mlx_lm": getattr(mlx_lm, "__version__", None),
@@ -30,6 +33,7 @@ def versions() -> dict:
 def probe(args) -> dict:
     import mlx
     import mlx_lm  # noqa: F401  — import is the env check
+
     return {
         "status": "pass",
         "engine": "mlx",
@@ -40,12 +44,16 @@ def probe(args) -> dict:
     }
 
 
-def _format_prompt(tokenizer, prompt: str, raw: bool, messages=None) -> tuple[str, bool]:
+def _format_prompt(
+    tokenizer, prompt: str, raw: bool, messages=None
+) -> tuple[str, bool]:
     use_chat = (not raw) and getattr(tokenizer, "chat_template", None)
     if not use_chat:
         return prompt, False
     history = list(messages or []) + [{"role": "user", "content": prompt}]
-    text = tokenizer.apply_chat_template(history, tokenize=False, add_generation_prompt=True)
+    text = tokenizer.apply_chat_template(
+        history, tokenize=False, add_generation_prompt=True
+    )
     return text, True
 
 
@@ -56,6 +64,7 @@ def _generate(model, tokenizer, prompt: str, args) -> str:
     if not args.sample:
         try:
             from mlx_lm.sample_utils import make_sampler
+
             kwargs["sampler"] = make_sampler(temp=0)
         except Exception:
             pass
@@ -118,7 +127,9 @@ def repl(args) -> dict:
             continue
         if user in ("/quit", "/exit"):
             break
-        formatted, use_chat = _format_prompt(tokenizer, user, args.raw, messages=messages)
+        formatted, use_chat = _format_prompt(
+            tokenizer, user, args.raw, messages=messages
+        )
         t1 = time.perf_counter()
         text = _generate(model, tokenizer, formatted, args)
         generate_seconds = time.perf_counter() - t1
@@ -143,7 +154,11 @@ def repl(args) -> dict:
             "tokens_per_second": None,
             "repl": True,
         }
-    return last or {"status": "fail", "engine": "mlx", "error": "repl ended without a prompt"}
+    return last or {
+        "status": "fail",
+        "engine": "mlx",
+        "error": "repl ended without a prompt",
+    }
 
 
 def main() -> int:
@@ -159,7 +174,9 @@ def main() -> int:
     p.add_argument("--sample", action="store_true")
     p.add_argument("--seed", type=int, default=None)
     p.add_argument("--trust-remote-code", action="store_true")
-    p.add_argument("--weights", default=None, help="ignored (mlx-lm loads the directory)")
+    p.add_argument(
+        "--weights", default=None, help="ignored (mlx-lm loads the directory)"
+    )
     p.add_argument("--dtype", default="auto", help="ignored")
     args = p.parse_args()
 
@@ -173,8 +190,14 @@ def main() -> int:
                 args.prompt = "Say hello in one short sentence."
             result = generate(args)
     except Exception as exc:
-        write_result(args.json_out, {"status": "fail", "engine": "mlx",
-                                     "error": f"{type(exc).__name__}: {exc}"})
+        write_result(
+            args.json_out,
+            {
+                "status": "fail",
+                "engine": "mlx",
+                "error": f"{type(exc).__name__}: {exc}",
+            },
+        )
         print(f"[runner] FAILED: {exc}", file=sys.stderr)
         return 1
     write_result(args.json_out, result)

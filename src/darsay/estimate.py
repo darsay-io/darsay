@@ -43,7 +43,9 @@ def _format_breakdown(files: list[dict]) -> dict:
         entry = by_ext.setdefault(ext, {"file_count": 0, "total_size_bytes": 0})
         entry["file_count"] += 1
         entry["total_size_bytes"] += f["size"] or 0
-    return dict(sorted(by_ext.items(), key=lambda kv: (-kv[1]["total_size_bytes"], kv[0])))
+    return dict(
+        sorted(by_ext.items(), key=lambda kv: (-kv[1]["total_size_bytes"], kv[0]))
+    )
 
 
 def estimate(
@@ -66,8 +68,10 @@ def estimate(
     except SourceError as exc:
         raise SystemExit(str(exc)) from None
 
-    files = [{"path": f.path, "size": f.size, "sha256": f.sha256, "git_sha1": f.git_sha1}
-             for f in snapshot.files]
+    files = [
+        {"path": f.path, "size": f.size, "sha256": f.sha256, "git_sha1": f.git_sha1}
+        for f in snapshot.files
+    ]
     subset = None
     if include:
         from .subset import select_subset
@@ -97,8 +101,11 @@ def estimate(
     else:
         verdict = "insufficient"
 
-    ram_gb = (round(primary_bytes * RAM_FACTOR / 1024**3, 1)
-              if repo_type == "model" and primary_bytes else None)
+    ram_gb = (
+        round(primary_bytes * RAM_FACTOR / 1024**3, 1)
+        if repo_type == "model" and primary_bytes
+        else None
+    )
     est = {
         "as_of": utc_now(),
         "artifact_type": repo_type,
@@ -120,8 +127,10 @@ def estimate(
         "payload": {
             "file_count": len(files),
             "total_size_bytes": total,
-            ("data" if repo_type == "dataset" else "weights"):
-                {"count": len(primary), "bytes": primary_bytes},
+            ("data" if repo_type == "dataset" else "weights"): {
+                "count": len(primary),
+                "bytes": primary_bytes,
+            },
             "support": {"count": len(support), "bytes": total - primary_bytes},
             "largest_file": largest,
             "unknown_size_count": sum(1 for f in files if f["size"] is None),
@@ -136,11 +145,13 @@ def estimate(
             "download_scratch_bytes": scratch,
             "min_ram_gb": ram_gb,
             "min_vram_gb": ram_gb,
-            "notes": ("scratch = largest file in flight during download; "
-                      "RAM/VRAM not applicable to dataset bundles."
-                      if repo_type == "dataset" else
-                      "RAM/VRAM = weight bytes x1.2 (as in manifest runtime); "
-                      "scratch = largest file in flight during download."),
+            "notes": (
+                "scratch = largest file in flight during download; "
+                "RAM/VRAM not applicable to dataset bundles."
+                if repo_type == "dataset"
+                else "RAM/VRAM = weight bytes x1.2 (as in manifest runtime); "
+                "scratch = largest file in flight during download."
+            ),
         },
         "disk": {
             "checked_path": str(checked_path),
@@ -153,7 +164,9 @@ def estimate(
     if variants:
         listed = provider.variants(ref, progress)
         if listed is None and repo_type == "dataset":
-            progress("(--variants lists quantized variants of a model; not applicable to datasets)")
+            progress(
+                "(--variants lists quantized variants of a model; not applicable to datasets)"
+            )
         est["variants"] = listed
     return est
 
@@ -196,70 +209,112 @@ def print_estimate(est: dict, progress=print) -> None:
     if est["subset"]:
         sub = est["subset"]
         extra = " + sidecars" if sub.get("sidecars") else ""
-        p(f"  subset:       only files matching {', '.join(sub['include'])}{extra} "
-          f"(full repo: {sub['full_file_count']} files, {human_size(sub['full_total_size_bytes'])})")
+        p(
+            f"  subset:       only files matching {', '.join(sub['include'])}{extra} "
+            f"(full repo: {sub['full_file_count']} files, {human_size(sub['full_total_size_bytes'])})"
+        )
 
     if is_dataset:
         fmts = est["formats"] or {}
         if fmts:
-            breakdown = ", ".join(f"{ext} {human_size(d['total_size_bytes'])} in {d['file_count']}"
-                                  for ext, d in fmts.items())
+            breakdown = ", ".join(
+                f"{ext} {human_size(d['total_size_bytes'])} in {d['file_count']}"
+                for ext, d in fmts.items()
+            )
             p(f"  formats:      {breakdown}")
         else:
             p("  formats:      no files listed upstream")
     elif params:
         by_dtype = params["by_dtype"] or {}
         if len(by_dtype) > 1:
-            split = ", ".join(f"{human_params(n)} {d}" for d, n in
-                              sorted(by_dtype.items(), key=lambda kv: -kv[1]))
+            split = ", ".join(
+                f"{human_params(n)} {d}"
+                for d, n in sorted(by_dtype.items(), key=lambda kv: -kv[1])
+            )
             dtypes = f" ({split})"
         else:
             dtypes = f" {params['dominant_dtype']}" if params["dominant_dtype"] else ""
-        p(f"  parameters:   {human_params(params['total'])}{dtypes}  [upstream safetensors metadata]")
+        p(
+            f"  parameters:   {human_params(params['total'])}{dtypes}  [upstream safetensors metadata]"
+        )
     else:
         p("  parameters:   not published upstream")
-    n_files = lambda n: f"{n} file{'s' if n != 1 else ''}"
-    primary_key, primary_label = ("data", "data") if is_dataset else ("weights", "weights")
-    p(f"  payload:      {n_files(pay['file_count'])}, {human_size(pay['total_size_bytes'])}")
-    p(f"                {primary_label} {human_size(pay[primary_key]['bytes'])} in {n_files(pay[primary_key]['count'])}"
-      + (f" (largest {human_size(pay['largest_file']['size'])}: {pay['largest_file']['path']})"
-         if pay["largest_file"] else ""))
-    p(f"                support {human_size(pay['support']['bytes'])} in {n_files(pay['support']['count'])}")
+
+    def n_files(n):
+        return f"{n} file{'s' if n != 1 else ''}"
+
+    primary_key, primary_label = (
+        ("data", "data") if is_dataset else ("weights", "weights")
+    )
+    p(
+        f"  payload:      {n_files(pay['file_count'])}, {human_size(pay['total_size_bytes'])}"
+    )
+    p(
+        f"                {primary_label} {human_size(pay[primary_key]['bytes'])} in {n_files(pay[primary_key]['count'])}"
+        + (
+            f" (largest {human_size(pay['largest_file']['size'])}: {pay['largest_file']['path']})"
+            if pay["largest_file"]
+            else ""
+        )
+    )
+    p(
+        f"                support {human_size(pay['support']['bytes'])} in {n_files(pay['support']['count'])}"
+    )
     if pay["unknown_size_count"]:
-        p(f"                WARNING: {pay['unknown_size_count']} files have no upstream size")
+        p(
+            f"                WARNING: {pay['unknown_size_count']} files have no upstream size"
+        )
     if is_dataset:
         p("  engines:      none (dataset bundle — hydrate/run not applicable)")
     else:
         p(f"  engines:      {', '.join(est['engines']) or 'none recognized'}")
     comp = est["completeness"]
     missing = ", ".join(comp.get("missing_required") or [])
-    p(f"  completeness: {comp['status']}" + (f" (missing: {missing})" if missing else ""))
+    p(
+        f"  completeness: {comp['status']}"
+        + (f" (missing: {missing})" if missing else "")
+    )
 
     e = est["estimates"]
     if is_dataset:
-        p(f"  estimated:    download scratch +{human_size(e['download_scratch_bytes'])} (largest file in flight)")
+        p(
+            f"  estimated:    download scratch +{human_size(e['download_scratch_bytes'])} (largest file in flight)"
+        )
     else:
-        p(f"  estimated:    download scratch +{human_size(e['download_scratch_bytes'])} (largest file in flight), "
-          f"min RAM/VRAM {e['min_ram_gb']} GB (weight bytes x1.2)")
+        p(
+            f"  estimated:    download scratch +{human_size(e['download_scratch_bytes'])} (largest file in flight), "
+            f"min RAM/VRAM {e['min_ram_gb']} GB (weight bytes x1.2)"
+        )
 
     b, d = est["bundle"], est["disk"]
-    p(f"  bundle:       {b['dir']}" + ("  (EXISTS — archive would need --force)" if b["exists"] else "  (new)"))
+    p(
+        f"  bundle:       {b['dir']}"
+        + ("  (EXISTS — archive would need --force)" if b["exists"] else "  (new)")
+    )
     verdict_note = {
         "ok": "OK",
         "tight": "TIGHT — under 10% headroom",
         "insufficient": "INSUFFICIENT",
     }[d["verdict"]]
-    p(f"  disk:         needs ~{human_size(d['needed_bytes'])}, "
-      f"free {human_size(d['free_bytes'])} at {d['checked_path']} — {verdict_note}")
+    p(
+        f"  disk:         needs ~{human_size(d['needed_bytes'])}, "
+        f"free {human_size(d['free_bytes'])} at {d['checked_path']} — {verdict_note}"
+    )
 
     if est["variants"]:
         v = est["variants"]
-        p(f"\n  Quantized variants upstream ({v['count_listed']} listed, cap {v['query_limit']}; "
-          f"sizes fetched for top {v['detail_limit']} by downloads):")
-        for row in v["repos"][:v["detail_limit"]]:
-            size = human_size(row["total_size_bytes"]) if row["total_size_bytes"] else "?"
+        p(
+            f"\n  Quantized variants upstream ({v['count_listed']} listed, cap {v['query_limit']}; "
+            f"sizes fetched for top {v['detail_limit']} by downloads):"
+        )
+        for row in v["repos"][: v["detail_limit"]]:
+            size = (
+                human_size(row["total_size_bytes"]) if row["total_size_bytes"] else "?"
+            )
             fmts = ",".join(row["formats"] or ["?"])
-            p(f"    {size:>10}  {fmts:<12} {row['repo_id']}  ({row['downloads']:,} downloads)")
+            p(
+                f"    {size:>10}  {fmts:<12} {row['repo_id']}  ({row['downloads']:,} downloads)"
+            )
         rest = v["count_listed"] - v["detail_limit"]
         if rest > 0:
             p(f"    ... and {rest} more (darsay estimate <source> to size any of them)")

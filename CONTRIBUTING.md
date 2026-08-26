@@ -19,6 +19,7 @@ Python 3.10+ (development uses 3.14). From the repo root:
 python3 -m venv .venv
 .venv/bin/pip install -e ".[fast-hash,smoke,dev]"
 .venv/bin/darsay --version
+.venv/bin/ruff check && .venv/bin/ruff format --check
 .venv/bin/pytest                    # unit + integration, no network
 ```
 
@@ -31,8 +32,22 @@ provider) on every run, live Hub e2e opt-in. See
 ```
 
 Never archive into the gitignored `vault/` you use for real archives. GitHub
-Actions runs the hermetic suite and the Hub path on every push and pull
-request.
+Actions runs Ruff, the hermetic suite, and the Hub path on every push and
+pull request.
+
+## Lint and format
+
+[Ruff](https://docs.astral.sh/ruff/) is the linter and formatter. It
+ships in the `dev` extra; config is `[tool.ruff]` in `pyproject.toml`.
+
+```bash
+.venv/bin/ruff check          # lint
+.venv/bin/ruff format         # rewrite to the project style
+.venv/bin/ruff check --fix    # lint, apply safe fixes
+```
+
+CI runs `ruff check` and `ruff format --check`. Do not add flake8,
+Black, or isort — Ruff replaces them.
 
 ## Invariants
 

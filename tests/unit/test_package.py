@@ -7,7 +7,6 @@ from darsay import SCHEMA_VERSION, __version__
 from darsay.export import MVB_FORMAT_VERSION
 from darsay.hydrate import ENGINES
 
-
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -33,7 +32,11 @@ def test_runner_scripts_are_packaged():
     import darsay
 
     root = Path(darsay.__file__).parent / "runners"
-    missing = [spec["runner"] for spec in ENGINES.values() if not (root / spec["runner"]).is_file()]
+    missing = [
+        spec["runner"]
+        for spec in ENGINES.values()
+        if not (root / spec["runner"]).is_file()
+    ]
     assert missing == []
 
 

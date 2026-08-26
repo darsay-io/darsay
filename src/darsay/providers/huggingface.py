@@ -7,10 +7,10 @@ ref, or the unprefixed Hub shorthand (``owner/name``, ``datasets/owner/name``).
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator
 from urllib.parse import urlparse
 
 from .base import (
@@ -32,8 +32,30 @@ VARIANT_QUERY_LIMIT = 100
 VARIANT_DETAIL_LIMIT = 10
 RELATED_QUERY_LIMIT = 100
 
-_FORMAT_TAGS = ("gguf", "mlx", "awq", "gptq", "fp8", "4-bit", "8-bit", "exl2", "exl3", "onnx")
-_FORMAT_NAME_HINTS = ("nvfp4", "fp8", "awq", "gptq", "int8", "int4", "mlx", "gguf", "exl3", "exl2")
+_FORMAT_TAGS = (
+    "gguf",
+    "mlx",
+    "awq",
+    "gptq",
+    "fp8",
+    "4-bit",
+    "8-bit",
+    "exl2",
+    "exl3",
+    "onnx",
+)
+_FORMAT_NAME_HINTS = (
+    "nvfp4",
+    "fp8",
+    "awq",
+    "gptq",
+    "int8",
+    "int4",
+    "mlx",
+    "gguf",
+    "exl3",
+    "exl2",
+)
 
 
 def _json_value(value):
@@ -97,10 +119,10 @@ def parse_base_model_tags(tags: list[str]) -> tuple[list[str], dict[str, str]]:
     for tag in tags:
         if not tag.startswith("base_model:"):
             continue
-        rest = tag[len("base_model:"):]
+        rest = tag[len("base_model:") :]
         for rel in BASE_MODEL_RELATIONS:
             if rest.startswith(rel + ":"):
-                rest = rest[len(rel) + 1:]
+                rest = rest[len(rel) + 1 :]
                 if rest:
                     relations[rest] = rel
                 break
@@ -122,9 +144,7 @@ class HuggingFaceProvider(SourceProvider):
             parsed = urlparse(s)
             host = parsed.netloc.lower().removeprefix("www.")
             if host not in self.url_hosts:
-                raise SystemExit(
-                    f"error: not a {self.label} URL: {locator!r}"
-                )
+                raise SystemExit(f"error: not a {self.label} URL: {locator!r}")
             s = parsed.path.lstrip("/")
             from_url = True
         s = s.split("?", 1)[0].split("#", 1)[0].strip("/")
@@ -241,9 +261,11 @@ class HuggingFaceProvider(SourceProvider):
 
         import huggingface_hub.constants as hub_constants
         import huggingface_hub.file_download as file_download
+
         try:
             from huggingface_hub.utils._xet import abort_xet_session
         except ImportError:
+
             def abort_xet_session():
                 return None
 
@@ -279,8 +301,12 @@ class HuggingFaceProvider(SourceProvider):
             with incomplete_path.open("ab") as handle:
                 resume_size = handle.tell()
                 if expected_size is not None:
-                    file_download._check_disk_space(expected_size, incomplete_path.parent)
-                    file_download._check_disk_space(expected_size, destination_path.parent)
+                    file_download._check_disk_space(
+                        expected_size, incomplete_path.parent
+                    )
+                    file_download._check_disk_space(
+                        expected_size, destination_path.parent
+                    )
                 if xet_file_data is not None and file_download.is_xet_available():
                     file_download.xet_get(
                         incomplete_path=incomplete_path,
@@ -349,20 +375,27 @@ class HuggingFaceProvider(SourceProvider):
         from huggingface_hub.utils import HfHubHTTPError
 
         api = HfApi()
-        listed = list(api.list_models(
-            filter=f"base_model:quantized:{source.locator}",
-            limit=VARIANT_QUERY_LIMIT,
-        ))
+        listed = list(
+            api.list_models(
+                filter=f"base_model:quantized:{source.locator}",
+                limit=VARIANT_QUERY_LIMIT,
+            )
+        )
         listed.sort(key=lambda m: -(m.downloads or 0))
-        rows = [{
-            "repo_id": m.id,
-            "downloads": m.downloads,
-            "formats": _variant_formats(m.id, m.tags),
-            "total_size_bytes": None,
-        } for m in listed]
+        rows = [
+            {
+                "repo_id": m.id,
+                "downloads": m.downloads,
+                "formats": _variant_formats(m.id, m.tags),
+                "total_size_bytes": None,
+            }
+            for m in listed
+        ]
         detailed = rows[:VARIANT_DETAIL_LIMIT]
         if detailed:
-            progress(f"Sizing top {len(detailed)} of {len(rows)} quantized variants ...")
+            progress(
+                f"Sizing top {len(detailed)} of {len(rows)} quantized variants ..."
+            )
         for row in detailed:
             try:
                 vi = api.model_info(row["repo_id"], files_metadata=True)
@@ -384,12 +417,17 @@ class HuggingFaceProvider(SourceProvider):
         card = metadata.get("card_data") or {}
         tags = list(metadata.get("tags") or [])
         if source.artifact_type == "dataset":
-            related = {"as_of": _utc_now(), "query_limit": RELATED_QUERY_LIMIT,
-                       "models_trained_on": None}
+            related = {
+                "as_of": _utc_now(),
+                "query_limit": RELATED_QUERY_LIMIT,
+                "models_trained_on": None,
+            }
             try:
-                models = list(api.list_models(
-                    filter=f"dataset:{source.locator}", limit=RELATED_QUERY_LIMIT
-                ))
+                models = list(
+                    api.list_models(
+                        filter=f"dataset:{source.locator}", limit=RELATED_QUERY_LIMIT
+                    )
+                )
                 related["models_trained_on"] = sorted(m.id for m in models)
             except Exception:
                 pass
@@ -408,12 +446,19 @@ class HuggingFaceProvider(SourceProvider):
             "finetunes": None,
             "adapters": None,
         }
-        kinds = {"quantized": "quantized_versions", "finetune": "finetunes", "adapter": "adapters"}
+        kinds = {
+            "quantized": "quantized_versions",
+            "finetune": "finetunes",
+            "adapter": "adapters",
+        }
         for kind, key in kinds.items():
             try:
-                models = list(api.list_models(
-                    filter=f"base_model:{kind}:{source.locator}", limit=RELATED_QUERY_LIMIT
-                ))
+                models = list(
+                    api.list_models(
+                        filter=f"base_model:{kind}:{source.locator}",
+                        limit=RELATED_QUERY_LIMIT,
+                    )
+                )
                 related[key] = sorted(m.id for m in models)
             except Exception:
                 pass
@@ -421,7 +466,9 @@ class HuggingFaceProvider(SourceProvider):
             ggufs = [m for m in related["quantized_versions"] if "gguf" in m.lower()]
             related["gguf_repos"] = ggufs or None
 
-        base_models = [b for b in (_as_list(card.get("base_model")) or []) if isinstance(b, str)]
+        base_models = [
+            b for b in (_as_list(card.get("base_model")) or []) if isinstance(b, str)
+        ]
         tag_bases, tag_relations = parse_base_model_tags(tags)
         for b in tag_bases:
             if b not in base_models:
@@ -439,8 +486,12 @@ class HuggingFaceProvider(SourceProvider):
             "training_datasets": _as_list(card.get("datasets")),
             "quantized_versions": related["quantized_versions"],
             "gguf_repos": related["gguf_repos"],
-            "finetunes_count": len(related["finetunes"]) if related["finetunes"] is not None else None,
-            "adapters_count": len(related["adapters"]) if related["adapters"] is not None else None,
+            "finetunes_count": len(related["finetunes"])
+            if related["finetunes"] is not None
+            else None,
+            "adapters_count": len(related["adapters"])
+            if related["adapters"] is not None
+            else None,
             "related_variants": None,
             "successors": None,
             "ecosystem_snapshot_as_of": related["as_of"],
@@ -486,7 +537,10 @@ class HuggingFaceProvider(SourceProvider):
             metadata_path = download_root.joinpath(*relative.parts).with_name(
                 f"{relative.name}.metadata"
             )
-            path = metadata_path.parent / f"{_short_hash(metadata_path.name)}.{etag}.incomplete"
+            path = (
+                metadata_path.parent
+                / f"{_short_hash(metadata_path.name)}.{etag}.incomplete"
+            )
             return path.stat().st_size if path.is_file() else 0
         except ImportError:
             matches = list(download_root.rglob(f"*.{etag}.incomplete"))
@@ -512,16 +566,20 @@ class HuggingFaceProvider(SourceProvider):
     def _snapshot(self, source: SourceRef, revision_ref: str, info) -> Snapshot:
         files = []
         for sibling in info.siblings or []:
-            files.append(FileSpec(
-                path=sibling.rfilename,
-                size=sibling.size,
-                sha256=sibling.lfs.sha256 if sibling.lfs else None,
-                git_sha1=sibling.blob_id if not sibling.lfs else None,
-            ))
+            files.append(
+                FileSpec(
+                    path=sibling.rfilename,
+                    size=sibling.size,
+                    sha256=sibling.lfs.sha256 if sibling.lfs else None,
+                    git_sha1=sibling.blob_id if not sibling.lfs else None,
+                )
+            )
         files.sort(key=lambda item: item.path)
         card = info.card_data.to_dict() if info.card_data else {}
         last_modified = (
-            info.last_modified.isoformat(timespec="seconds") if info.last_modified else None
+            info.last_modified.isoformat(timespec="seconds")
+            if info.last_modified
+            else None
         )
         return Snapshot(
             source=source,
@@ -533,7 +591,9 @@ class HuggingFaceProvider(SourceProvider):
                 "tags": list(info.tags or []),
                 "gated": getattr(info, "gated", None) or False,
                 "created_at": (
-                    info.created_at.isoformat(timespec="seconds") if info.created_at else None
+                    info.created_at.isoformat(timespec="seconds")
+                    if info.created_at
+                    else None
                 ),
                 "last_modified": last_modified,
                 "downloads": getattr(info, "downloads", None),

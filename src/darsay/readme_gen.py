@@ -37,7 +37,9 @@ def _tested_hardware_line(tested: list | None) -> str:
     for e in tested:
         label = e.get("chip") or e.get("host") or "unknown machine"
         perf = f", {e['tokens_per_second']} tok/s" if e.get("tokens_per_second") else ""
-        parts.append(f"{label} ({e.get('device', '?')}, {e.get('engine', '?')}{perf}, {str(e.get('at', ''))[:10]})")
+        parts.append(
+            f"{label} ({e.get('device', '?')}, {e.get('engine', '?')}{perf}, {str(e.get('at', ''))[:10]})"
+        )
     return "- Tested hardware: " + "; ".join(parts)
 
 
@@ -51,11 +53,15 @@ def _curation_body(bundle_dir: Path) -> str | None:
     idx = text.find("\n## ")
     if idx == -1:
         return None
-    body = text[idx + 1:].strip()
-    return "\n".join("#" + line if line.startswith("## ") else line for line in body.splitlines())
+    body = text[idx + 1 :].strip()
+    return "\n".join(
+        "#" + line if line.startswith("## ") else line for line in body.splitlines()
+    )
 
 
-def _header_table_close(lines: list[str], lic: dict, inv: dict, arc: dict, sec: dict) -> None:
+def _header_table_close(
+    lines: list[str], lic: dict, inv: dict, arc: dict, sec: dict
+) -> None:
     lines += [
         f"| **License** | {lic['name'] or lic['spdx_id'] or 'UNKNOWN'} |",
         f"| **Payload** | {inv['file_count']} files, {human_size(inv['total_size_bytes'])} |",
@@ -96,22 +102,34 @@ def _source_lines(src: dict) -> list[str]:
     ]
     access = src.get("access") or {}
     if access.get("gated"):
-        lines.append(f"- Access: **gated upstream** (mode: {access['gated']}) — the gate agreement "
-                     "is not part of the snapshot; re-fetching requires an account that accepted it")
-    flagged = [t for t in (src.get("upstream_tags") or []) if t in ALIGNMENT_MODIFICATION_TAGS]
+        lines.append(
+            f"- Access: **gated upstream** (mode: {access['gated']}) — the gate agreement "
+            "is not part of the snapshot; re-fetching requires an account that accepted it"
+        )
+    flagged = [
+        t for t in (src.get("upstream_tags") or []) if t in ALIGNMENT_MODIFICATION_TAGS
+    ]
     if flagged:
-        lines.append(f"- Upstream tags flag **alignment modifications**: {', '.join(flagged)} "
-                     "— see the archived model card and `curation.md`")
+        lines.append(
+            f"- Upstream tags flag **alignment modifications**: {', '.join(flagged)} "
+            "— see the archived model card and `curation.md`"
+        )
     stats = src.get("upstream_stats_at_archive") or {}
     if stats.get("downloads_last_month") is not None:
-        lines.append(f"- Upstream popularity at archive time: {stats['downloads_last_month']:,} downloads/month, "
-                     f"{stats.get('likes', 0):,} likes")
+        lines.append(
+            f"- Upstream popularity at archive time: {stats['downloads_last_month']:,} downloads/month, "
+            f"{stats.get('likes', 0):,} likes"
+        )
     subset = src.get("subset")
     if subset:
         patterns = ", ".join(f"`{p}`" for p in subset.get("include") or [])
         omitted = subset.get("omitted_file_count")
         if omitted is None:
-            omitted = max(0, int(subset.get("full_file_count") or 0) - int(subset.get("kept_file_count") or 0))
+            omitted = max(
+                0,
+                int(subset.get("full_file_count") or 0)
+                - int(subset.get("kept_file_count") or 0),
+            )
         extra = " + sidecars" if subset.get("sidecars") else ""
         lines.append(
             f"- Subset: kept {subset.get('kept_file_count')} of {subset.get('full_file_count')} "
@@ -129,7 +147,8 @@ def _licensing_lines(lic: dict) -> list[str]:
         "",
         "## Licensing",
         "",
-        f"- SPDX: `{lic['spdx_id'] or 'unknown'}`" + (" — **needs manual review**" if lic["needs_manual_review"] else ""),
+        f"- SPDX: `{lic['spdx_id'] or 'unknown'}`"
+        + (" — **needs manual review**" if lic["needs_manual_review"] else ""),
         f"- Commercial use: {flag(lic['commercial_use'])} · Redistribution: {flag(lic['redistribution'])} · "
         f"Modification: {flag(lic['modification'])} · Attribution required: {flag(lic['attribution_required'])}",
         f"- License text in bundle: {', '.join('`' + f + '`' for f in lic['license_files']) or 'NONE SHIPPED UPSTREAM'}",
@@ -165,10 +184,17 @@ def _inventory_lines(inv: dict) -> list[str]:
         "|---|---|---|---|",
     ]
     for f in inv["files"]:
-        match = {True: "✓", False: "✗ MISMATCH", None: "—"}[f["verified_against_upstream"]]
-        lines.append(f"| `{f['path']}` | {human_size(f['size'])} | `{f['sha256'][:16]}…` | {match} |")
-    lines.append("\nFull hashes (SHA-256" + (", BLAKE3" if any(f.get("blake3") for f in inv["files"]) else "")
-                 + ", upstream LFS/git) are in `manifest.json`.")
+        match = {True: "✓", False: "✗ MISMATCH", None: "—"}[
+            f["verified_against_upstream"]
+        ]
+        lines.append(
+            f"| `{f['path']}` | {human_size(f['size'])} | `{f['sha256'][:16]}…` | {match} |"
+        )
+    lines.append(
+        "\nFull hashes (SHA-256"
+        + (", BLAKE3" if any(f.get("blake3") for f in inv["files"]) else "")
+        + ", upstream LFS/git) are in `manifest.json`."
+    )
     return lines
 
 
@@ -178,7 +204,9 @@ def _curation_and_footer_lines(bundle_dir: Path, m: dict) -> list[str]:
     if curation:
         lines.append(curation)
     else:
-        lines.append("_No curation notes yet — edit `curation.md` and run `darsay regen`._")
+        lines.append(
+            "_No curation notes yet — edit `curation.md` and run `darsay regen`._"
+        )
     lines += [
         "",
         "---",
@@ -235,9 +263,15 @@ def _render_model_readme(bundle_dir: Path, m: dict) -> str:
         "",
         "## Model metadata",
         "",
-        f"- Parameters: {meta['parameter_count']:,}" if meta["parameter_count"] else "- Parameters: unknown",
+        f"- Parameters: {meta['parameter_count']:,}"
+        if meta["parameter_count"]
+        else "- Parameters: unknown",
         f"- Layers {meta['num_hidden_layers']} · hidden {meta['hidden_size']} · heads {meta['num_attention_heads']}"
-        + (f" (KV {meta['num_key_value_heads']})" if meta.get("num_key_value_heads") else ""),
+        + (
+            f" (KV {meta['num_key_value_heads']})"
+            if meta.get("num_key_value_heads")
+            else ""
+        ),
         f"- Precision: {meta['precision'] or '?'} · Quantization: {meta['quantization'] or 'none'}"
         f" · Shards: {meta['weight_shards'] or '?'}",
         f"- Tokenizer: {tok['class'] or '?'}, vocab {tok['vocab_size'] or '?'}, "
@@ -256,37 +290,62 @@ def _render_model_readme(bundle_dir: Path, m: dict) -> str:
         "",
         f"- Checksums: **{check['status'].upper()}** at {check['at']} ({check['files_checked']} files)",
         f"- Completeness: **{val['completeness']['status']}**"
-        + (f" — missing recommended: {', '.join(val['completeness']['missing_recommended'])}"
-           if val["completeness"].get("missing_recommended") else ""),
+        + (
+            f" — missing recommended: {', '.join(val['completeness']['missing_recommended'])}"
+            if val["completeness"].get("missing_recommended")
+            else ""
+        ),
         f"- Smoke tests: tokenizer `{tok_smoke}`, inference `{inf_smoke}`",
-        f"- Full report: [VERIFICATION.md](VERIFICATION.md) · history in `verification.json`",
+        "- Full report: [VERIFICATION.md](VERIFICATION.md) · history in `verification.json`",
         "",
         "## Relationships",
         "",
     ]
-    bases = rel.get("base_models") or ([rel["base_model"]] if rel.get("base_model") else [])
+    bases = rel.get("base_models") or (
+        [rel["base_model"]] if rel.get("base_model") else []
+    )
     if bases:
         relation = rel.get("base_model_relation")
-        lines.append("- Derived from: " + ", ".join(f"`{b}`" for b in bases)
-                     + (f" — relation: **{relation}**" if relation else " — relation not declared upstream"))
+        lines.append(
+            "- Derived from: "
+            + ", ".join(f"`{b}`" for b in bases)
+            + (
+                f" — relation: **{relation}**"
+                if relation
+                else " — relation not declared upstream"
+            )
+        )
     else:
         lines.append("- Derived from: none declared (base model)")
     if rel.get("gguf_repos"):
         shown = rel["gguf_repos"][:8]
         more = len(rel["gguf_repos"]) - len(shown)
-        lines.append(f"- Known GGUF conversions ({len(rel['gguf_repos'])}): "
-                     + ", ".join(f"`{g}`" for g in shown) + (f" … +{more} more" if more > 0 else ""))
+        lines.append(
+            f"- Known GGUF conversions ({len(rel['gguf_repos'])}): "
+            + ", ".join(f"`{g}`" for g in shown)
+            + (f" … +{more} more" if more > 0 else "")
+        )
     cap = rel.get("query_limit") or 100
 
     def capped(n):
         return f"≥{n} (query capped)" if n == cap else str(n)
 
     if rel.get("quantized_versions"):
-        lines.append(f"- Known quantizations at archive time: {capped(len(rel['quantized_versions']))} repos (full list in manifest)")
+        lines.append(
+            f"- Known quantizations at archive time: {capped(len(rel['quantized_versions']))} repos (full list in manifest)"
+        )
     if rel.get("finetunes_count") is not None:
-        lines.append(f"- Public finetunes at archive time: {capped(rel['finetunes_count'])}"
-                     + (f" · adapters: {capped(rel['adapters_count'])}" if rel.get("adapters_count") is not None else ""))
-    lines.append(f"- Ecosystem snapshot taken: {rel.get('ecosystem_snapshot_as_of', 'n/a')}")
+        lines.append(
+            f"- Public finetunes at archive time: {capped(rel['finetunes_count'])}"
+            + (
+                f" · adapters: {capped(rel['adapters_count'])}"
+                if rel.get("adapters_count") is not None
+                else ""
+            )
+        )
+    lines.append(
+        f"- Ecosystem snapshot taken: {rel.get('ecosystem_snapshot_as_of', 'n/a')}"
+    )
 
     lines += _archive_record_lines(arc, sec)
     lines += _inventory_lines(inv)
@@ -299,7 +358,7 @@ def _render_model_readme(bundle_dir: Path, m: dict) -> str:
         "One command — builds (or reuses) a local env, then runs a prompt fully offline:",
         "",
         "```bash",
-        f"darsay run {bundle_path} \"Say hello in one short sentence.\"",
+        f'darsay run {bundle_path} "Say hello in one short sentence."',
         "```",
         "",
         "(`darsay hydrate` prepares the env without running; envs live outside the",
@@ -345,8 +404,13 @@ def _render_dataset_readme(bundle_dir: Path, m: dict) -> str:
     structure_smoke = val["smoke_tests"].get("structure", {}).get("status", "not-run")
 
     formats = dm.get("formats") or {}
-    fmt_summary = ", ".join(f"{ext} ({d['file_count']}, {human_size(d['total_size_bytes'])})"
-                            for ext, d in formats.items()) or "—"
+    fmt_summary = (
+        ", ".join(
+            f"{ext} ({d['file_count']}, {human_size(d['total_size_bytes'])})"
+            for ext, d in formats.items()
+        )
+        or "—"
+    )
     declared = dm.get("declared") or {}
     configs = sorted((declared.get("configs") or {}).keys())
     example_total = declared.get("example_count_total")
@@ -389,21 +453,33 @@ def _render_dataset_readme(bundle_dir: Path, m: dict) -> str:
         for cfg_name in configs:
             cfg = declared["configs"][cfg_name]
             for split_name, split in (cfg.get("splits") or {}).items():
-                ex = f"{split['num_examples']:,}" if split.get("num_examples") is not None else "?"
+                ex = (
+                    f"{split['num_examples']:,}"
+                    if split.get("num_examples") is not None
+                    else "?"
+                )
                 nb = human_size(split.get("num_bytes"))
                 lines.append(f"| {cfg_name} | {split_name} | {ex} | {nb} |")
     measured = dm.get("measured") or {}
     if measured.get("status") in ("measured", "partial"):
         total_rows = measured.get("total_rows")
         lines.append("")
-        lines.append(f"Measured rows ({measured.get('method')}): "
-                     + (f"{total_rows:,}" if total_rows is not None else "?")
-                     + f" across {len(measured.get('row_counts') or {})} parquet files"
-                     + (" — some files unreadable, see manifest" if measured["status"] == "partial" else "")
-                     + ".")
+        lines.append(
+            f"Measured rows ({measured.get('method')}): "
+            + (f"{total_rows:,}" if total_rows is not None else "?")
+            + f" across {len(measured.get('row_counts') or {})} parquet files"
+            + (
+                " — some files unreadable, see manifest"
+                if measured["status"] == "partial"
+                else ""
+            )
+            + "."
+        )
     else:
         lines.append("")
-        lines.append(f"Measured rows: skipped — {measured.get('reason', 'not recorded')}.")
+        lines.append(
+            f"Measured rows: skipped — {measured.get('reason', 'not recorded')}."
+        )
 
     lines += [
         "",
@@ -411,28 +487,48 @@ def _render_dataset_readme(bundle_dir: Path, m: dict) -> str:
         "",
         f"- Checksums: **{check['status'].upper()}** at {check['at']} ({check['files_checked']} files)",
         f"- Completeness: **{val['completeness']['status']}**"
-        + (f" — missing recommended: {', '.join(val['completeness']['missing_recommended'])}"
-           if val["completeness"].get("missing_recommended") else ""),
+        + (
+            f" — missing recommended: {', '.join(val['completeness']['missing_recommended'])}"
+            if val["completeness"].get("missing_recommended")
+            else ""
+        ),
         f"- Structure checks: `{structure_smoke}` (parquet magic, JSONL parse, CSV sniff — `darsay smoke`)",
-        f"- Full report: [VERIFICATION.md](VERIFICATION.md) · history in `verification.json`",
+        "- Full report: [VERIFICATION.md](VERIFICATION.md) · history in `verification.json`",
         "",
         "## Relationships",
         "",
-        f"- Source datasets (declared upstream): "
-        + (", ".join(f"`{d}`" for d in rel["source_datasets"]) if rel.get("source_datasets") else "none declared"),
+        "- Source datasets (declared upstream): "
+        + (
+            ", ".join(f"`{d}`" for d in rel["source_datasets"])
+            if rel.get("source_datasets")
+            else "none declared"
+        ),
     ]
     cap = rel.get("query_limit") or 100
     trained = rel.get("models_trained_on")
     if trained is not None:
-        count = f"≥{len(trained)} (query capped)" if len(trained) == cap else str(len(trained))
+        count = (
+            f"≥{len(trained)} (query capped)"
+            if len(trained) == cap
+            else str(len(trained))
+        )
         shown = trained[:8]
         more = len(trained) - len(shown)
-        lines.append(f"- Models trained on this dataset at archive time: {count}"
-                     + (": " + ", ".join(f"`{t}`" for t in shown) + (f" … +{more} more" if more > 0 else "")
-                        if shown else ""))
+        lines.append(
+            f"- Models trained on this dataset at archive time: {count}"
+            + (
+                ": "
+                + ", ".join(f"`{t}`" for t in shown)
+                + (f" … +{more} more" if more > 0 else "")
+                if shown
+                else ""
+            )
+        )
     else:
         lines.append("- Models trained on this dataset: query failed at archive time")
-    lines.append(f"- Ecosystem snapshot taken: {rel.get('ecosystem_snapshot_as_of', 'n/a')}")
+    lines.append(
+        f"- Ecosystem snapshot taken: {rel.get('ecosystem_snapshot_as_of', 'n/a')}"
+    )
 
     lines += _archive_record_lines(arc, sec)
     lines += _inventory_lines(inv)
@@ -470,4 +566,6 @@ def _render_dataset_readme(bundle_dir: Path, m: dict) -> str:
 
 
 def write_bundle_readme(bundle_dir: Path, manifest: dict) -> None:
-    (bundle_dir / "README.md").write_text(render_bundle_readme(bundle_dir, manifest), encoding="utf-8")
+    (bundle_dir / "README.md").write_text(
+        render_bundle_readme(bundle_dir, manifest), encoding="utf-8"
+    )

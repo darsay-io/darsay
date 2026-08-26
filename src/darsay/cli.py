@@ -64,7 +64,9 @@ def _vault_path(args, *, announce: bool = False) -> Path:
     return path
 
 
-def _bundle_dir(args, spec: str | None = None, *, require_manifest: bool = True) -> Path:
+def _bundle_dir(
+    args, spec: str | None = None, *, require_manifest: bool = True
+) -> Path:
     from .vault import resolve_bundle
 
     return resolve_bundle(
@@ -78,7 +80,9 @@ def _positive_float(value: str) -> float:
     try:
         parsed = float(value)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"expected a positive number, got {value!r}") from exc
+        raise argparse.ArgumentTypeError(
+            f"expected a positive number, got {value!r}"
+        ) from exc
     if parsed <= 0:
         raise argparse.ArgumentTypeError(f"expected a positive number, got {value!r}")
     return parsed
@@ -95,7 +99,9 @@ def _byte_size(value: str) -> int:
     multiplier = 1024 ** ("KMGT".index(match.group(2)) + 1) if match.group(2) else 1
     parsed = int(number * multiplier)
     if parsed <= 0:
-        raise argparse.ArgumentTypeError(f"expected a positive byte size, got {value!r}")
+        raise argparse.ArgumentTypeError(
+            f"expected a positive byte size, got {value!r}"
+        )
     return parsed
 
 
@@ -103,7 +109,9 @@ def _positive_int(value: str) -> int:
     try:
         parsed = int(value)
     except ValueError as exc:
-        raise argparse.ArgumentTypeError(f"expected a positive integer, got {value!r}") from exc
+        raise argparse.ArgumentTypeError(
+            f"expected a positive integer, got {value!r}"
+        ) from exc
     if parsed <= 0:
         raise argparse.ArgumentTypeError(f"expected a positive integer, got {value!r}")
     return parsed
@@ -214,7 +222,10 @@ def _estimate_catalog(args, vault, cat_path) -> int:
     for entry in selected:
         parsed = try_parse_source(entry["source"])
         if parsed is None:
-            print(f"warning: unknown source provider in {entry['source']!r}", file=sys.stderr)
+            print(
+                f"warning: unknown source provider in {entry['source']!r}",
+                file=sys.stderr,
+            )
             failed += 1
             continue
         try:
@@ -231,14 +242,18 @@ def _estimate_catalog(args, vault, cat_path) -> int:
             continue
         digest = estimate_digest(est)
         entry["estimate"] = digest
-        digests.append({"source": entry["source"], "include": entry.get("include"), **digest})
+        digests.append(
+            {"source": entry["source"], "include": entry.get("include"), **digest}
+        )
         if quiet:
             continue
         extra = f"  [{', '.join(entry['include'])}]" if entry.get("include") else ""
         gated = "  GATED" if digest.get("gated") else ""
         params = ""
         if digest.get("parameters"):
-            dtype = f" {digest['dominant_dtype']}" if digest.get("dominant_dtype") else ""
+            dtype = (
+                f" {digest['dominant_dtype']}" if digest.get("dominant_dtype") else ""
+            )
             params = f"  {human_params(digest['parameters'])}{dtype}"
         print(
             f"  {entry['source']}{extra}  {human_size(digest['payload_bytes'])}  "
@@ -260,7 +275,6 @@ def _estimate_catalog(args, vault, cat_path) -> int:
 
 def cmd_archive(args) -> int:
     from .archiver import archive
-    from .catalog import try_resolve_catalog
     from .transfer import PartialTransfer
 
     vault = _vault_path(args, announce=True)
@@ -268,7 +282,9 @@ def cmd_archive(args) -> int:
     if target is None:
         return 0
     source, revision, include = target
-    max_bytes = int(args.max_gb * 1024**3) if args.max_gb is not None else args.max_bytes
+    max_bytes = (
+        int(args.max_gb * 1024**3) if args.max_gb is not None else args.max_bytes
+    )
     try:
         bundle = archive(
             source,
@@ -286,20 +302,29 @@ def cmd_archive(args) -> int:
     except PartialTransfer as stop:
         print(f"\nArchive paused cleanly ({stop.reason}: {stop.detail}).")
         print(f"Partial bundle: {stop.bundle_dir}")
-        print("Re-run the same archive command to continue from verified and partial bytes.")
+        print(
+            "Re-run the same archive command to continue from verified and partial bytes."
+        )
         return 10
     if bundle is None:  # --dry-run printed the plan and intentionally did not register
         return 0
     bundle_id = f"{bundle.parent.name}@{bundle.name}"
     from .archiver import load_manifest
+
     artifact = load_manifest(bundle).get("artifact_type")
-    next_cmd = f"darsay info {bundle_id}" if artifact == "dataset" else f"darsay run {bundle_id}"
+    next_cmd = (
+        f"darsay info {bundle_id}"
+        if artifact == "dataset"
+        else f"darsay run {bundle_id}"
+    )
     print(f"\nBundle ready: {bundle}")
     print(f"  id:           {bundle_id}")
     print(f"  manifest:     {bundle / 'manifest.json'}")
     print(f"  readme:       {bundle / 'README.md'}")
     print(f"  verification: {bundle / 'VERIFICATION.md'}")
-    print(f"  curation:     {bundle / 'curation.md'}  <- edit this, then `darsay regen`")
+    print(
+        f"  curation:     {bundle / 'curation.md'}  <- edit this, then `darsay regen`"
+    )
     print(f"  next:         {next_cmd}")
     return 0
 
@@ -343,7 +368,9 @@ def _archive_target(args, vault) -> tuple[str, str | None, list[str] | None] | N
             "error: --next already applies the entry’s revision/include; drop --revision/--include"
         )
     if next_flag != "" and source:
-        raise SystemExit("error: --next already chose the catalog; do not also pass SOURCE")
+        raise SystemExit(
+            "error: --next already chose the catalog; do not also pass SOURCE"
+        )
     catalog_spec = source if next_flag == "" else next_flag
     if not catalog_spec:
         raise SystemExit("error: --next requires a catalog")
@@ -470,7 +497,14 @@ def _list_catalog(args, vault, records, spec) -> int:
     sort = getattr(args, "sort", None) or "next"
     rows = sort_rows(rows, sort)
     if args.json:
-        print(json.dumps(overlay_envelope(catalog, vault, rows), indent=2, ensure_ascii=False, default=str))
+        print(
+            json.dumps(
+                overlay_envelope(catalog, vault, rows),
+                indent=2,
+                ensure_ascii=False,
+                default=str,
+            )
+        )
         return 0
     if args.ids:
         printable = [r for r in rows if r.get("status") != "unknown"]
@@ -495,7 +529,9 @@ def _list_catalog(args, vault, records, spec) -> int:
         print(format_archive_command(source, revision, include, vault=args.vault))
         return 0
     if not catalog["entries"]:
-        print(f"Catalog {catalog['id']}  ·  {catalog.get('title') or catalog['id']}  ·  0 sources")
+        print(
+            f"Catalog {catalog['id']}  ·  {catalog.get('title') or catalog['id']}  ·  0 sources"
+        )
         print()
         print("No entries. Add one:")
         print(f"  darsay catalog add {catalog['id']} huggingface:owner/name --desire 8")
@@ -522,6 +558,7 @@ def cmd_catalog(args) -> int:
         return 0
     if not catalogs:
         from .catalog import catalogs_dir
+
         print(f"No catalogs in {catalogs_dir(vault)}/")
         print("  hint: darsay catalog new summer")
         return 0
@@ -545,8 +582,12 @@ def cmd_catalog_new(args) -> int:
     print(f"  id:       {catalog['id']}")
     print(f"  catalog:  {dest / 'catalog.json'}")
     print(f"  readme:   {dest / 'README.md'}")
-    print(f"  curation: {dest / 'curation.md'}  <- edit this, then `darsay catalog regen`")
-    print(f"  next:     darsay catalog add {catalog['id']} huggingface:owner/name --desire 8")
+    print(
+        f"  curation: {dest / 'curation.md'}  <- edit this, then `darsay catalog regen`"
+    )
+    print(
+        f"  next:     darsay catalog add {catalog['id']} huggingface:owner/name --desire 8"
+    )
     return 0
 
 
@@ -606,7 +647,14 @@ def cmd_catalog_add(args) -> int:
 
 
 def cmd_catalog_drop(args) -> int:
-    from .catalog import drop_entry, load_catalog, require_writable, resolve_catalog, save_catalog, write_catalog_readme
+    from .catalog import (
+        drop_entry,
+        load_catalog,
+        require_writable,
+        resolve_catalog,
+        save_catalog,
+        write_catalog_readme,
+    )
 
     vault = _vault_path(args, announce=True)
     path = resolve_catalog(vault, args.catalog)
@@ -644,7 +692,7 @@ def cmd_catalog_adopt(args) -> int:
         vault,
         dest_path,
         bool(args.write),
-        hint=f"adopt into a vault catalog; then list it",
+        hint="adopt into a vault catalog; then list it",
     )
     src_path = resolve_catalog(vault, args.other)
     dest = load_catalog(dest_path)
@@ -661,8 +709,14 @@ def cmd_catalog_adopt(args) -> int:
 
 
 def cmd_catalog_regen(args) -> int:
-    from .catalog import load_catalog, require_writable, resolve_catalog, save_catalog, write_catalog_readme
     from .archiver import utc_now
+    from .catalog import (
+        load_catalog,
+        require_writable,
+        resolve_catalog,
+        save_catalog,
+        write_catalog_readme,
+    )
 
     vault = _vault_path(args, announce=True)
     path = resolve_catalog(vault, args.catalog)
@@ -757,7 +811,9 @@ def cmd_du(args) -> int:
     print(f"Vault {vault}")
     for rec in records:
         note = "  (partial)" if rec.get("partial") else ""
-        print(f"  {human_size(rec.get('on_disk_bytes') or 0):>10}  {rec['bundle_id']}{note}")
+        print(
+            f"  {human_size(rec.get('on_disk_bytes') or 0):>10}  {rec['bundle_id']}{note}"
+        )
     print(f"  {human_size(runtime_bytes):>10}  .runtime")
     print(f"  {human_size(payload['total_bytes']):>10}  total")
     return 0
@@ -780,26 +836,43 @@ def cmd_info(args) -> int:
     print(f"{m['bundle_id']}  (schema v{m['schema_version']}, {m['artifact_type']})")
     print(f"  path:       {bundle}")
     src = m["source"]
-    print(f"  source:     {src['address']} @ {src['revision'][:12]} ({src.get('provider') or src['origin']})")
-    print(f"  license:    {m['licensing']['spdx_id']}  commercial={m['licensing']['commercial_use']}")
+    print(
+        f"  source:     {src['address']} @ {src['revision'][:12]} ({src.get('provider') or src['origin']})"
+    )
+    print(
+        f"  license:    {m['licensing']['spdx_id']}  commercial={m['licensing']['commercial_use']}"
+    )
     if m["artifact_type"] == "dataset":
         dm = m["dataset_metadata"]
-        fmts = ", ".join(f"{ext} x{d['file_count']}" for ext, d in (dm.get("formats") or {}).items())
+        fmts = ", ".join(
+            f"{ext} x{d['file_count']}" for ext, d in (dm.get("formats") or {}).items()
+        )
         declared = (dm.get("declared") or {}).get("example_count_total")
-        print(f"  formats:    {fmts or '?'}  declared examples={f'{declared:,}' if declared is not None else '?'}")
+        print(
+            f"  formats:    {fmts or '?'}  declared examples={f'{declared:,}' if declared is not None else '?'}"
+        )
     else:
         meta = m["model_metadata"]
-        print(f"  params:     {human_params(meta['parameter_count'])} {meta['precision'] or ''}  ctx={meta['context_length']}")
-    print(f"  payload:    {m['inventory']['file_count']} files, {human_size(m['inventory']['total_size_bytes'])}")
+        print(
+            f"  params:     {human_params(meta['parameter_count'])} {meta['precision'] or ''}  ctx={meta['context_length']}"
+        )
+    print(
+        f"  payload:    {m['inventory']['file_count']} files, {human_size(m['inventory']['total_size_bytes'])}"
+    )
     subset = src.get("subset")
     if subset:
         print(
             f"  subset:     {', '.join(subset.get('include') or [])}  "
             f"{subset.get('kept_file_count')} of {subset.get('full_file_count')} upstream files"
         )
-    print(f"  integrity:  {m['security']['integrity_status']}  last check {m['archive']['last_integrity_check']}")
+    print(
+        f"  integrity:  {m['security']['integrity_status']}  last check {m['archive']['last_integrity_check']}"
+    )
     smoke = m["validation"]["smoke_tests"]
-    print("  smoke:      " + " ".join(f"{name}={r['status']}" for name, r in smoke.items()))
+    print(
+        "  smoke:      "
+        + " ".join(f"{name}={r['status']}" for name, r in smoke.items())
+    )
     if m["artifact_type"] != "dataset":
         from .hydrate import load_hydration
 
@@ -813,7 +886,9 @@ def cmd_info(args) -> int:
                 run_note = f"last run {last['status']} ({', '.join(extras)})"
             else:
                 run_note = "no runs yet"
-            print(f"  hydration:  {hyd['engine']} in env {hyd['env']['key']} — {run_note}")
+            print(
+                f"  hydration:  {hyd['engine']} in env {hyd['env']['key']} — {run_note}"
+            )
         else:
             print(f"  hydration:  not hydrated (darsay hydrate {m['bundle_id']})")
     return 0
@@ -843,10 +918,13 @@ def cmd_assemble(args) -> int:
     )
     ledger = json.loads((bundle / "transfer.json").read_text(encoding="utf-8"))
     from .sources import source_from_ledger
+
     address = source_from_ledger(ledger).canonical
     print(f"\nCombined partial bundle: {bundle}")
     if plan["complete"]:
-        print("All payload files are present and verified; run archive once to register the bundle:")
+        print(
+            "All payload files are present and verified; run archive once to register the bundle:"
+        )
     else:
         print("Continue the combined transfer with:")
     print(
@@ -917,7 +995,9 @@ def cmd_envs(args) -> int:
         return 0
     for env in envs:
         used = ", ".join(env["used_by"]) or "UNREFERENCED (candidate for --prune)"
-        print(f"{env['key']}  python {env['python']}  {human_size(env['size_bytes'])}  created {env['created_at'][:10]}")
+        print(
+            f"{env['key']}  python {env['python']}  {human_size(env['size_bytes'])}  created {env['created_at'][:10]}"
+        )
         print(f"  {env['path']}")
         print(f"  used by: {used}")
     return 0
@@ -940,8 +1020,11 @@ def main(argv=None) -> int:
     vault_after = argparse.ArgumentParser(add_help=False)
     vault_after.add_argument("--vault", default=argparse.SUPPRESS, help=vault_help)
 
-    parser = argparse.ArgumentParser(prog="darsay", description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        prog="darsay",
+        description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
     parser.add_argument("--version", action="version", version=f"darsay {__version__}")
     parser.add_argument("--vault", default=None, help=vault_help)
     sub = parser.add_subparsers(dest="command", required=False)
@@ -950,45 +1033,104 @@ def main(argv=None) -> int:
         kwargs.setdefault("parents", [vault_after])
         return sub.add_parser(name, **kwargs)
 
-    p = add_cmd("estimate", help="preflight a source or refresh a catalog's cached sizes")
+    p = add_cmd(
+        "estimate", help="preflight a source or refresh a catalog's cached sizes"
+    )
     p.add_argument("target", help="source ref, catalog slug, or path to catalog.json")
-    p.add_argument("entry", nargs="?", help="when TARGET is a catalog, refresh only this source")
+    p.add_argument(
+        "entry", nargs="?", help="when TARGET is a catalog, refresh only this source"
+    )
     p.add_argument("--revision", help="branch, tag, or commit (default: main)")
-    p.add_argument("--include", action="append", metavar="GLOB",
-                   help="count only payload files matching GLOB (repeatable), "
-                        "e.g. --include '*Q4_K_M*' to size one GGUF quant of a pack repo")
-    p.add_argument("--variants", action="store_true",
-                   help="also list upstream quantized variants of this model, with sizes")
+    p.add_argument(
+        "--include",
+        action="append",
+        metavar="GLOB",
+        help="count only payload files matching GLOB (repeatable), "
+        "e.g. --include '*Q4_K_M*' to size one GGUF quant of a pack repo",
+    )
+    p.add_argument(
+        "--variants",
+        action="store_true",
+        help="also list upstream quantized variants of this model, with sizes",
+    )
     p.add_argument("--json", action="store_true", help="machine-readable output")
-    p.add_argument("--write", action="store_true",
-                   help="allow writing a path-addressed catalog (vault-named catalogs are always writable)")
+    p.add_argument(
+        "--write",
+        action="store_true",
+        help="allow writing a path-addressed catalog (vault-named catalogs are always writable)",
+    )
     p.set_defaults(func=cmd_estimate)
 
     p = add_cmd("archive", help="download and archive a model or dataset as a bundle")
-    p.add_argument("source", nargs="?", help="e.g. huggingface:Qwen/Qwen3-0.6B, datasets/<owner>/<name>, or a huggingface.co URL")
-    p.add_argument("--next", nargs="?", const="", metavar="CATALOG",
-                   help="archive the next unfinished overlay row of CATALOG")
-    p.add_argument("--revision", help="branch, tag, or commit (default: main; always pinned to the resolved commit)")
-    p.add_argument("--force", action="store_true", help="re-archive over an existing bundle")
-    p.add_argument("--dry-run", action="store_true",
-                   help="pin, reconcile, and print the transfer plan without moving payload bytes")
+    p.add_argument(
+        "source",
+        nargs="?",
+        help="e.g. huggingface:Qwen/Qwen3-0.6B, datasets/<owner>/<name>, or a huggingface.co URL",
+    )
+    p.add_argument(
+        "--next",
+        nargs="?",
+        const="",
+        metavar="CATALOG",
+        help="archive the next unfinished overlay row of CATALOG",
+    )
+    p.add_argument(
+        "--revision",
+        help="branch, tag, or commit (default: main; always pinned to the resolved commit)",
+    )
+    p.add_argument(
+        "--force", action="store_true", help="re-archive over an existing bundle"
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="pin, reconcile, and print the transfer plan without moving payload bytes",
+    )
     budget = p.add_mutually_exclusive_group()
-    budget.add_argument("--max-gb", type=_positive_float, metavar="N",
-                        help="stop cleanly after approximately N GiB of network transfer")
-    budget.add_argument("--max-bytes", type=_byte_size, metavar="SIZE",
-                        help="stop cleanly after network SIZE (e.g. 500M, 20G)")
-    p.add_argument("--max-minutes", type=_positive_float, metavar="N",
-                   help="stop cleanly when the transfer session reaches N minutes")
-    p.add_argument("--rehash", action="store_true",
-                   help="re-hash every present payload file instead of trusting verified ledger entries")
-    p.add_argument("--jobs", type=_positive_int, default=4, metavar="N",
-                   help="parallel workers for files smaller than 8 MiB (default: 4)")
-    p.add_argument("--shard", type=_shard_key, metavar="N/T",
-                   help="advisory cooperative order: fetch byte-balanced lane N of T first")
-    p.add_argument("--include", action="append", metavar="GLOB",
-                   help="archive only payload files matching GLOB (repeatable), plus "
-                        "sidecar files (config, tokenizer, license, card). "
-                        "The manifest records the omitted upstream files")
+    budget.add_argument(
+        "--max-gb",
+        type=_positive_float,
+        metavar="N",
+        help="stop cleanly after approximately N GiB of network transfer",
+    )
+    budget.add_argument(
+        "--max-bytes",
+        type=_byte_size,
+        metavar="SIZE",
+        help="stop cleanly after network SIZE (e.g. 500M, 20G)",
+    )
+    p.add_argument(
+        "--max-minutes",
+        type=_positive_float,
+        metavar="N",
+        help="stop cleanly when the transfer session reaches N minutes",
+    )
+    p.add_argument(
+        "--rehash",
+        action="store_true",
+        help="re-hash every present payload file instead of trusting verified ledger entries",
+    )
+    p.add_argument(
+        "--jobs",
+        type=_positive_int,
+        default=4,
+        metavar="N",
+        help="parallel workers for files smaller than 8 MiB (default: 4)",
+    )
+    p.add_argument(
+        "--shard",
+        type=_shard_key,
+        metavar="N/T",
+        help="advisory cooperative order: fetch byte-balanced lane N of T first",
+    )
+    p.add_argument(
+        "--include",
+        action="append",
+        metavar="GLOB",
+        help="archive only payload files matching GLOB (repeatable), plus "
+        "sidecar files (config, tokenizer, license, card). "
+        "The manifest records the omitted upstream files",
+    )
     p.set_defaults(func=cmd_archive)
 
     bundle_help = "path, bundle id (name@revision12 from `list`), or a unique prefix"
@@ -999,25 +1141,45 @@ def main(argv=None) -> int:
 
     p = add_cmd("smoke", help="run smoke tests on a bundle")
     p.add_argument("bundle", help=bundle_help)
-    p.add_argument("--inference", action="store_true", help="also load the model and generate (needs torch)")
+    p.add_argument(
+        "--inference",
+        action="store_true",
+        help="also load the model and generate (needs torch)",
+    )
     p.set_defaults(func=cmd_smoke)
 
     p = add_cmd("list", help="list bundles, or overlay a catalog on this vault")
-    p.add_argument("catalog", nargs="?", help="catalog slug or path to catalog.json (omit = vault inventory)")
+    p.add_argument(
+        "catalog",
+        nargs="?",
+        help="catalog slug or path to catalog.json (omit = vault inventory)",
+    )
     list_fmt = p.add_mutually_exclusive_group()
-    list_fmt.add_argument("--json", action="store_true", help="machine-readable records")
-    list_fmt.add_argument("--ids", action="store_true", help="bundle ids (or catalog source refs), one per line")
     list_fmt.add_argument(
-        "--next", action="store_true",
+        "--json", action="store_true", help="machine-readable records"
+    )
+    list_fmt.add_argument(
+        "--ids",
+        action="store_true",
+        help="bundle ids (or catalog source refs), one per line",
+    )
+    list_fmt.add_argument(
+        "--next",
+        action="store_true",
         help="print a copy-pasteable archive command for the next unfinished row",
     )
     p.add_argument("--want", action="store_true", help="only want and partial rows")
-    p.add_argument("--sort", choices=("next", "desire", "size", "name", "status"),
-                   help="row order (default: next when a catalog is given, name for the vault)")
+    p.add_argument(
+        "--sort",
+        choices=("next", "desire", "size", "name", "status"),
+        help="row order (default: next when a catalog is given, name for the vault)",
+    )
     p.set_defaults(func=cmd_list)
 
     p = add_cmd("catalog", help="create and edit catalogs (shareable want-lists)")
-    p.add_argument("--ids", action="store_true", help="catalog ids, one per line (for completion)")
+    p.add_argument(
+        "--ids", action="store_true", help="catalog ids, one per line (for completion)"
+    )
     p.set_defaults(func=cmd_catalog)
     cat = p.add_subparsers(dest="catalog_command", required=False)
 
@@ -1036,15 +1198,23 @@ def main(argv=None) -> int:
     n.add_argument("--note", help="catalog-level note")
     n.set_defaults(func=cmd_catalog_new)
 
-    a = add_cat("add", help="add or update a source in a catalog (offline unless --estimate)")
+    a = add_cat(
+        "add", help="add or update a source in a catalog (offline unless --estimate)"
+    )
     a.add_argument("catalog", help="catalog slug or path")
     a.add_argument("source", help="source ref")
     a.add_argument("--desire", type=_desire, metavar="N", help="1–9, 9 = most desired")
     a.add_argument("--note", help="short curator note")
     a.add_argument("--revision", help="intended pin (hex prefix or tag)")
     a.add_argument("--include", action="append", metavar="GLOB", help=include_help)
-    a.add_argument("--estimate", action="store_true", help="also fetch Hub metadata and cache sizes")
-    a.add_argument("--write", action="store_true", help="allow writing a path-addressed catalog")
+    a.add_argument(
+        "--estimate",
+        action="store_true",
+        help="also fetch Hub metadata and cache sizes",
+    )
+    a.add_argument(
+        "--write", action="store_true", help="allow writing a path-addressed catalog"
+    )
     a.set_defaults(func=cmd_catalog_add)
 
     d = add_cat("drop", help="remove a source from a catalog")
@@ -1052,24 +1222,38 @@ def main(argv=None) -> int:
     d.add_argument("source", help="source ref")
     d.add_argument("--revision", help="intended pin")
     d.add_argument("--include", action="append", metavar="GLOB", help=include_help)
-    d.add_argument("--full", action="store_true", help="select the full-repo row (include is null)")
-    d.add_argument("--write", action="store_true", help="allow writing a path-addressed catalog")
+    d.add_argument(
+        "--full", action="store_true", help="select the full-repo row (include is null)"
+    )
+    d.add_argument(
+        "--write", action="store_true", help="allow writing a path-addressed catalog"
+    )
     d.set_defaults(func=cmd_catalog_drop)
 
     o = add_cat("adopt", help="copy missing entries from another catalog")
     o.add_argument("catalog", help="destination catalog")
     o.add_argument("other", help="source catalog slug or path")
-    o.add_argument("--write", action="store_true", help="allow writing a path-addressed destination")
+    o.add_argument(
+        "--write",
+        action="store_true",
+        help="allow writing a path-addressed destination",
+    )
     o.set_defaults(func=cmd_catalog_adopt)
 
-    g = add_cat("regen", help="rebuild a catalog README.md from catalog.json + curation.md")
+    g = add_cat(
+        "regen", help="rebuild a catalog README.md from catalog.json + curation.md"
+    )
     g.add_argument("catalog", help="catalog slug or path")
-    g.add_argument("--write", action="store_true", help="allow writing a path-addressed catalog")
+    g.add_argument(
+        "--write", action="store_true", help="allow writing a path-addressed catalog"
+    )
     g.set_defaults(func=cmd_catalog_regen)
 
     p = add_cmd("rm", help="delete one or more bundles from the vault")
     p.add_argument("bundles", nargs="+", metavar="BUNDLE", help=bundle_help)
-    p.add_argument("-y", "--yes", action="store_true", help="do not prompt for confirmation")
+    p.add_argument(
+        "-y", "--yes", action="store_true", help="do not prompt for confirmation"
+    )
     p.set_defaults(func=cmd_rm)
 
     p = add_cmd("du", help="disk usage of bundles and the shared runtime")
@@ -1084,67 +1268,135 @@ def main(argv=None) -> int:
     p.add_argument("bundle", help=bundle_help)
     p.set_defaults(func=cmd_info)
 
-    p = add_cmd("regen", help="rebuild a bundle's README.md from manifest + curation.md")
+    p = add_cmd(
+        "regen", help="rebuild a bundle's README.md from manifest + curation.md"
+    )
     p.add_argument("bundle", help=bundle_help)
     p.set_defaults(func=cmd_regen)
 
     p = add_cmd("hydrate", help="build (or reuse) a runnable local env for a bundle")
     p.add_argument("bundle", help=bundle_help)
-    p.add_argument("--engine", help="runtime engine (default: auto-detect from the payload)")
-    p.add_argument("--python", help="interpreter for the env (default: $DARSAY_PYTHON or this python)")
-    p.add_argument("--weights", help="payload weights file for single-file engines, e.g. model/foo.gguf")
-    p.add_argument("--force", action="store_true", help="rebuild the env even if it exists")
-    p.add_argument("--dry-run", action="store_true", help="show the plan without touching anything")
-    p.add_argument("--ignore-preflight", action="store_true",
-                   help="try anyway if the architecture or RAM check fails")
+    p.add_argument(
+        "--engine", help="runtime engine (default: auto-detect from the payload)"
+    )
+    p.add_argument(
+        "--python",
+        help="interpreter for the env (default: $DARSAY_PYTHON or this python)",
+    )
+    p.add_argument(
+        "--weights",
+        help="payload weights file for single-file engines, e.g. model/foo.gguf",
+    )
+    p.add_argument(
+        "--force", action="store_true", help="rebuild the env even if it exists"
+    )
+    p.add_argument(
+        "--dry-run", action="store_true", help="show the plan without touching anything"
+    )
+    p.add_argument(
+        "--ignore-preflight",
+        action="store_true",
+        help="try anyway if the architecture or RAM check fails",
+    )
     p.set_defaults(func=cmd_hydrate)
 
-    p = add_cmd("run", help="run a prompt against a bundle (hydrates first if needed; fully offline)")
+    p = add_cmd(
+        "run",
+        help="run a prompt against a bundle (hydrates first if needed; fully offline)",
+    )
     p.add_argument("bundle", help=bundle_help)
     p.add_argument(
         "prompt",
         nargs="*",
-        help='prompt text (quotes optional: darsay run toy Say hello). '
-             'Default: "Say hello in one short sentence."',
+        help="prompt text (quotes optional: darsay run toy Say hello). "
+        'Default: "Say hello in one short sentence."',
     )
-    p.add_argument("--repl", action="store_true",
-                   help="interactive loop; the model stays loaded. /quit to exit")
-    p.add_argument("--engine", help="runtime engine (default: the hydrated one, else auto-detect)")
+    p.add_argument(
+        "--repl",
+        action="store_true",
+        help="interactive loop; the model stays loaded. /quit to exit",
+    )
+    p.add_argument(
+        "--engine", help="runtime engine (default: the hydrated one, else auto-detect)"
+    )
     p.add_argument("--max-new-tokens", type=int, default=256)
     p.add_argument("--device", default="auto", help="auto | cpu | cuda | mps")
-    p.add_argument("--dtype", default="auto", help="transformers only: auto | float32 | bfloat16 | float16")
-    p.add_argument("--raw", action="store_true", help="plain completion — skip the chat template")
-    p.add_argument("--sample", action="store_true", help="sample with the model's generation defaults (default: greedy)")
+    p.add_argument(
+        "--dtype",
+        default="auto",
+        help="transformers only: auto | float32 | bfloat16 | float16",
+    )
+    p.add_argument(
+        "--raw", action="store_true", help="plain completion — skip the chat template"
+    )
+    p.add_argument(
+        "--sample",
+        action="store_true",
+        help="sample with the model's generation defaults (default: greedy)",
+    )
     p.add_argument("--seed", type=int, help="seed for --sample")
-    p.add_argument("--trust-remote-code", action="store_true", help="allow custom modeling code from the payload")
+    p.add_argument(
+        "--trust-remote-code",
+        action="store_true",
+        help="allow custom modeling code from the payload",
+    )
     p.add_argument("--timeout", type=float, help="kill the run after N seconds")
     p.add_argument("--python", help="interpreter if hydration is needed")
-    p.add_argument("--weights", help="weights file if hydration is needed (single-file engines)")
-    p.add_argument("--ignore-preflight", action="store_true",
-                   help="try anyway if the architecture or RAM check fails")
+    p.add_argument(
+        "--weights", help="weights file if hydration is needed (single-file engines)"
+    )
+    p.add_argument(
+        "--ignore-preflight",
+        action="store_true",
+        help="try anyway if the architecture or RAM check fails",
+    )
     p.set_defaults(func=cmd_run)
 
-    p = add_cmd("dehydrate", help="remove a bundle's hydration record (envs are shared; prune via `envs --prune`)")
+    p = add_cmd(
+        "dehydrate",
+        help="remove a bundle's hydration record (envs are shared; prune via `envs --prune`)",
+    )
     p.add_argument("bundle", help=bundle_help)
     p.set_defaults(func=cmd_dehydrate)
 
     p = add_cmd("envs", help="list shared runtime envs and which bundles use them")
-    p.add_argument("--prune", action="store_true", help="delete envs no hydrated bundle references")
+    p.add_argument(
+        "--prune", action="store_true", help="delete envs no hydrated bundle references"
+    )
     p.set_defaults(func=cmd_envs)
 
-    p = add_cmd("export", help="pack a bundle into a single deterministic .mvb.tar file")
+    p = add_cmd(
+        "export", help="pack a bundle into a single deterministic .mvb.tar file"
+    )
     p.add_argument("bundle", help=bundle_help)
-    p.add_argument("-o", "--output-dir", default=".", help="directory for the .mvb.tar (default: cwd)")
+    p.add_argument(
+        "-o",
+        "--output-dir",
+        default=".",
+        help="directory for the .mvb.tar (default: cwd)",
+    )
     p.set_defaults(func=cmd_export)
 
-    p = add_cmd("import", help="unpack a .mvb.tar into the vault, verifying before registering")
+    p = add_cmd(
+        "import", help="unpack a .mvb.tar into the vault, verifying before registering"
+    )
     p.add_argument("file")
-    p.add_argument("--force", action="store_true", help="replace an existing bundle at the destination")
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="replace an existing bundle at the destination",
+    )
     p.set_defaults(func=cmd_import)
 
-    p = add_cmd("assemble", help="combine matching partial bundles offline into this vault")
-    p.add_argument("partials", nargs="+", metavar="BUNDLE",
-                   help="partial bundle directories with the same pinned revision")
+    p = add_cmd(
+        "assemble", help="combine matching partial bundles offline into this vault"
+    )
+    p.add_argument(
+        "partials",
+        nargs="+",
+        metavar="BUNDLE",
+        help="partial bundle directories with the same pinned revision",
+    )
     p.set_defaults(func=cmd_assemble)
 
     args = parser.parse_args(argv)

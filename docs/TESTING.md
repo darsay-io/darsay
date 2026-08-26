@@ -61,6 +61,7 @@ From a checkout, with the project venv:
 
 ```bash
 .venv/bin/pip install -e ".[dev]"
+.venv/bin/ruff check && .venv/bin/ruff format --check
 .venv/bin/pytest                         # unit + integration (e2e skipped)
 .venv/bin/pytest -m unit
 .venv/bin/pytest -m integration
@@ -76,10 +77,11 @@ e2e job and runs the hermetic suite on every push and pull request.
 `.github/workflows/ci.yml` on push to `main`, pull requests, and
 `workflow_dispatch`:
 
-1. **Tests** — Python 3.10, 3.12, 3.14: `pytest -m "not e2e"` with
+1. **Lint** — Python 3.12: `ruff check` and `ruff format --check`.
+2. **Tests** — Python 3.10, 3.12, 3.14: `pytest -m "not e2e"` with
    `--cov-fail-under=73`, plus a CLI `--version` / `--help` smoke.
-2. **E2E** — Python 3.12, cached Hub downloads, `sshleifer/tiny-gpt2`.
-3. **sdist and wheel** — build, `twine check`, install the wheel in a clean
+3. **E2E** — Python 3.12, cached Hub downloads, `sshleifer/tiny-gpt2`.
+4. **sdist and wheel** — build, `twine check`, install the wheel in a clean
    env and confirm runner scripts shipped.
 
 The existing `release.yml` workflow is unchanged: it publishes artifacts on

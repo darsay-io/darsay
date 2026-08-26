@@ -33,7 +33,9 @@ def pytest_configure(config):
     config.addinivalue_line(
         "markers", "integration: multi-module tests with a fake provider (no network)"
     )
-    config.addinivalue_line("markers", "e2e: live network tests against Hugging Face Hub")
+    config.addinivalue_line(
+        "markers", "e2e: live network tests against Hugging Face Hub"
+    )
 
 
 def pytest_collection_modifyitems(config, items):

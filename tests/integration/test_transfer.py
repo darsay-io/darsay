@@ -41,7 +41,9 @@ def test_budget_stop_is_resumable(vault, test_provider):
     assert manifest["inventory"]["file_count"] == len(files)
     # Verified files from the first session should not be fetched again.
     first_verified = [
-        path for path, state in ledger["files"].items() if state.get("status") == "verified"
+        path
+        for path, state in ledger["files"].items()
+        if state.get("status") == "verified"
     ]
     resumed_downloads = test_provider.downloads[len(downloaded_before) :]
     assert not set(first_verified) & set(resumed_downloads)
@@ -71,10 +73,11 @@ def test_reconcile_adopts_existing_bytes(vault, test_provider):
     assert test_provider.downloads == []
 
 
-def test_reconcile_discards_unexpected_and_size_mismatch(vault, test_provider, tmp_path):
-    from darsay.transfer import begin_session, new_ledger, reconcile
-    from darsay.providers.base import FileSpec, Snapshot
+def test_reconcile_discards_unexpected_and_size_mismatch(
+    vault, test_provider, tmp_path
+):
     from darsay.sources import parse_source
+    from darsay.transfer import begin_session, new_ledger, reconcile
 
     files = {"keep.bin": b"abcd", "good.bin": b"xxxx"}
     test_provider.add_repo("acme/toy", files)

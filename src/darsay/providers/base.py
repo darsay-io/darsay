@@ -9,10 +9,10 @@ The public CLI (``darsay archive <source>``) does not change.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterator
 from urllib.parse import urlparse
 
 

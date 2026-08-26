@@ -48,7 +48,9 @@ def summarize_safetensors(paths: list[Path]) -> dict | None:
             n = 1
             for dim in entry.get("shape", []):
                 n *= dim
-            dtype = DTYPE_NAMES.get(entry.get("dtype", ""), entry.get("dtype", "unknown"))
+            dtype = DTYPE_NAMES.get(
+                entry.get("dtype", ""), entry.get("dtype", "unknown")
+            )
             by_dtype[dtype] = by_dtype.get(dtype, 0) + n
             total += n
             tensors += 1

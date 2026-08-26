@@ -51,7 +51,8 @@ inference = ["transformers", "torch"]
 # Measured parquet row counts for dataset bundles (declared counts need nothing)
 datasets = ["pyarrow"]
 # Test suite (unit + integration; e2e needs only the core Hub client)
-dev = ["pytest>=8.0", "pytest-cov>=5.0"]
+# plus Ruff for lint + format
+dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.12"]
 
 [project.urls]
 Homepage = "https://github.com/jeremynorris/darsay"
@@ -97,3 +98,29 @@ exclude_lines = [
     "pragma: no cover",
     "if __name__ == .__main__.:",
 ]
+
+[tool.ruff]
+target-version = "py310"
+src = ["src"]
+extend-exclude = ["vault", "*.md"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+]
+ignore = [
+    # Formatter is the source of truth for wrapping; leftover long
+    # strings / URLs are not worth fighting.
+    "E501",
+    # Explicit if/else and early-return guards are the house style.
+    "SIM103",
+    "SIM108",
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["darsay", "tests"]

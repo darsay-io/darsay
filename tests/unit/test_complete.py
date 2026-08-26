@@ -12,8 +12,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 def test_complete_command_lists_match_argparse():
     text = (ROOT / "src" / "darsay" / "cli.py").read_text(encoding="utf-8")
-    cli_cmds = re.findall(r'add_cmd\("([^"]+)"', text)
-    cat_cmds = re.findall(r'add_cat\("([^"]+)"', text)
+    cli_cmds = re.findall(r'add_cmd\(\s*"([^"]+)"', text)
+    cat_cmds = re.findall(r'add_cat\(\s*"([^"]+)"', text)
     assert set(cli_cmds) == set(COMMANDS)
     assert set(cat_cmds) == set(CATALOG_COMMANDS)
     assert set(BUNDLE_COMMANDS) <= set(COMMANDS)

@@ -8,8 +8,7 @@ from __future__ import annotations
 
 import json
 import struct
-from typing import Mapping
-
+from collections.abc import Mapping
 
 _DTYPE_WIDTH = {"F32": 4, "F16": 2, "BF16": 2, "I8": 1, "I32": 4, "F64": 8}
 
@@ -75,9 +74,9 @@ def model_files(
                 "eos_token": "</s>",
             }
         ).encode("utf-8"),
-        "tokenizer.json": json.dumps({"version": "1.0", "model": {"type": "WordLevel"}}).encode(
-            "utf-8"
-        ),
+        "tokenizer.json": json.dumps(
+            {"version": "1.0", "model": {"type": "WordLevel"}}
+        ).encode("utf-8"),
         "model.safetensors": make_safetensors({"weight": ("F32", shape)}),
         "LICENSE": b"Apache License 2.0\n",
         "README.md": b"# Toy model\n\nA synthetic fixture.\n",

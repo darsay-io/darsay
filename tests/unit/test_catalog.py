@@ -9,6 +9,8 @@ from darsay.catalog import (
     CATALOG_KIND,
     CATALOG_SCHEMA_VERSION,
     DIGEST_KEYS,
+    adopt_entries,
+    drop_entry,
     entry_key,
     estimate_digest,
     estimate_is_stale,
@@ -34,14 +36,14 @@ from darsay.catalog import (
     try_resolve_catalog,
     upsert_entry,
     vault_header_line,
-    drop_entry,
-    adopt_entries,
     warning_detail,
     write_catalog_readme,
 )
 
 
-def _entry(source, *, desire=None, revision=None, include=None, estimate=None, note=None):
+def _entry(
+    source, *, desire=None, revision=None, include=None, estimate=None, note=None
+):
     return {
         "source": source,
         "revision": revision,
@@ -69,7 +71,14 @@ def _catalog(entries, **kwargs):
     return cat
 
 
-def _record(source, *, revision="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", partial=False, include=None, remaining=0):
+def _record(
+    source,
+    *,
+    revision="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    partial=False,
+    include=None,
+    remaining=0,
+):
     return {
         "bundle_id": f"test--acme--toy@{revision[:12]}",
         "path": "/tmp/bundle",
@@ -117,12 +126,14 @@ def test_try_parse_source_unknown_provider():
 
 
 def test_overlay_have_partial_want_unknown():
-    catalog = _catalog([
-        _entry("huggingface:acme/have", desire=6),
-        _entry("huggingface:acme/partial", desire=9),
-        _entry("huggingface:acme/want", desire=8),
-        _entry("other:foo/bar", desire=9),
-    ])
+    catalog = _catalog(
+        [
+            _entry("huggingface:acme/have", desire=6),
+            _entry("huggingface:acme/partial", desire=9),
+            _entry("huggingface:acme/want", desire=8),
+            _entry("other:foo/bar", desire=9),
+        ]
+    )
     records = [
         _record("huggingface:acme/have"),
         _record("huggingface:acme/partial", partial=True, remaining=400),
@@ -143,7 +154,12 @@ def test_overlay_have_partial_want_unknown():
 def test_next_entry_prefers_partial_over_higher_desire_want():
     rows = [
         {"status": "want", "desire": 9, "source": "huggingface:acme/want"},
-        {"status": "partial", "desire": 1, "source": "huggingface:acme/partial", "remaining_bytes": 10},
+        {
+            "status": "partial",
+            "desire": 1,
+            "source": "huggingface:acme/partial",
+            "remaining_bytes": 10,
+        },
         {"status": "unknown", "desire": 9, "source": "other:foo/bar"},
     ]
     assert next_entry(rows, desire=True)["source"] == "huggingface:acme/partial"
@@ -164,7 +180,11 @@ def test_overlay_subset_is_different_work():
 
 def test_overlay_null_revision_matches_any_pin():
     catalog = _catalog([_entry("huggingface:acme/toy", revision=None)])
-    records = [_record("huggingface:acme/toy", revision="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")]
+    records = [
+        _record(
+            "huggingface:acme/toy", revision="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        )
+    ]
     rows = overlay(catalog, records)
     assert rows[0]["status"] == "have"
 
@@ -217,7 +237,12 @@ def test_realize_from_overlay_partial_uses_matched_pin():
     assert source == "huggingface:acme/toy"
     assert rev.startswith("bbbb")
     assert include == ["*Q4*"]
-    want = {"status": "want", "source": "huggingface:acme/toy", "revision": None, "include": ["*Q5*"]}
+    want = {
+        "status": "want",
+        "source": "huggingface:acme/toy",
+        "revision": None,
+        "include": ["*Q5*"],
+    }
     source, rev, include = realize_from_overlay(want)
     assert rev is None
     assert include == ["*Q5*"]
@@ -248,7 +273,8 @@ def test_estimate_digest_allowlist():
 
 
 def test_estimate_is_stale():
-    from datetime import datetime, timezone, timedelta
+    from datetime import datetime, timedelta, timezone
+
     now = datetime(2026, 8, 26, tzinfo=timezone.utc)
     fresh = (now - timedelta(days=2)).isoformat()
     old = (now - timedelta(days=12)).isoformat()
@@ -339,7 +365,9 @@ def test_load_rejects_missing_version(tmp_path):
 def test_upsert_and_drop_include_set(tmp_path):
     cat = new_catalog(tmp_path, "summer")
     upsert_entry(cat, "huggingface:acme/toy", desire=3, include=["*Q4*", "*.gguf"])
-    entry, action = upsert_entry(cat, "huggingface:acme/toy", desire=9, include=["*.gguf", "*Q4*"])
+    entry, action = upsert_entry(
+        cat, "huggingface:acme/toy", desire=9, include=["*.gguf", "*Q4*"]
+    )
     assert action == "updated"
     assert entry["desire"] == 9
     assert len(cat["entries"]) == 1
@@ -357,7 +385,9 @@ def test_upsert_and_drop_include_set(tmp_path):
         drop_entry(cat, "huggingface:acme/toy")
     drop_entry(cat, "huggingface:acme/toy", include=None, include_given=True)
     assert len(cat["entries"]) == 1
-    assert include_key(cat["entries"][0].get("include")) == include_key(["*Q4*", "*.gguf"])
+    assert include_key(cat["entries"][0].get("include")) == include_key(
+        ["*Q4*", "*.gguf"]
+    )
 
 
 def test_upsert_skips_unknown_provider_rows():
@@ -365,15 +395,20 @@ def test_upsert_skips_unknown_provider_rows():
     entry, action = upsert_entry(dest, "huggingface:acme/toy", desire=8)
     assert action == "added"
     assert entry["source"] == "huggingface:acme/toy"
-    assert [e["source"] for e in dest["entries"]] == ["other:foo/bar", "huggingface:acme/toy"]
+    assert [e["source"] for e in dest["entries"]] == [
+        "other:foo/bar",
+        "huggingface:acme/toy",
+    ]
 
 
 def test_adopt_skips_existing():
     dest = _catalog([_entry("huggingface:acme/toy", desire=2)])
-    other = _catalog([
-        _entry("huggingface:acme/toy", desire=9),
-        _entry("huggingface:acme/other", desire=8),
-    ])
+    other = _catalog(
+        [
+            _entry("huggingface:acme/toy", desire=9),
+            _entry("huggingface:acme/other", desire=8),
+        ]
+    )
     adopted, skipped = adopt_entries(dest, other)
     assert adopted == 1
     assert skipped == 1
@@ -429,7 +464,9 @@ def test_next_idle_message_empty_vs_complete():
     assert err
     assert "is empty" in msg
     assert "catalog add" in msg
-    rows = overlay(_catalog([_entry("huggingface:acme/toy")]), [_record("huggingface:acme/toy")])
+    rows = overlay(
+        _catalog([_entry("huggingface:acme/toy")]), [_record("huggingface:acme/toy")]
+    )
     msg, err = next_idle_message(_catalog([_entry("huggingface:acme/toy")]), rows)
     assert not err
     assert "nothing missing" in msg
@@ -447,18 +484,20 @@ def test_write_catalog_readme_includes_include_cached_size_and_overlay_hints(tmp
     dest = tmp_path / "summer"
     dest.mkdir()
     catalog = _catalog(
-        [_entry(
-            "huggingface:acme/toy",
-            desire=8,
-            include=["*Q4_K_M*"],
-            note="the quant",
-            estimate={
-                "payload_bytes": 1024,
-                "as_of": "2026-08-01T00:00:00+00:00",
-                "artifact_type": "model",
-                "license": "apache-2.0",
-            },
-        )],
+        [
+            _entry(
+                "huggingface:acme/toy",
+                desire=8,
+                include=["*Q4_K_M*"],
+                note="the quant",
+                estimate={
+                    "payload_bytes": 1024,
+                    "as_of": "2026-08-01T00:00:00+00:00",
+                    "artifact_type": "model",
+                    "license": "apache-2.0",
+                },
+            )
+        ],
         curator="Alex",
         note="a want-list",
     )
@@ -476,15 +515,17 @@ def test_write_catalog_readme_includes_include_cached_size_and_overlay_hints(tmp
 
 
 def test_print_catalog_index(capsys):
-    print_catalog_index([
-        {
-            "id": "summer",
-            "title": "Summer 2026",
-            "curator": None,
-            "entries": [{}, {}],
-            "updated": "2026-08-26T12:00:00+00:00",
-        }
-    ])
+    print_catalog_index(
+        [
+            {
+                "id": "summer",
+                "title": "Summer 2026",
+                "curator": None,
+                "entries": [{}, {}],
+                "updated": "2026-08-26T12:00:00+00:00",
+            }
+        ]
+    )
     out = capsys.readouterr().out
     assert "CATALOG" in out
     assert "summer" in out
@@ -494,20 +535,22 @@ def test_print_catalog_index(capsys):
 
 
 def test_print_catalog_table_hides_empty_desire_note(capsys):
-    print_catalog_table([
-        {
-            "status": "have",
-            "desire": None,
-            "source": "huggingface:acme/toy",
-            "revision": None,
-            "include": None,
-            "note": None,
-            "bundle_id": "acme--toy@aaaaaaaaaaaa",
-            "payload_bytes": 100,
-            "estimate_stale": False,
-            "gated": False,
-        }
-    ])
+    print_catalog_table(
+        [
+            {
+                "status": "have",
+                "desire": None,
+                "source": "huggingface:acme/toy",
+                "revision": None,
+                "include": None,
+                "note": None,
+                "bundle_id": "acme--toy@aaaaaaaaaaaa",
+                "payload_bytes": 100,
+                "estimate_stale": False,
+                "gated": False,
+            }
+        ]
+    )
     out = capsys.readouterr().out
     assert "STATUS" in out
     assert "SOURCE" in out
@@ -515,52 +558,75 @@ def test_print_catalog_table_hides_empty_desire_note(capsys):
     assert "DESIRE" not in out
     assert "NOTE" not in out
     capsys.readouterr()
-    print_catalog_table([
-        {
-            "status": "want",
-            "desire": 8,
-            "source": "huggingface:acme/toy",
-            "revision": None,
-            "include": None,
-            "note": "keep",
-            "bundle_id": None,
-            "payload_bytes": None,
-            "estimate_stale": False,
-            "gated": False,
-        }
-    ])
+    print_catalog_table(
+        [
+            {
+                "status": "want",
+                "desire": 8,
+                "source": "huggingface:acme/toy",
+                "revision": None,
+                "include": None,
+                "note": "keep",
+                "bundle_id": None,
+                "payload_bytes": None,
+                "estimate_stale": False,
+                "gated": False,
+            }
+        ]
+    )
     out = capsys.readouterr().out
     assert "DESIRE" in out
     assert "NOTE" in out
 
 
 def test_vault_header_omits_remaining_when_complete(tmp_path):
-    line = vault_header_line(tmp_path, {
-        "have": 2, "partial": 0, "want": 0, "unknown": 0,
-        "remaining_bytes": 0, "remaining_unknown": False, "on_disk_bytes": 100,
-    })
+    line = vault_header_line(
+        tmp_path,
+        {
+            "have": 2,
+            "partial": 0,
+            "want": 0,
+            "unknown": 0,
+            "remaining_bytes": 0,
+            "remaining_unknown": False,
+            "on_disk_bytes": 100,
+        },
+    )
     assert "remaining" not in line
-    partial = vault_header_line(tmp_path, {
-        "have": 1, "partial": 1, "want": 0, "unknown": 0,
-        "remaining_bytes": 50, "remaining_unknown": False, "on_disk_bytes": 100,
-    })
+    partial = vault_header_line(
+        tmp_path,
+        {
+            "have": 1,
+            "partial": 1,
+            "want": 0,
+            "unknown": 0,
+            "remaining_bytes": 50,
+            "remaining_unknown": False,
+            "on_disk_bytes": 100,
+        },
+    )
     assert "remaining" in partial
 
 
 def test_overlay_stats_unknown_size_count_is_not_zero_remaining():
-    rows = [{
-        "status": "want",
-        "on_disk_bytes": 0,
-        "remaining_bytes": 0,
-        "estimate": {"as_of": "2026-08-01T00:00:00+00:00", "unknown_size_count": 3},
-    }]
+    rows = [
+        {
+            "status": "want",
+            "on_disk_bytes": 0,
+            "remaining_bytes": 0,
+            "estimate": {"as_of": "2026-08-01T00:00:00+00:00", "unknown_size_count": 3},
+        }
+    ]
     stats = overlay_stats(rows)
     assert stats["remaining_bytes"] == 0
     assert stats["remaining_unknown"] is True
 
 
 def test_warning_detail_strips_error_prefix():
-    assert warning_detail(SystemExit("error: unreadable catalog at x")) == "unreadable catalog at x"
+    assert (
+        warning_detail(SystemExit("error: unreadable catalog at x"))
+        == "unreadable catalog at x"
+    )
     assert warning_detail(SystemExit("nope")) == "nope"
 
 

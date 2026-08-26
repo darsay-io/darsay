@@ -72,8 +72,7 @@ def is_sidecar(path: str) -> bool:
     name = _basename(path)
     lowered = name.lower()
     return any(
-        fnmatch(name, pat) or fnmatch(lowered, pat.lower())
-        for pat in SIDECAR_GLOBS
+        fnmatch(name, pat) or fnmatch(lowered, pat.lower()) for pat in SIDECAR_GLOBS
     )
 
 
@@ -86,7 +85,9 @@ def file_record(item) -> dict:
     }
 
 
-def select_subset(files, include: list[str], *, sidecars: bool = True) -> tuple[list, dict]:
+def select_subset(
+    files, include: list[str], *, sidecars: bool = True
+) -> tuple[list, dict]:
     """Return ``(kept_items, subset_record)``.
 
     Raises ``SystemExit`` when no file matches an include glob (sidecars

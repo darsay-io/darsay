@@ -113,7 +113,14 @@ LICENSE_INFO = {
     },
 }
 
-LICENSE_FILE_PATTERNS = ("LICENSE*", "LICENCE*", "COPYING*", "NOTICE*", "license*", "notice*")
+LICENSE_FILE_PATTERNS = (
+    "LICENSE*",
+    "LICENCE*",
+    "COPYING*",
+    "NOTICE*",
+    "license*",
+    "notice*",
+)
 
 
 def find_license_files(payload_root: Path) -> list[str]:
@@ -126,7 +133,9 @@ def find_license_files(payload_root: Path) -> list[str]:
     return sorted(found)
 
 
-def build_licensing_record(spdx_id: str | None, payload_root: Path, gated: bool = False) -> dict:
+def build_licensing_record(
+    spdx_id: str | None, payload_root: Path, gated: bool = False
+) -> dict:
     info = LICENSE_INFO.get(spdx_id) if spdx_id else None
     license_files = find_license_files(payload_root)
     notes = []
@@ -136,7 +145,9 @@ def build_licensing_record(spdx_id: str | None, payload_root: Path, gated: bool 
             "repo metadata tag. Verify terms at the source before redistribution."
         )
     if info is None and spdx_id is not None:
-        notes.append(f"License id '{spdx_id}' not in the rights-flags table; review manually.")
+        notes.append(
+            f"License id '{spdx_id}' not in the rights-flags table; review manually."
+        )
     if gated:
         notes.append(
             "Upstream repo is gated: the files were obtained under an access agreement "

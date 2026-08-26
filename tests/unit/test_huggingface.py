@@ -59,7 +59,9 @@ def test_variant_formats_from_tags_and_name():
 
 def test_json_value_datetime_and_nested():
     ts = datetime(2026, 1, 1, tzinfo=timezone.utc)
-    converted = _json_value({"at": ts, "n": 1, "ok": True, "xs": (1, 2), "other": object()})
+    converted = _json_value(
+        {"at": ts, "n": 1, "ok": True, "xs": (1, 2), "other": object()}
+    )
     assert converted["at"].startswith("2026-01-01")
     assert converted["n"] == 1
     assert converted["xs"] == [1, 2]

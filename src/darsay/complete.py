@@ -85,7 +85,7 @@ _darsay() {{
       ;;
     catalog)
       if (( CURRENT == 3 )); then
-        _values 'catalog-command' {' '.join(CATALOG_COMMANDS)}
+        _values 'catalog-command' {" ".join(CATALOG_COMMANDS)}
         return
       fi
       _darsay_catalogs
@@ -179,7 +179,7 @@ def _fish() -> str:
 complete -c darsay -n "__fish_use_subcommand" -a "{cmds}"
 complete -c darsay -n "__fish_seen_subcommand_from {bundle}" -a "(darsay list --ids 2>/dev/null)"
 complete -c darsay -n "__fish_seen_subcommand_from list estimate catalog" -a "(darsay catalog --ids 2>/dev/null)"
-complete -c darsay -n "__fish_seen_subcommand_from catalog" -a "{' '.join(CATALOG_COMMANDS)}"
+complete -c darsay -n "__fish_seen_subcommand_from catalog" -a "{" ".join(CATALOG_COMMANDS)}"
 complete -c darsay -n "__fish_seen_subcommand_from archive" -l next -r -a "(darsay catalog --ids 2>/dev/null)"
 complete -c darsay -n "__fish_seen_subcommand_from import" -F -a "*.mvb.tar"
 complete -c darsay -n "__fish_seen_subcommand_from complete" -a "bash zsh fish"

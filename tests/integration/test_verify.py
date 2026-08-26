@@ -56,7 +56,10 @@ def test_verify_heals_integrity_after_restore(vault, test_provider):
     assert load_manifest(bundle)["security"]["integrity_status"] == "compromised"
     (bundle / "model" / "model.safetensors").write_bytes(original)
     assert verify_bundle(bundle, progress=silent)["result"] == "pass"
-    assert load_manifest(bundle)["security"]["integrity_status"] == "verified-against-upstream"
+    assert (
+        load_manifest(bundle)["security"]["integrity_status"]
+        == "verified-against-upstream"
+    )
     # The compromise is still in the append-only log.
     changes = load_manifest(bundle)["security"]["unexpected_changes"]
     assert any(c["type"] == "modified" for c in changes)

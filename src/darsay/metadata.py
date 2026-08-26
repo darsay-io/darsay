@@ -35,7 +35,15 @@ def extract_model_metadata(payload_root: Path, card_data: dict | None = None) ->
 
     special_tokens = {
         key: tokenizer_config.get(key)
-        for key in ("bos_token", "eos_token", "pad_token", "unk_token", "sep_token", "cls_token", "mask_token")
+        for key in (
+            "bos_token",
+            "eos_token",
+            "pad_token",
+            "unk_token",
+            "sep_token",
+            "cls_token",
+            "mask_token",
+        )
         if tokenizer_config.get(key) is not None
     }
 
@@ -58,7 +66,8 @@ def extract_model_metadata(payload_root: Path, card_data: dict | None = None) ->
         "architecture": (config.get("architectures") or [None])[0],
         "model_type": config.get("model_type"),
         "context_length": config.get("max_position_embeddings"),
-        "precision": config.get("torch_dtype") or (weights["dominant_dtype"] if weights else None),
+        "precision": config.get("torch_dtype")
+        or (weights["dominant_dtype"] if weights else None),
         "quantization": quantization,
         "hidden_size": config.get("hidden_size"),
         "num_hidden_layers": config.get("num_hidden_layers"),
@@ -76,7 +85,14 @@ def extract_model_metadata(payload_root: Path, card_data: dict | None = None) ->
         "training_cutoff": None,  # rarely published; curator fills in when known
         "generation_defaults": {
             key: generation_config[key]
-            for key in ("temperature", "top_p", "top_k", "do_sample", "repetition_penalty", "max_new_tokens")
+            for key in (
+                "temperature",
+                "top_p",
+                "top_k",
+                "do_sample",
+                "repetition_penalty",
+                "max_new_tokens",
+            )
             if key in generation_config
         }
         or None,
@@ -115,14 +131,18 @@ def _declared_dataset_info(infos: dict, card_data: dict) -> dict | None:
     have_counts = False
     for name, info in raw_configs.items():
         splits_in = info.get("splits") or {}
-        if isinstance(splits_in, list):  # card YAML lists splits; dataset_infos.json maps them
+        if isinstance(
+            splits_in, list
+        ):  # card YAML lists splits; dataset_infos.json maps them
             splits_in = {s.get("name"): s for s in splits_in if isinstance(s, dict)}
         splits = {}
         for split_name, s in splits_in.items():
             if not isinstance(s, dict):
                 continue
-            splits[split_name] = {"num_examples": s.get("num_examples"),
-                                  "num_bytes": s.get("num_bytes")}
+            splits[split_name] = {
+                "num_examples": s.get("num_examples"),
+                "num_bytes": s.get("num_bytes"),
+            }
             if s.get("num_examples") is not None:
                 total_examples += s["num_examples"]
                 have_counts = True
@@ -143,17 +163,22 @@ def _measured_row_counts(payload_root: Path) -> dict:
     """Row counts established from the payload itself. Parquet only, and only
     when pyarrow is available — otherwise recorded as skipped, never guessed."""
     parquet_files = sorted(
-        p for p in payload_root.rglob("*.parquet")
+        p
+        for p in payload_root.rglob("*.parquet")
         if p.is_file() and ".cache" not in p.relative_to(payload_root).parts
     )
     if not parquet_files:
-        return {"status": "skipped",
-                "reason": "no parquet files in payload (row counting covers parquet only)"}
+        return {
+            "status": "skipped",
+            "reason": "no parquet files in payload (row counting covers parquet only)",
+        }
     try:
         import pyarrow.parquet as pq
     except ImportError:
-        return {"status": "skipped",
-                "reason": "pyarrow not installed (pip install darsay[datasets])"}
+        return {
+            "status": "skipped",
+            "reason": "pyarrow not installed (pip install darsay[datasets])",
+        }
     rows = {}
     errors = {}
     for p in parquet_files:
@@ -173,8 +198,11 @@ def _measured_row_counts(payload_root: Path) -> dict:
     return out
 
 
-def extract_dataset_metadata(payload_root: Path, card_data: dict | None = None,
-                             file_records: list[dict] | None = None) -> dict:
+def extract_dataset_metadata(
+    payload_root: Path,
+    card_data: dict | None = None,
+    file_records: list[dict] | None = None,
+) -> dict:
     card_data = card_data or {}
     infos = _load_json(payload_root / "dataset_infos.json") or {}
 
@@ -184,7 +212,9 @@ def extract_dataset_metadata(payload_root: Path, card_data: dict | None = None,
         entry = formats.setdefault(ext, {"file_count": 0, "total_size_bytes": 0})
         entry["file_count"] += 1
         entry["total_size_bytes"] += r["size"] or 0
-    formats = dict(sorted(formats.items(), key=lambda kv: (-kv[1]["total_size_bytes"], kv[0])))
+    formats = dict(
+        sorted(formats.items(), key=lambda kv: (-kv[1]["total_size_bytes"], kv[0]))
+    )
 
     def listed(value):
         if isinstance(value, str):
@@ -222,7 +252,9 @@ def estimate_runtime(payload_root: Path, model_metadata: dict) -> dict:
         "estimated_min_ram_gb": est_gb,
         "estimated_min_vram_gb": est_gb,
         "tested_hardware": None,
-        "os_support": ["linux", "macos", "windows"] if has_safetensors or has_gguf else None,
+        "os_support": ["linux", "macos", "windows"]
+        if has_safetensors or has_gguf
+        else None,
         "cuda_notes": None,
         "rocm_notes": None,
         "cpu_inference": True if (has_safetensors or has_gguf) else None,

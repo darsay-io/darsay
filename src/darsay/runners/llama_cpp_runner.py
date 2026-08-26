@@ -15,11 +15,14 @@ from pathlib import Path
 
 
 def write_result(path: str, data: dict) -> None:
-    Path(path).write_text(json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    Path(path).write_text(
+        json.dumps(data, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
+    )
 
 
 def versions() -> dict:
     import llama_cpp
+
     return {"llama_cpp_python": llama_cpp.__version__}
 
 
@@ -28,12 +31,19 @@ def probe(args) -> dict:
 
     weights = Path(args.weights)
     if not weights.is_file():
-        return {"status": "fail", "engine": "llama-cpp", "error": f"weights not found: {weights}"}
+        return {
+            "status": "fail",
+            "engine": "llama-cpp",
+            "error": f"weights not found: {weights}",
+        }
     return {
         "status": "pass",
         "engine": "llama-cpp",
         "versions": versions(),
-        "devices": {"gpu_offload": bool(llama_cpp.llama_supports_gpu_offload()), "cpu": True},
+        "devices": {
+            "gpu_offload": bool(llama_cpp.llama_supports_gpu_offload()),
+            "cpu": True,
+        },
         "weights": str(weights),
         "weights_size_bytes": weights.stat().st_size,
     }
@@ -43,12 +53,20 @@ def generate(args) -> dict:
     from llama_cpp import Llama
 
     n_gpu_layers = 0 if args.device == "cpu" else -1
-    print(f"[runner] loading {args.weights} (n_gpu_layers={n_gpu_layers})", file=sys.stderr)
+    print(
+        f"[runner] loading {args.weights} (n_gpu_layers={n_gpu_layers})",
+        file=sys.stderr,
+    )
 
     t0 = time.perf_counter()
     # n_ctx=0 asks llama-cpp-python for the GGUF's trained context (0.3+).
-    llm = Llama(model_path=args.weights, n_ctx=0, n_gpu_layers=n_gpu_layers,
-                seed=args.seed if args.seed is not None else -1, verbose=False)
+    llm = Llama(
+        model_path=args.weights,
+        n_ctx=0,
+        n_gpu_layers=n_gpu_layers,
+        seed=args.seed if args.seed is not None else -1,
+        verbose=False,
+    )
     load_seconds = time.perf_counter() - t0
 
     # Greedy unless --sample (temperature 0 is llama.cpp's greedy mode).
@@ -64,7 +82,9 @@ def generate(args) -> dict:
         # otherwise llama-cpp-python's fallback template.
         resp = llm.create_chat_completion(
             messages=[{"role": "user", "content": args.prompt}],
-            max_tokens=args.max_new_tokens, temperature=temperature)
+            max_tokens=args.max_new_tokens,
+            temperature=temperature,
+        )
         choice = resp["choices"][0]
         text = choice["message"]["content"]
         prompt_mode = "chat-template"
@@ -86,7 +106,9 @@ def generate(args) -> dict:
         "stop_reason": "eos" if choice.get("finish_reason") == "stop" else "length",
         "load_seconds": round(load_seconds, 2),
         "generate_seconds": round(generate_seconds, 2),
-        "tokens_per_second": round(new_tokens / generate_seconds, 1) if generate_seconds > 0 else None,
+        "tokens_per_second": round(new_tokens / generate_seconds, 1)
+        if generate_seconds > 0
+        else None,
     }
 
 
@@ -94,12 +116,17 @@ def repl(args) -> dict:
     from llama_cpp import Llama
 
     n_gpu_layers = 0 if args.device == "cpu" else -1
-    print(f"[runner] loading {args.weights} (n_gpu_layers={n_gpu_layers})", file=sys.stderr)
+    print(
+        f"[runner] loading {args.weights} (n_gpu_layers={n_gpu_layers})",
+        file=sys.stderr,
+    )
     t0 = time.perf_counter()
     llm = Llama(
-        model_path=args.weights, n_ctx=0,
+        model_path=args.weights,
+        n_ctx=0,
         n_gpu_layers=n_gpu_layers,
-        seed=args.seed if args.seed is not None else -1, verbose=False,
+        seed=args.seed if args.seed is not None else -1,
+        verbose=False,
     )
     load_seconds = time.perf_counter() - t0
     print("[repl] model loaded. Type a prompt; /quit to exit.", file=sys.stderr)
@@ -129,7 +156,10 @@ def repl(args) -> dict:
         else:
             messages.append({"role": "user", "content": user})
             resp = llm.create_chat_completion(
-                messages=messages, max_tokens=args.max_new_tokens, temperature=temperature)
+                messages=messages,
+                max_tokens=args.max_new_tokens,
+                temperature=temperature,
+            )
             text = resp["choices"][0]["message"]["content"]
             messages.append({"role": "assistant", "content": text})
             prompt_mode = "chat-template"
@@ -147,29 +177,47 @@ def repl(args) -> dict:
             "sampling": {"do_sample": args.sample, "temperature": temperature},
             "output": text,
             "new_tokens": new_tokens,
-            "stop_reason": "eos" if resp["choices"][0].get("finish_reason") == "stop" else "length",
+            "stop_reason": "eos"
+            if resp["choices"][0].get("finish_reason") == "stop"
+            else "length",
             "load_seconds": round(load_seconds, 2),
             "generate_seconds": round(generate_seconds, 2),
-            "tokens_per_second": round(new_tokens / generate_seconds, 1) if generate_seconds > 0 else None,
+            "tokens_per_second": round(new_tokens / generate_seconds, 1)
+            if generate_seconds > 0
+            else None,
             "repl": True,
         }
-    return last or {"status": "fail", "engine": "llama-cpp", "error": "repl ended without a prompt"}
+    return last or {
+        "status": "fail",
+        "engine": "llama-cpp",
+        "error": "repl ended without a prompt",
+    }
 
 
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--model-dir", required=True, help="payload directory (context only)")
+    p.add_argument(
+        "--model-dir", required=True, help="payload directory (context only)"
+    )
     p.add_argument("--weights", required=True, help="path to the .gguf file")
     p.add_argument("--json-out", required=True)
     p.add_argument("--probe", action="store_true")
     p.add_argument("--prompt", default=None)
-    p.add_argument("--repl", action="store_true", help="interactive loop; model stays loaded")
+    p.add_argument(
+        "--repl", action="store_true", help="interactive loop; model stays loaded"
+    )
     p.add_argument("--max-new-tokens", type=int, default=256)
-    p.add_argument("--device", default="auto", help="auto (GPU offload when built with it) | cpu")
-    p.add_argument("--raw", action="store_true", help="plain completion, skip the chat template")
+    p.add_argument(
+        "--device", default="auto", help="auto (GPU offload when built with it) | cpu"
+    )
+    p.add_argument(
+        "--raw", action="store_true", help="plain completion, skip the chat template"
+    )
     p.add_argument("--sample", action="store_true")
     p.add_argument("--seed", type=int, default=None)
-    p.add_argument("--trust-remote-code", action="store_true", help="ignored for llama.cpp")
+    p.add_argument(
+        "--trust-remote-code", action="store_true", help="ignored for llama.cpp"
+    )
     args = p.parse_args()
 
     try:
@@ -182,8 +230,14 @@ def main() -> int:
                 args.prompt = "Say hello in one short sentence."
             result = generate(args)
     except Exception as exc:  # runner contract: report, never crash silently
-        write_result(args.json_out, {"status": "fail", "engine": "llama-cpp",
-                                     "error": f"{type(exc).__name__}: {exc}"})
+        write_result(
+            args.json_out,
+            {
+                "status": "fail",
+                "engine": "llama-cpp",
+                "error": f"{type(exc).__name__}: {exc}",
+            },
+        )
         print(f"[runner] FAILED: {exc}", file=sys.stderr)
         return 1
     write_result(args.json_out, result)

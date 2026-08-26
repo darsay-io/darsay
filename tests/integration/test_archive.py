@@ -112,10 +112,12 @@ def test_estimate_include_subset(vault, test_provider):
 
 
 def test_archive_include_records_subset_and_omits_unmatched(vault, test_provider):
-    files = model_files(extra={
-        "Q4_K_M.gguf": b"gguf-quant",
-        "Q8_0.gguf": b"gguf-big",
-    })
+    files = model_files(
+        extra={
+            "Q4_K_M.gguf": b"gguf-quant",
+            "Q8_0.gguf": b"gguf-big",
+        }
+    )
     test_provider.add_repo("acme/pack", files)
     bundle = archive_quiet("test:acme/pack", vault=vault, include=["*Q4_K_M*"])
     manifest = load_manifest(bundle)
@@ -160,6 +162,8 @@ def test_curation_not_overwritten_on_force(vault, test_provider):
     test_provider.add_repo("acme/toy", model_files())
     bundle = archive_quiet("test:acme/toy", vault=vault)
     curation = bundle / "curation.md"
-    curation.write_text("# Curation notes — kept\n\n## Historical significance\n\nHand edited.\n")
+    curation.write_text(
+        "# Curation notes — kept\n\n## Historical significance\n\nHand edited.\n"
+    )
     archive_quiet("test:acme/toy", vault=vault, force=True)
     assert "Hand edited." in curation.read_text()

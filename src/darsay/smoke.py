@@ -45,17 +45,27 @@ def tokenizer_test(payload_root: Path) -> dict:
 
     try:
         from transformers import AutoTokenizer
+
         tok = AutoTokenizer.from_pretrained(str(payload_root))
         ids = tok.encode(SAMPLE_TEXT)
         decoded = tok.decode(ids, skip_special_tokens=True)
         ok = "quick brown fox" in decoded
-        return {"status": "pass" if ok else "fail", "engine": "transformers",
-                "token_count": len(ids), "roundtrip_exact": decoded == SAMPLE_TEXT}
+        return {
+            "status": "pass" if ok else "fail",
+            "engine": "transformers",
+            "token_count": len(ids),
+            "roundtrip_exact": decoded == SAMPLE_TEXT,
+        }
     except ImportError:
         if Tokenizer is not None:
-            return {"status": "skipped",
-                    "reason": "payload has no tokenizer.json; install `transformers` for the slow-tokenizer fallback"}
-        return {"status": "skipped", "reason": "neither `tokenizers` nor `transformers` installed"}
+            return {
+                "status": "skipped",
+                "reason": "payload has no tokenizer.json; install `transformers` for the slow-tokenizer fallback",
+            }
+        return {
+            "status": "skipped",
+            "reason": "neither `tokenizers` nor `transformers` installed",
+        }
     except Exception as exc:
         return {"status": "fail", "engine": "transformers", "error": str(exc)}
 
@@ -65,22 +75,35 @@ def inference_test(payload_root: Path, max_new_tokens: int = 8) -> dict:
         import torch
         from transformers import AutoModelForCausalLM, AutoTokenizer
     except ImportError:
-        return {"status": "skipped", "reason": "transformers/torch not installed (install darsay[inference])"}
+        return {
+            "status": "skipped",
+            "reason": "transformers/torch not installed (install darsay[inference])",
+        }
     try:
         tok = AutoTokenizer.from_pretrained(str(payload_root))
-        model = AutoModelForCausalLM.from_pretrained(str(payload_root), torch_dtype="auto")
+        model = AutoModelForCausalLM.from_pretrained(
+            str(payload_root), torch_dtype="auto"
+        )
         model.eval()
         inputs = tok(PROMPT, return_tensors="pt")
         with torch.no_grad():
-            out = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
+            out = model.generate(
+                **inputs, max_new_tokens=max_new_tokens, do_sample=False
+            )
         text = tok.decode(out[0], skip_special_tokens=True)
-        return {"status": "pass", "engine": "transformers", "prompt": PROMPT,
-                "output": text, "new_tokens": int(out.shape[-1] - inputs["input_ids"].shape[-1])}
+        return {
+            "status": "pass",
+            "engine": "transformers",
+            "prompt": PROMPT,
+            "output": text,
+            "new_tokens": int(out.shape[-1] - inputs["input_ids"].shape[-1]),
+        }
     except Exception as exc:
         return {"status": "fail", "engine": "transformers", "error": str(exc)}
 
 
 # ---------------------------------------------------- dataset structure checks
+
 
 def _check_parquet(path: Path) -> str | None:
     if path.stat().st_size < 12:  # PAR1 + footer + PAR1 minimum
@@ -107,7 +130,7 @@ def _check_jsonl(path: Path) -> str | None:
 
 
 def _check_csv(path: Path) -> str | None:
-    with open(path, "r", encoding="utf-8", errors="replace", newline="") as f:
+    with open(path, encoding="utf-8", errors="replace", newline="") as f:
         sample = f.read(CSV_SNIFF_BYTES)
     if not sample.strip():
         return "file is empty"
@@ -153,7 +176,10 @@ def structure_test(payload_root: Path) -> dict:
         else:
             passed += 1
     if not checked:
-        return {"status": "skipped", "reason": "no parquet/jsonl/csv/tsv files to check"}
+        return {
+            "status": "skipped",
+            "reason": "no parquet/jsonl/csv/tsv files to check",
+        }
     return {
         "status": "pass" if not failures else "fail",
         "files_checked": checked,
@@ -187,9 +213,14 @@ def run_smoke(bundle_dir: Path, inference: bool = False, progress=print) -> dict
             inf_result = {"at": now, **inference_test(payload_root)}
             progress(f"  inference: {inf_result['status']}")
         else:
-            inf_result = manifest["validation"]["smoke_tests"].get("inference", {"status": "not-run"})
+            inf_result = manifest["validation"]["smoke_tests"].get(
+                "inference", {"status": "not-run"}
+            )
 
-        manifest["validation"]["smoke_tests"] = {"tokenizer": tok_result, "inference": inf_result}
+        manifest["validation"]["smoke_tests"] = {
+            "tokenizer": tok_result,
+            "inference": inf_result,
+        }
 
     manifest["archive"]["last_accessed"] = now
     write_manifest(bundle_dir, manifest)

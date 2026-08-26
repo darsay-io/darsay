@@ -54,9 +54,7 @@ def test_model_completeness_gguf_satisfies_all_required():
 
 
 def test_model_completeness_missing_weights():
-    result = check_completeness(
-        "model", ["model/config.json", "model/tokenizer.json"]
-    )
+    result = check_completeness("model", ["model/config.json", "model/tokenizer.json"])
     assert result["status"] == "incomplete"
     assert "weights" in result["missing_required"]
 
