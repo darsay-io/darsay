@@ -295,6 +295,26 @@ def select_weights(manifest: dict, engine: str, requested: str | None) -> str | 
     )
 
 
+def requirement_name(req: str) -> str:
+    for sep in ("===", "==", ">=", "<=", "~=", "!=", ">", "<"):
+        if sep in req:
+            return req.split(sep, 1)[0].strip()
+    return req.strip()
+
+
+def pin_requirements(loose: list[str], pinned: dict[str, str] | None) -> list[str]:
+    """Re-install from recorded package versions when an env is rebuilt."""
+    if not pinned:
+        return list(loose)
+    lookup = {k.lower().replace("_", "-"): v for k, v in pinned.items()}
+    out = []
+    for req in loose:
+        name = requirement_name(req)
+        version = lookup.get(name.lower().replace("_", "-"))
+        out.append(f"{name}=={version}" if version else req)
+    return sorted(out)
+
+
 def resolve_requirements(engine: str, payload_root: Path) -> list[str]:
     """Registry requirements, tightened with what the payload itself declares
     (config.json transformers_version -> a floor, recorded, never guessed)."""
@@ -467,11 +487,24 @@ def hydrate_bundle(bundle_dir: Path, engine: str | None = None, python: str | No
     payload_root = bundle_dir / manifest_payload_root(manifest)
     chosen = select_engine(manifest, engine)
     weights_path = select_weights(manifest, chosen, weights)
-    requirements = resolve_requirements(chosen, payload_root)
+    loose = resolve_requirements(chosen, payload_root)
+    previous = load_hydration(bundle_dir) or {}
+    pinned = None if force else previous.get("engine_packages")
+    install_spec = pin_requirements(loose, pinned)
     root = runtime_root(bundle_dir)
 
     python_exe = _pick_python(python)
     py_full, py_minor = _python_version(python_exe)
+    prev_env = previous.get("env") or {}
+    prev_marker = None
+    if not force and prev_env.get("key"):
+        candidate = root / "envs" / prev_env["key"] / "env.json"
+        if candidate.is_file():
+            prev_marker = candidate
+    if prev_marker is not None:
+        requirements = json.loads(prev_marker.read_text(encoding="utf-8"))["requirements"]
+    else:
+        requirements = install_spec
     key = _env_key(chosen, py_minor, requirements)
     env_dir = root / "envs" / key
     env_exists = (env_dir / "env.json").is_file()
@@ -489,7 +522,8 @@ def hydrate_bundle(bundle_dir: Path, engine: str | None = None, python: str | No
         progress(f"  installer:    {_installer()[0]}")
         progress(f"  then:         probe env offline, write {HYDRATION_FILE}")
         return {"dry_run": True, "engine": chosen, "env_key": key, "env_exists": env_exists,
-                "requirements": requirements, "preflight": issues}
+                "requirements": requirements, "preflight": issues,
+                "rebuild_from_pins": bool(pinned) and not env_exists}
 
     env_record = ensure_env(chosen, requirements, python, root, force=force, progress=progress)
 
@@ -502,7 +536,6 @@ def hydrate_bundle(bundle_dir: Path, engine: str | None = None, python: str | No
     progress(f"  probe: {probe.get('status')}")
 
     now = utc_now()
-    previous = load_hydration(bundle_dir) or {}
     record = {
         "hydration_schema": HYDRATION_SCHEMA,
         "bundle_id": manifest["bundle_id"],

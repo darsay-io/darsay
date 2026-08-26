@@ -83,6 +83,10 @@ non-zero — a broken env is never registered.
 
 - Interpreter: `--python PATH` > `$DARSAY_PYTHON` > the python running
   darsay. `uv` is used when on PATH, else `venv` + `pip`.
+- Rebuilds reuse `hydration.json` `engine_packages` as `name==version` pins
+  so deleting an env and running again installs the same torch/transformers
+  (or mlx) that last worked. `--force` ignores the pins and takes current
+  PyPI.
 - `darsay envs` lists envs, sizes, and which bundles reference them;
   `darsay envs --prune` deletes unreferenced ones.
 - `darsay dehydrate <bundle>` drops the bundle's `hydration.json`
@@ -113,6 +117,7 @@ crashing silently, and never write into the model directory.
   "env": {"key", "path", "python", "python_executable",
           "created_at", "installer", "requirements"},
   "engine_packages": {"torch": "2.13.0", "transformers": "5.15.1", …},
+                              // reused as name==version pins if the env is rebuilt
   "probe": {"at", "status", "versions", "devices", "tokenizer", …},
   "runs": [ /* last 20: at, status, prompt, prompt_mode, device, dtype,
                sampling, new_tokens, stop_reason, timings,

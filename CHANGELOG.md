@@ -35,6 +35,9 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
 - `darsay run` joins unquoted prompt words, and `--repl` keeps the model
   loaded for a multi-turn loop (`/quit` to exit). New `mlx` engine on
   macOS (`--engine mlx`; auto-detected for `*.npz` payloads).
+- Hydration rebuilds install the package versions recorded in
+  `hydration.json` (`engine_packages`) instead of floating `torch` /
+  `transformers`. `--force` refreshes to current PyPI.
 
 - **Rename:** the package, CLI, and environment variables are now `darsay`
   (`darsay` / `$DARSAY_HOME` / `$DARSAY_RUNTIME` / `$DARSAY_PYTHON` /

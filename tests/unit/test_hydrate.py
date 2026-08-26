@@ -8,7 +8,9 @@ from darsay.hydrate import (
     _offline_env,
     detect_engines,
     engine_supports_payload,
+    pin_requirements,
     preflight_run,
+    requirement_name,
     resolve_requirements,
     runtime_root,
     select_engine,
@@ -126,6 +128,17 @@ def test_env_key_is_content_addressed():
     assert a != c
     assert a != d
     assert a.startswith("transformers-py3.12-")
+
+
+def test_pin_requirements_uses_recorded_versions():
+    assert requirement_name("transformers>=4.40.0") == "transformers"
+    assert requirement_name("torch") == "torch"
+    loose = ["torch", "transformers>=4.40.0"]
+    assert pin_requirements(loose, None) == loose
+    pinned = pin_requirements(loose, {"torch": "2.2.0", "transformers": "4.40.0"})
+    assert pinned == ["torch==2.2.0", "transformers==4.40.0"]
+    # Unknown extras in the pin set are ignored; unmatched reqs stay loose.
+    assert pin_requirements(["mlx"], {"torch": "2.2.0"}) == ["mlx"]
 
 
 def test_resolve_requirements_uses_declared_floor(tmp_path):

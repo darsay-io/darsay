@@ -27,6 +27,31 @@ def test_hydrate_preflight_rejects_non_causal_architecture(vault, test_provider,
     assert any(i["code"] == "unsupported-architecture" for i in record["preflight"])
 
 
+def test_hydrate_dry_run_rebuilds_from_pinned_packages(vault, test_provider, monkeypatch, tmp_path):
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    runtime = tmp_path / "runtime"
+    monkeypatch.setenv("DARSAY_RUNTIME", str(runtime))
+    (bundle / "hydration.json").write_text(
+        json.dumps(
+            {
+                "hydration_schema": 1,
+                "bundle_id": "x",
+                "engine": "transformers",
+                "engine_packages": {"torch": "2.2.0", "transformers": "4.40.0"},
+                "env": {"key": "gone", "python_executable": str(tmp_path / "missing")},
+                "runs": [{"status": "pass"}],
+            }
+        )
+        + "\n"
+    )
+    record = hydrate_bundle(bundle, dry_run=True, progress=silent)
+    assert record["rebuild_from_pins"] is True
+    assert "torch==2.2.0" in record["requirements"]
+    assert "transformers==4.40.0" in record["requirements"]
+    assert not runtime.exists()
+
+
 def test_hydrate_dry_run_creates_nothing(vault, test_provider, monkeypatch, tmp_path):
     test_provider.add_repo("acme/toy", model_files())
     bundle = archive_quiet("test:acme/toy", vault=vault)
