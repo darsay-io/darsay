@@ -16,8 +16,9 @@ is the canonical bundle, when a quantized repo deserves archiving in its own
 right, and how "I want to run it at 4 bits" is served without archiving
 anything extra.
 
-Status: policy §1–3 adopted; mechanics in §4 are designed but not yet
-implemented (except `estimate`). Case study: Qwen/Qwen3.8-27B (2026-08).
+Status: policy §1–3 adopted; `estimate --include` and `archive --include`
+are implemented (schema 1.6.0). Hydration-time `--quantize` is still
+proposed. Case study: Qwen/Qwen3.8-27B (2026-08).
 
 ## 1. The two kinds of quantized artifact
 
@@ -87,16 +88,26 @@ metadata; derived numbers (RAM x1.2, download scratch) are labeled
 estimates. Variant listing caps are recorded (`query_limit`,
 `detail_limit`), matching the manifest's record-don't-fabricate rule.
 
-### Proposed: subset archiving (`archive --include`)
+### Implemented: subset archiving (`archive --include`)
 
 Pack repos (one repo, 27 quant files) make "bundle = whole repo" the wrong
-unit: archiving one 16 GB Q4_K_M shouldn't cost 430 GB. Proposal:
-`archive --include GLOB` filters the snapshot; the manifest records the
-subset honestly — a `source.subset` object holding the include patterns
-**and the full upstream file list with sizes/hashes**, so the bundle states
-exactly what it deliberately does not contain. Completeness rules already
-pass for a single GGUF (the `model/*.gguf` pattern satisfies
-config/weights/tokenizer). Schema minor bump when implemented.
+unit: archiving one 16 GB Q4_K_M shouldn't cost 430 GB.
+
+```bash
+darsay estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
+darsay archive  unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
+```
+
+`--include` is a glob, repeatable. Matching files are kept, plus sidecar
+files (config, tokenizer, license, card) so a single GGUF still loads.
+The pin is the subset: later reruns without `--include` resume that pin
+rather than expanding it (`--force` re-pins). Completeness rules already
+pass for a single GGUF (`model/*.gguf` satisfies config/weights/tokenizer).
+
+The manifest records the subset honestly — `source.subset` holds the
+include patterns **and the full upstream file list with sizes/hashes**,
+so the bundle states exactly what it deliberately does not contain.
+Schema 1.6.0 (additive).
 
 ### Proposed: hydration-time quantization (`hydrate --quantize`, `run --quantize`)
 
@@ -125,7 +136,7 @@ no network either, since the input is the archived payload.
 | You want | Do |
 |---|---|
 | Preserve the model | Archive the highest-fidelity repo (55.6 GB) |
-| Preserve what people actually ran | Also archive that published quant as a satellite bundle (FP8: +30.9 GB; one GGUF via proposed `archive --include`: +16 GB) |
+| Preserve what people actually ran | Also archive that published quant as a satellite bundle (FP8: +30.9 GB; one GGUF via `archive --include`: +16 GB) |
 | Just run it smaller/faster locally | Proposed `hydrate --quantize <recipe>` — disposable, regenerable, zero archival cost |
 
 ## See also

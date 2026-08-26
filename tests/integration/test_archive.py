@@ -98,8 +98,42 @@ def test_estimate_include_subset(vault, test_provider):
         progress=silent,
     )
     assert est["subset"]["include"] == ["*.safetensors"]
-    assert est["payload"]["file_count"] == 1
     assert est["subset"]["full_file_count"] == len(files)
+    assert est["subset"]["kept_file_count"] == est["payload"]["file_count"]
+    assert est["payload"]["file_count"] < len(files)
+    assert est["payload"]["file_count"] > 1  # matched weights plus sidecars
+    full_paths = {item["path"] for item in est["subset"]["full_files"]}
+    assert "extra.bin" in full_paths
+    assert "model.safetensors" in full_paths
+    assert "config.json" in full_paths
+
+
+def test_archive_include_records_subset_and_omits_unmatched(vault, test_provider):
+    files = model_files(extra={
+        "Q4_K_M.gguf": b"gguf-quant",
+        "Q8_0.gguf": b"gguf-big",
+    })
+    test_provider.add_repo("acme/pack", files)
+    bundle = archive_quiet("test:acme/pack", vault=vault, include=["*Q4_K_M*"])
+    manifest = load_manifest(bundle)
+    assert manifest["schema_version"] == SCHEMA_VERSION
+    subset = manifest["source"]["subset"]
+    assert subset["include"] == ["*Q4_K_M*"]
+    assert subset["sidecars"] is True
+    assert "Q8_0.gguf" in {item["path"] for item in subset["full_files"]}
+    inventory = {item["path"] for item in manifest["inventory"]["files"]}
+    assert "model/Q4_K_M.gguf" in inventory
+    assert "model/Q8_0.gguf" not in inventory
+    assert "model/config.json" in inventory
+    assert "model/LICENSE" in inventory
+    assert not (bundle / "model" / "Q8_0.gguf").exists()
+    assert (bundle / "model" / "Q4_K_M.gguf").read_bytes() == b"gguf-quant"
+
+
+def test_archive_include_no_match_exits(vault, test_provider):
+    test_provider.add_repo("acme/toy", model_files())
+    with pytest.raises(SystemExit, match="matched no payload files"):
+        archive_quiet("test:acme/toy", vault=vault, include=["*nope*"])
 
 
 def test_estimate_records_variant_query_limit(vault, test_provider):

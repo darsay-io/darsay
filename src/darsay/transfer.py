@@ -297,9 +297,15 @@ def find_resume(
     return None
 
 
-def new_ledger(snapshot) -> dict:
+def new_ledger(snapshot, include: list[str] | None = None) -> dict:
+    from .subset import select_subset
+
+    files = list(snapshot.files)
+    subset = None
+    if include:
+        files, subset = select_subset(files, include)
     expected = []
-    for spec in snapshot.files:
+    for spec in files:
         expected.append({
             "path": spec.path,
             "size": spec.size,
@@ -308,7 +314,7 @@ def new_ledger(snapshot) -> dict:
         })
     expected.sort(key=lambda item: item["path"])
     source = snapshot.source
-    return {
+    ledger = {
         "transfer_version": TRANSFER_VERSION,
         "provider": source.provider,
         "address": source.canonical,
@@ -323,6 +329,9 @@ def new_ledger(snapshot) -> dict:
         "sessions": [],
         "events": [],
     }
+    if subset is not None:
+        ledger["subset"] = subset
+    return ledger
 
 
 def begin_session(bundle_dir: Path, ledger: dict, shard: tuple[int, int] | None = None) -> dict:

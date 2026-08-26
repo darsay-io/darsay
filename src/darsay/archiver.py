@@ -105,6 +105,23 @@ def _guess_version(repo_name: str, model_type: str | None) -> str | None:
     return m.group(1) if m else None
 
 
+def _warn_include_vs_pin(include: list[str] | None, ledger: dict, progress) -> None:
+    pinned = (ledger.get("subset") or {}).get("include")
+    if not include:
+        return
+    if pinned is None:
+        progress(
+            "WARNING: --include ignored; this pin is the full file set. "
+            "Use --force to pin a subset."
+        )
+        return
+    if list(include) != list(pinned):
+        progress(
+            "WARNING: --include differs from the pinned subset "
+            f"{pinned}; resuming the pin. Use --force to re-pin."
+        )
+
+
 def archive(
     source: str | SourceRef,
     revision: str | None = None,
@@ -116,6 +133,7 @@ def archive(
     rehash: bool = False,
     jobs: int = 4,
     shard: tuple[int, int] | None = None,
+    include: list[str] | None = None,
     progress=print,
 ) -> Path | None:
     """Archive a source through pin → reconcile → transfer → register."""
@@ -175,23 +193,26 @@ def archive(
 
         if pinned is not None:
             ledger = load_ledger(bundle_dir)
+            _warn_include_vs_pin(include, ledger, progress)
         else:
             if manifest_path.exists() and dry_run and not force:
                 try:
                     ledger = load_ledger(bundle_dir)
+                    _warn_include_vs_pin(include, ledger, progress)
                 except LedgerError:
                     assert snapshot is not None
-                    ledger = new_ledger(snapshot)
+                    ledger = new_ledger(snapshot, include=include)
             elif force:
                 assert snapshot is not None
-                ledger = new_ledger(snapshot)
+                ledger = new_ledger(snapshot, include=include)
                 save_ledger(bundle_dir, ledger)
             else:
                 try:
                     ledger = load_ledger(bundle_dir)
+                    _warn_include_vs_pin(include, ledger, progress)
                 except LedgerError:
                     assert snapshot is not None
-                    ledger = new_ledger(snapshot)
+                    ledger = new_ledger(snapshot, include=include)
                     save_ledger(bundle_dir, ledger)
             if force and manifest_path.exists():
                 manifest_path.unlink()
@@ -383,6 +404,7 @@ def _register_bundle(bundle_dir: Path, payload_dir: Path, ledger: dict, progress
                 "likes": metadata.get("likes"),
             },
             "upstream_tags": tags or None,
+            "subset": ledger.get("subset"),
         },
         "licensing": licensing,
         "inventory": {

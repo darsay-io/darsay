@@ -6,7 +6,7 @@
   <a href="../README.md">README</a>
 </p>
 
-# manifest.json — schema reference (v1.5.0)
+# manifest.json — schema reference (v1.6.0)
 
 > **In one sentence.** The manifest is the recorded facts about a bundle.
 > Unknown is `null`. The tool never fabricates.
@@ -32,7 +32,7 @@ Conventions:
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | Version of this schema (`"1.5.0"`; 1.1 defined `runtime.tested_hardware`; 1.2 added datasets; 1.3 added gate and structured-lineage provenance; 1.4 added incremental-transfer accounting and local-source provenance; 1.5 added `source.provider` / `source.address` — all additive). |
+| `schema_version` | Version of this schema (`"1.6.0"`; 1.1 defined `runtime.tested_hardware`; 1.2 added datasets; 1.3 added gate and structured-lineage provenance; 1.4 added incremental-transfer accounting and local-source provenance; 1.5 added `source.provider` / `source.address`; 1.6 added `source.subset` for `archive --include` — all additive). |
 | `artifact_type` | Registry key driving completeness rules and the payload root (`"model"` or `"dataset"`; future: GGUF packs, papers — see `src/darsay/schema.py`). |
 | `bundle_id` | `<bundle directory name>@<first 12 of pinned revision>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Hugging Face dataset bundles take a `datasets--` prefix (`datasets--saidutta69--fable-5-premium@684cb1f849fe`) since model and dataset namespaces can collide on that host. Other providers include their id in the directory name. Stable, deterministic, unique per (source, revision). |
 
@@ -68,6 +68,7 @@ Provenance of the download.
 | `access` | `{gated, notes}`. `gated` is the Hub gate status at archive time: `"auto"` (agree → instant access, contact info shared with the authors), `"manual"` (authors approve each request), or `false`. The gate agreement text lives in Hub repo settings, **not** in the repo tree, so it is not part of the snapshot — `notes` records that. Gates are enforced server-side on file downloads; an archive of a gated repo means the archiving account had accepted the terms. |
 | `upstream_stats_at_archive` | Downloads/month and likes at archive time — a popularity snapshot for the historical record. |
 | `upstream_tags` | Raw repo tags at archive time. |
+| `subset` | Present when `archive --include` pinned a globbed subset. `{include, sidecars, sidecar_file_count, full_file_count, full_total_size_bytes, kept_file_count, kept_total_size_bytes, full_files[]}`. `full_files` is the complete upstream inventory (path, size, sha256, git_sha1) so the bundle states exactly what it left out. `inventory.files` is only the kept payload. `null` when the pin is the whole repo. Added in 1.6.0. |
 
 ## `licensing`
 

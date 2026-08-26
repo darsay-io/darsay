@@ -15,6 +15,10 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
   filesystem path, a bundle id (`name@revision12`), or a unique prefix of
   either. `darsay list` prints a `PATH` column so the id is a usable handle,
   not just a label.
+- `archive --include GLOB` (repeatable) pins a subset of the upstream
+  snapshot. Matching files plus sidecars (config, tokenizer, license, card)
+  are transferred; `source.subset` records the include patterns and the
+  full upstream file list. Manifest schema **1.6.0** (additive).
 
 ### Changed
 

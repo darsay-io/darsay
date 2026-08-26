@@ -118,23 +118,24 @@ The pin is frozen on the first run. Later runs do not chase a new
 ## Price one quant from a pack repo
 
 Some GGUF repos are hundreds of gigabytes of named quants. `--include`
-is an **estimate** flag: it prices a glob against Hub metadata and
-downloads nothing.
+prices a glob against Hub metadata, then archives only those files
+(plus config/tokenizer/license sidecars). The manifest records the
+omitted upstream files.
 
 ```bash
 darsay estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
+darsay archive  unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
 ```
 
-`--include` is a glob, repeatable. To *keep* a published quant, archive
-that repo as its own satellite bundle — the official FP8, a community
-GGUF people actually ran:
+`--include` is a glob, repeatable. A published quant that is its own
+repo (official FP8, a community GGUF people actually ran) is still an
+ordinary satellite bundle with no glob:
 
 ```bash
 darsay archive Qwen/Qwen3.8-27B-FP8
 ```
 
-Subset archiving (`archive --include`) is not shipped yet. Policy:
-[Quantization](../docs/QUANTIZATION.md).
+Policy: [Quantization](../docs/QUANTIZATION.md).
 
 ---
 

@@ -144,7 +144,7 @@ If a later source is gated, set `$HF_TOKEN` or run
 |---|---|
 | The download is huge | `darsay archive … --max-gb 10` — exits 10, rerun to resume |
 | You hit Ctrl-C | Rerun the same `archive` command. Completed files are kept |
-| You only want one GGUF from a pack | `darsay estimate REPO --include '*Q4_K_M*'` prices it; archive the published satellite repo, not the whole pack |
+| You only want one GGUF from a pack | `darsay archive REPO --include '*Q4_K_M*'` — prices first with `estimate --include` |
 | It is a dataset, not a model | `darsay archive datasets/owner/name` — payload lands in `data/` |
 | You want one file for a USB drive | `darsay export <bundle> -o /backups` |
 | You want to know it still matches | `darsay verify <bundle>` |

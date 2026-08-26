@@ -20,4 +20,6 @@ __version__ = "0.6.0"
 #        verification records its per-file timing. Additive.
 # 1.5.0: source.provider and source.address (canonical provider-qualified
 #        ref). origin remains the provider id. Additive.
-SCHEMA_VERSION = "1.5.0"
+# 1.6.0: source.subset for archive --include (include globs, sidecar flag,
+#        full upstream file list with sizes/hashes). Additive.
+SCHEMA_VERSION = "1.6.0"

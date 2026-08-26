@@ -387,7 +387,7 @@ a schema change.
 - [MANIFEST.md](MANIFEST.md) — `source.transfer` fields and local-source
   provenance.
 - [QUANTIZATION.md](QUANTIZATION.md) — deciding *what* to archive; its
-  proposed `archive --include` subsets compose with this design (the
+  `archive --include` subsets compose with this design (the
   expected set is filtered before planning, recorded as `source.subset`).
 - [DESIGN.md](DESIGN.md) — why the Hugging Face provider keeps
   `huggingface_hub` as transport (`hf_hub_download` owns

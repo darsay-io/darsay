@@ -15,7 +15,6 @@ manifest's `query_limit` convention.
 from __future__ import annotations
 
 import shutil
-from fnmatch import fnmatch
 from pathlib import Path
 
 from .archiver import bundle_dir_for, utc_now
@@ -67,10 +66,13 @@ def estimate(
     except SourceError as exc:
         raise SystemExit(str(exc)) from None
 
-    files = [{"path": f.path, "size": f.size} for f in snapshot.files]
-    full_count, full_total = len(files), sum(f["size"] or 0 for f in files)
+    files = [{"path": f.path, "size": f.size, "sha256": f.sha256, "git_sha1": f.git_sha1}
+             for f in snapshot.files]
+    subset = None
     if include:
-        files = [f for f in files if any(fnmatch(f["path"], pat) for pat in include)]
+        from .subset import select_subset
+
+        files, subset = select_subset(files, include)
 
     primary_suffixes = DATA_SUFFIXES if repo_type == "dataset" else WEIGHT_SUFFIXES
     primary = [f for f in files if f["path"].lower().endswith(primary_suffixes)]
@@ -112,9 +114,7 @@ def estimate(
             "gated": bool((snapshot.metadata or {}).get("gated")),
             "last_modified_upstream": snapshot.last_modified,
         },
-        "subset": {"include": include,
-                   "full_file_count": full_count,
-                   "full_total_size_bytes": full_total} if include else None,
+        "subset": subset,
         "parameters": snapshot.parameters,
         "formats": _format_breakdown(files) if repo_type == "dataset" else None,
         "payload": {
@@ -195,7 +195,8 @@ def print_estimate(est: dict, progress=print) -> None:
     p(f"  {' | '.join(str(f) for f in facts if f)}")
     if est["subset"]:
         sub = est["subset"]
-        p(f"  subset:       only files matching {', '.join(sub['include'])} "
+        extra = " + sidecars" if sub.get("sidecars") else ""
+        p(f"  subset:       only files matching {', '.join(sub['include'])}{extra} "
           f"(full repo: {sub['full_file_count']} files, {human_size(sub['full_total_size_bytes'])})")
 
     if is_dataset:
@@ -267,8 +268,8 @@ def print_estimate(est: dict, progress=print) -> None:
     if src["revision_ref"] != "main":
         cmd += f" --revision {src['revision_ref']}"
     if est["subset"]:
-        p(f"\nNOTE: archive has no subset mode yet — `{cmd}` would fetch the FULL repo "
-          f"({human_size(est['subset']['full_total_size_bytes'])}), not this subset. "
-          "See docs/QUANTIZATION.md (proposed --include).\n")
+        for pat in est["subset"]["include"]:
+            cmd += f" --include {pat!r}"
+        p(f"\nTo archive this subset: {cmd}\n")
     else:
         p(f"\nTo archive: {cmd}\n")

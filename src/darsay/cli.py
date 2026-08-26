@@ -144,6 +144,7 @@ def cmd_archive(args) -> int:
             rehash=args.rehash,
             jobs=args.jobs,
             shard=args.shard,
+            include=args.include,
         )
     except PartialTransfer as stop:
         print(f"\nArchive paused cleanly ({stop.reason}: {stop.detail}).")
@@ -428,6 +429,10 @@ def main(argv=None) -> int:
                    help="parallel workers for files smaller than 8 MiB (default: 4)")
     p.add_argument("--shard", type=_shard_key, metavar="N/T",
                    help="advisory cooperative order: fetch byte-balanced lane N of T first")
+    p.add_argument("--include", action="append", metavar="GLOB",
+                   help="archive only payload files matching GLOB (repeatable), plus "
+                        "sidecar files (config, tokenizer, license, card). "
+                        "The manifest records the omitted upstream files")
     p.set_defaults(func=cmd_archive)
 
     bundle_help = "path, bundle id (name@revision12 from `list`), or a unique prefix"

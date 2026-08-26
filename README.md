@@ -24,7 +24,7 @@ darsay run     qwen--qwen3-0.6b "Say hello"
   <a href="https://github.com/jeremynorris/darsay/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/jeremynorris/darsay/ci.yml?style=flat-square&label=CI" alt="CI"></a>
   <a href="https://github.com/jeremynorris/darsay/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-38bdf8?style=flat-square" alt="Apache 2.0"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-00b4ff?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/schema-v1.5.0-0ea5e9?style=flat-square" alt="Manifest schema 1.5.0">
+  <img src="https://img.shields.io/badge/schema-v1.6.0-0ea5e9?style=flat-square" alt="Manifest schema 1.6.0">
 </p>
 
 <p align="center">
@@ -246,6 +246,7 @@ Source refs are provider-qualified — `huggingface:Qwen/Qwen3-0.6B`,
 ```bash
 darsay estimate Qwen/Qwen3.8-27B --variants
 darsay estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
+darsay archive  unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
 darsay estimate datasets/saidutta69/fable-5-premium
 darsay archive  datasets/saidutta69/fable-5-premium
 darsay archive  Qwen/Qwen3.8-27B --max-gb 10          # pause; rerun to resume

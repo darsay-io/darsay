@@ -21,7 +21,7 @@
 | | Current |
 |---|---|
 | Tool | **0.6.0** |
-| Manifest schema | **1.5.0** |
+| Manifest schema | **1.6.0** |
 | MVB format | **1.1** |
 | License | Apache 2.0 |
 
