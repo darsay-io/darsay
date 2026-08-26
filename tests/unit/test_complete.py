@@ -9,11 +9,15 @@ def test_script_for_known_shells():
     zsh = script_for("zsh")
     assert zsh.startswith("#compdef darsay")
     assert "darsay list --ids" in zsh
+    assert "CURRENT-1" in zsh and "--next" in zsh
     bash = script_for("bash")
     assert "complete -F _darsay darsay" in bash
     assert "*.mvb.tar" in bash
+    assert "catalog --ids" in bash
+    assert "== --next" in bash
     fish = script_for("fish")
     assert "darsay.fish" in fish
+    assert "-l next" in fish
     for name in COMMANDS:
         assert name in zsh
         assert name in bash

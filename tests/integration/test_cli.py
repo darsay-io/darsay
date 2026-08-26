@@ -46,6 +46,9 @@ def test_cli_list_partial_bundle(vault, test_provider, capsys):
     listed = capsys.readouterr().out
     assert "partial" in listed
     assert "test:acme/toy" in listed
+    assert "DESIRE" not in listed
+    assert "NOTE" not in listed
+    assert "remaining" in listed
 
 
 def test_run_joins_unquoted_prompt_and_accepts_repl_flag(vault, test_provider, monkeypatch):
@@ -156,6 +159,9 @@ def test_list_info_verify_regen_roundtrip(vault, test_provider, capsys):
     assert "test--acme--toy" in listed
     assert "test:acme/toy" in listed
     assert "have" in listed
+    assert "DESIRE" not in listed
+    assert "NOTE" not in listed
+    assert "remaining" not in listed
     assert main(["--vault", str(vault), "list", "--json"]) == 0
     data = json.loads(capsys.readouterr().out)
     assert data[0]["path"] == str(bundle)

@@ -172,6 +172,8 @@ def _estimate_catalog(args, vault, cat_path) -> int:
         require_writable,
         save_catalog,
         try_parse_source,
+        warning_detail,
+        write_catalog_readme,
     )
     from .estimate import estimate
     from .readme_gen import human_params, human_size
@@ -183,12 +185,7 @@ def _estimate_catalog(args, vault, cat_path) -> int:
         )
     if args.variants:
         print("warning: --variants is ignored for catalog estimate", file=sys.stderr)
-    require_writable(
-        vault,
-        cat_path,
-        bool(getattr(args, "write", False)),
-        hint=f"darsay catalog adopt reading {cat_path.parent}",
-    )
+    require_writable(vault, cat_path, bool(getattr(args, "write", False)))
     catalog = load_catalog(cat_path)
     only_canonical = None
     if args.entry:
@@ -229,7 +226,7 @@ def _estimate_catalog(args, vault, cat_path) -> int:
                 progress=lambda *a, **k: None,
             )
         except SystemExit as exc:
-            print(f"warning: {exc}", file=sys.stderr)
+            print(f"warning: {warning_detail(exc)}", file=sys.stderr)
             failed += 1
             continue
         digest = estimate_digest(est)
@@ -249,6 +246,7 @@ def _estimate_catalog(args, vault, cat_path) -> int:
         )
     catalog["updated"] = utc_now()
     save_catalog(cat_path, catalog)
+    write_catalog_readme(cat_path.parent, catalog)
     if args.json:
         print(json.dumps(digests, indent=2, ensure_ascii=False))
         return 1 if failed else 0
@@ -303,11 +301,20 @@ def cmd_archive(args) -> int:
     return 0
 
 
+def _finish_next(message: str, error: bool = False) -> int:
+    """Idle ``--next``: errors raise; idempotent success prints on stderr and returns 0."""
+    if error:
+        raise SystemExit("error: " + message)
+    print(message, file=sys.stderr)
+    return 0
+
+
 def _archive_target(args, vault) -> tuple[str, str | None, list[str] | None] | None:
-    """Resolve archive SOURCE vs --next CATALOG (K11/K14)."""
+    """Resolve archive SOURCE vs --next CATALOG."""
     from .catalog import (
         load_catalog,
         next_entry,
+        next_idle_message,
         overlay,
         realize_from_overlay,
         resolve_catalog,
@@ -342,12 +349,8 @@ def _archive_target(args, vault) -> tuple[str, str | None, list[str] | None] | N
     rows = overlay(catalog, bundle_records(vault))
     nxt = next_entry(rows, desire=True)
     if nxt is None:
-        print(f"error: nothing to archive — every entry in {catalog['id']} is already in the vault")
+        _finish_next(*next_idle_message(catalog, rows))
         return None
-    if nxt.get("status") == "unknown":
-        raise SystemExit(
-            f"error: cannot archive {nxt['source']} — unknown source provider"
-        )
     source, revision, include = realize_from_overlay(nxt)
     if nxt.get("status") == "partial":
         rev12 = (revision or "")[:12]
@@ -397,9 +400,11 @@ def cmd_list(args) -> int:
 
 def _list_vault(args, vault, records) -> int:
     from .catalog import (
+        format_archive_command,
         next_entry,
         overlay_stats,
         print_catalog_table,
+        realize_from_overlay,
         sort_rows,
         vault_as_rows,
         vault_header_line,
@@ -415,17 +420,22 @@ def _list_vault(args, vault, records) -> int:
         for rec in records:
             print(rec["bundle_id"])
         return 0
-    rows = vault_as_rows(records)
+    all_rows = vault_as_rows(records)
+    rows = all_rows
     if getattr(args, "want", False):
         rows = [r for r in rows if r.get("status") == "partial"]
     if getattr(args, "next", False):
-        nxt = next_entry(rows, desire=False)
+        nxt = next_entry(all_rows, desire=False)
         if nxt is None:
-            raise SystemExit("error: nothing in progress in the vault")
-        print(nxt["source"])
+            return _finish_next("nothing in progress in the vault", error=False)
+        source, revision, include = realize_from_overlay(nxt)
+        print(format_archive_command(source, revision, include, vault=args.vault))
+        return 0
+    if not all_rows:
+        print(f"No bundles in {vault}/")
         return 0
     if not rows:
-        print(f"No bundles in {vault}/")
+        print("nothing in progress in the vault")
         return 0
     rows = sort_rows(rows, sort or "name")
     stats = overlay_stats(rows)
@@ -435,23 +445,25 @@ def _list_vault(args, vault, records) -> int:
 
 def _list_catalog(args, vault, records, spec) -> int:
     from .catalog import (
+        catalog_header_line,
         filter_want,
+        format_archive_command,
         load_catalog,
         next_entry,
+        next_idle_message,
         overlay,
         overlay_envelope,
         overlay_stats,
-        catalog_header_line,
         print_catalog_table,
+        realize_from_overlay,
         resolve_catalog,
         sort_rows,
     )
 
     cat_path = resolve_catalog(vault, spec)
     catalog = load_catalog(cat_path)
-    rows = overlay(catalog, records)
-    if getattr(args, "want", False):
-        rows = filter_want(rows)
+    all_rows = overlay(catalog, records)
+    rows = filter_want(all_rows) if getattr(args, "want", False) else all_rows
     sort = getattr(args, "sort", None) or "next"
     rows = sort_rows(rows, sort)
     if args.json:
@@ -472,18 +484,21 @@ def _list_catalog(args, vault, records, spec) -> int:
             print("  hint: darsay archive --next " + spec, file=sys.stderr)
         return 0
     if getattr(args, "next", False):
-        nxt = next_entry(rows, desire=True)
+        nxt = next_entry(all_rows, desire=True)
         if nxt is None:
-            raise SystemExit(
-                f"error: nothing missing in catalog {catalog['id']} — every entry is in the vault"
-            )
-        print(nxt["source"])
+            return _finish_next(*next_idle_message(catalog, all_rows))
+        source, revision, include = realize_from_overlay(nxt)
+        print(format_archive_command(source, revision, include, vault=args.vault))
         return 0
     if not catalog["entries"]:
         print(f"Catalog {catalog['id']}  ·  {catalog.get('title') or catalog['id']}  ·  0 sources")
         print()
         print("No entries. Add one:")
         print(f"  darsay catalog add {catalog['id']} huggingface:owner/name --desire 8")
+        return 0
+    if not rows:
+        stats = overlay_stats(all_rows)
+        print(f"nothing missing in catalog {catalog['id']} — {stats['have']} have")
         return 0
     stats = overlay_stats(rows)
     print_catalog_table(rows, header_line=catalog_header_line(catalog, stats, rows))
@@ -544,7 +559,7 @@ def cmd_catalog_add(args) -> int:
 
     vault = _vault_path(args, announce=True)
     path = resolve_catalog(vault, args.catalog)
-    require_writable(vault, path, bool(args.write), hint=f"darsay catalog adopt reading {path.parent}")
+    require_writable(vault, path, bool(args.write))
     catalog = load_catalog(path)
     entry, action = upsert_entry(
         catalog,
@@ -566,6 +581,11 @@ def cmd_catalog_add(args) -> int:
         entry["estimate"] = estimate_digest(est)
         gated = "  GATED" if entry["estimate"].get("gated") else ""
         extra = f"  {human_size(entry['estimate']['payload_bytes'])}{gated}  (as of {entry['estimate']['as_of'][:10]})"
+        action = "updated" if action == "unchanged" else action
+    elif action == "unchanged":
+        inc = f"  include={','.join(entry['include'])}" if entry.get("include") else ""
+        print(f"Unchanged {entry['source']}{inc}")
+        return 0
     save_catalog(path, catalog)
     write_catalog_readme(path.parent, catalog)
     inc = f"  include={','.join(entry['include'])}" if entry.get("include") else ""
@@ -584,7 +604,7 @@ def cmd_catalog_drop(args) -> int:
 
     vault = _vault_path(args, announce=True)
     path = resolve_catalog(vault, args.catalog)
-    require_writable(vault, path, bool(args.write), hint=f"darsay catalog adopt reading {path.parent}")
+    require_writable(vault, path, bool(args.write))
     catalog = load_catalog(path)
     removed = drop_entry(
         catalog,
@@ -638,7 +658,7 @@ def cmd_catalog_regen(args) -> int:
 
     vault = _vault_path(args, announce=True)
     path = resolve_catalog(vault, args.catalog)
-    require_writable(vault, path, bool(args.write), hint=f"darsay catalog adopt reading {path.parent}")
+    require_writable(vault, path, bool(args.write))
     catalog = load_catalog(path)
     catalog["updated"] = utc_now()
     save_catalog(path, catalog)
@@ -973,7 +993,10 @@ def main(argv=None) -> int:
     list_fmt = p.add_mutually_exclusive_group()
     list_fmt.add_argument("--json", action="store_true", help="machine-readable records")
     list_fmt.add_argument("--ids", action="store_true", help="bundle ids (or catalog source refs), one per line")
-    list_fmt.add_argument("--next", action="store_true", help="print the next source to fetch")
+    list_fmt.add_argument(
+        "--next", action="store_true",
+        help="print a copy-pasteable archive command for the next unfinished row",
+    )
     p.add_argument("--want", action="store_true", help="only want and partial rows")
     p.add_argument("--sort", choices=("next", "desire", "size", "name", "status"),
                    help="row order (default: next when a catalog is given, name for the vault)")

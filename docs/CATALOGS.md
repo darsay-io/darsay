@@ -24,7 +24,8 @@ Conventions match the [manifest](MANIFEST.md):
   `darsay estimate`, not the live dict (disk paths and bundle dirs are
   stripped).
 - Major schema version is breaking. Additive minor/patch: readers ignore
-  unknown fields. A 2.x file is a hard error for a 1.x tool.
+  unknown fields; this tool preserves unknown *top-level* keys on
+  round-trip. A 2.x file is a hard error for a 1.x tool.
 
 The catalog schema is independent of bundle `schema_version` (currently
 1.6.0). Catalogs are not inside `.mvb.tar`.
@@ -42,8 +43,10 @@ vault/catalogs/<slug>/
 not a bundle. `darsay du` still counts bundles and `.runtime` only.
 
 A catalog may also be a lone `catalog.json` (USB, git clone, gist). Path-
-addressed catalogs are read-only unless `--write`. Vault-named catalogs
-(`vault/catalogs/<id>/`) are writable.
+addressed catalogs require `./`, `~/`, or an absolute path (same as bundle
+addressing) and are read-only unless `--write`. A bare slug (`summer`)
+resolves only under `vault/catalogs/<slug>/`. Vault-named catalogs are
+writable.
 
 ## Top level
 
@@ -106,7 +109,11 @@ set.
 | `have` | A complete bundle of this work is in the vault. |
 | `partial` | An in-progress pin (ledger, no manifest) matches. |
 | `want` | Nothing in this vault matches. |
-| `unknown` | This darsay cannot parse the source (unknown provider). Not unfinished work. |
+| `unknown` | Unregistered source scheme (a future provider). Not unfinished work. A known provider with a locator that does not parse is a load error, not `unknown`. |
+
+`archive --next` and `list --sort next` prefer `partial` over `want`
+(finish bytes already on disk), then higher desire. `--sort desire` is
+priority-first. Unknown rows are skipped.
 
 `archive` does not write `catalog.json`. Status flips when *this* vault
 grows bytes. A friend’s overlay against their empty vault is all `want`.
@@ -128,5 +135,7 @@ darsay catalog adopt MINE ./friend
 ```
 
 `catalog add` is offline unless `--estimate`. Bare `darsay list` is the
-vault as the same table (DESIRE/NOTE are `—`). Cookbook:
+vault as the same table; DESIRE and NOTE hide when every cell is empty.
+`list --next` prints a copy-pasteable `darsay archive` line (source +
+`--revision` + `--include`). Cookbook:
 [Share a catalog](../examples/README.md#share-a-catalog).

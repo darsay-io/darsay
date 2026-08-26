@@ -225,7 +225,7 @@ def _match_keys(bundle_dir: Path, bundle_id: str) -> list[str]:
     ]
 
 
-def _is_forced_path(spec: str) -> bool:
+def is_forced_path(spec: str) -> bool:
     """Absolute, home, or explicit relative paths are not vault-id searches."""
     return spec.startswith(".") or spec.startswith("~") or Path(spec).is_absolute()
 
@@ -262,7 +262,7 @@ def resolve_bundle(
         return _require(path, require_manifest=require_manifest)
     vault_relative = vault / raw
     if (
-        not _is_forced_path(raw)
+        not is_forced_path(raw)
         and vault_relative.is_dir()
         and (
             (vault_relative / "manifest.json").is_file()
@@ -271,7 +271,7 @@ def resolve_bundle(
     ):
         return _require(vault_relative, require_manifest=require_manifest)
 
-    if _is_forced_path(raw):
+    if is_forced_path(raw):
         raise SystemExit(
             f"error: no manifest.json in {path} — not a darsay bundle"
             if require_manifest
@@ -310,7 +310,7 @@ def resolve_bundle(
         if catalog_file.is_file():
             extra = (
                 f"\n  hint: darsay list {folded}"
-                f"\n  hint: darsay catalog regen {folded}"
+                f"\n  hint: darsay archive --next {folded}"
             )
     raise SystemExit(
         f"error: no bundle matching {raw!r} in {vault}/\n"

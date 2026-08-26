@@ -70,6 +70,7 @@ def test_catalog_new_add_drop_list(vault, test_provider, capsys):
     listed = capsys.readouterr().out
     assert "want" in listed
     assert "test:acme/toy" in listed
+    assert "DESIRE" in listed
     archive_quiet("test:acme/toy", vault=vault)
     capsys.readouterr()
     assert main(["--vault", str(vault), "list", "summer"]) == 0
@@ -93,6 +94,8 @@ def test_estimate_catalog_and_path_readonly(vault, tmp_path, test_provider, caps
     assert "payload_bytes" in digest
     assert "checked_path" not in digest
     assert "precision" not in digest
+    readme = (vault / "catalogs" / "summer" / "README.md").read_text()
+    assert "(as of" in readme
 
     friend = tmp_path / "friend" / "catalog.json"
     friend.parent.mkdir()
@@ -161,8 +164,8 @@ def test_archive_next_errors(vault, test_provider, capsys):
         main(["--vault", str(vault), "archive", "summer"])
     with pytest.raises(SystemExit, match="already applies"):
         main(["--vault", str(vault), "archive", "--next", "summer", "--include", "*Q4*"])
-    assert main(["--vault", str(vault), "archive", "--next", "summer"]) == 0
-    assert "nothing to archive" in capsys.readouterr().out
+    with pytest.raises(SystemExit, match="catalog summer is empty"):
+        main(["--vault", str(vault), "archive", "--next", "summer"])
 
 
 def test_catalog_adopt_and_regen(vault, tmp_path, capsys):
@@ -215,8 +218,85 @@ def test_list_next_and_ids(vault, test_provider, capsys):
     assert "test:acme/toy" in captured.out
     assert "subset or pinned" in captured.err
     assert main(["--vault", str(vault), "list", "summer", "--next"]) == 0
-    assert capsys.readouterr().out.strip() == "test:acme/toy"
+    nxt = capsys.readouterr().out.strip()
+    assert "archive" in nxt
+    assert "test:acme/toy" in nxt
+    assert "--include" in nxt
     assert main(["--vault", str(vault), "list", "--sort", "name"]) == 0
     capsys.readouterr()
     with pytest.raises(SystemExit, match="requires a catalog"):
         main(["--vault", str(vault), "list", "--sort", "desire"])
+
+
+def test_add_after_unknown_provider_row(vault, test_provider, capsys):
+    test_provider.add_repo("acme/toy", model_files())
+    assert main(["--vault", str(vault), "catalog", "new", "summer"]) == 0
+    capsys.readouterr()
+    path = vault / "catalogs" / "summer" / "catalog.json"
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["entries"].append({
+        "source": "other:foo/bar",
+        "revision": None,
+        "include": None,
+        "desire": 9,
+        "note": None,
+        "added": "2026-01-01T00:00:00+00:00",
+        "estimate": None,
+    })
+    path.write_text(json.dumps(data), encoding="utf-8")
+    assert main(["--vault", str(vault), "catalog", "add", "summer", "test:acme/toy", "--desire", "8"]) == 0
+    out = capsys.readouterr().out
+    assert "Added test:acme/toy" in out
+    sources = [e["source"] for e in json.loads(path.read_text())["entries"]]
+    assert "other:foo/bar" in sources
+    assert "test:acme/toy" in sources
+
+
+def test_list_want_and_next_when_complete(vault, test_provider, capsys):
+    test_provider.add_repo("acme/toy", model_files())
+    archive_quiet("test:acme/toy", vault=vault)
+    assert main(["--vault", str(vault), "catalog", "new", "summer"]) == 0
+    capsys.readouterr()
+    assert main(["--vault", str(vault), "catalog", "add", "summer", "test:acme/toy", "--desire", "8"]) == 0
+    capsys.readouterr()
+    assert main(["--vault", str(vault), "list", "--want"]) == 0
+    vault_want = capsys.readouterr().out
+    assert "No bundles" not in vault_want
+    assert "nothing in progress" in vault_want
+    assert main(["--vault", str(vault), "list", "summer", "--want"]) == 0
+    cat_want = capsys.readouterr().out
+    assert "nothing missing" in cat_want
+    assert "1 have" in cat_want
+    assert main(["--vault", str(vault), "list", "summer", "--next"]) == 0
+    captured = capsys.readouterr()
+    assert captured.out.strip() == ""
+    assert "nothing missing" in captured.err
+    assert main(["--vault", str(vault), "archive", "--next", "summer"]) == 0
+    captured = capsys.readouterr()
+    assert "error:" not in captured.out
+    assert "nothing missing" in captured.err
+
+
+def test_path_catalog_write_hint_and_bundle_miss(vault, tmp_path, test_provider, capsys):
+    test_provider.add_repo("acme/toy", model_files())
+    archive_quiet("test:acme/toy", vault=vault)
+    friend = tmp_path / "friend"
+    friend.mkdir()
+    (friend / "catalog.json").write_text(
+        json.dumps({
+            "catalog_schema_version": "1.0.0",
+            "kind": "darsay.catalog",
+            "id": "summer",
+            "title": "Summer",
+            "created": "2026-01-01T00:00:00+00:00",
+            "updated": "2026-01-01T00:00:00+00:00",
+            "entries": [],
+        }),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match=r"catalog adopt <name>") as exc:
+        main(["--vault", str(vault), "catalog", "add", str(friend), "test:acme/toy"])
+    assert "adopt reading" not in str(exc.value)
+    with pytest.raises(SystemExit, match="is a bundle") as bundle_exc:
+        main(["--vault", str(vault), "list", "test--acme--toy"])
+    assert "darsay info" in str(bundle_exc.value)

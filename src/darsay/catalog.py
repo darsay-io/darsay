@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -30,6 +31,11 @@ DIGEST_KEYS = frozenset({
     "payload_bytes", "file_count", "license", "gated",
     "parameters", "dominant_dtype", "unknown_size_count",
 })
+_CATALOG_TOP_KEYS = (
+    "catalog_schema_version", "kind", "id", "title", "curator", "note",
+    "created", "updated", "entries",
+)
+_HIDE_IF_EMPTY = frozenset({"DESIRE", "NOTE"})
 
 
 def catalogs_dir(vault: Path) -> Path:
@@ -53,18 +59,27 @@ def iter_catalogs(vault: Path) -> list[dict]:
         try:
             catalog = load_catalog(path)
         except SystemExit as exc:
-            print(f"warning: {exc}", file=sys.stderr)
+            print(f"warning: {warning_detail(exc)}", file=sys.stderr)
             continue
         rows.append(catalog)
     return rows
 
 
+def warning_detail(exc: BaseException) -> str:
+    """Strip a leading ``error: `` so a SystemExit can be reprinted as a warning."""
+    text = str(exc)
+    return text[7:] if text.startswith("error: ") else text
+
+
 def try_parse_source(ref: str):
-    """Like parse_source, but unknown provider returns None instead of SystemExit."""
+    """Parse a source. Unknown provider/host → None. Known-provider parse errors still raise."""
     try:
         return parse_source(ref)
-    except SystemExit:
-        return None
+    except SystemExit as exc:
+        text = str(exc)
+        if "unknown source provider" in text or "no source provider for host" in text:
+            return None
+        raise
 
 
 def include_key(include: list[str] | None) -> tuple[str, ...]:
@@ -72,10 +87,10 @@ def include_key(include: list[str] | None) -> tuple[str, ...]:
 
 
 def entry_key(source: str, revision: str | None, include: list[str] | None) -> tuple:
-    """Uniqueness for add/drop. Callers must pass a parseable source."""
-    ref = parse_source(source)
-    rev = (revision or "").strip()
-    return (ref.canonical, rev, include_key(include))
+    """Uniqueness for add/drop. Unknown-provider rows key on the raw source string."""
+    parsed = try_parse_source(source)
+    canonical = parsed.canonical if parsed is not None else source
+    return (canonical, (revision or "").strip(), include_key(include))
 
 
 def revisions_match(got: str, want: str) -> bool:
@@ -108,6 +123,18 @@ def estimate_digest(est: dict) -> dict:
     return digest
 
 
+def project_stored_estimate(est) -> dict | None:
+    """Keep only DIGEST_KEYS. Live ``estimate()`` dicts are digested; disk paths never persist."""
+    if not isinstance(est, dict):
+        return None
+    if isinstance(est.get("payload"), dict) and isinstance(est.get("source"), dict):
+        try:
+            return estimate_digest(est)
+        except (AssertionError, KeyError, TypeError):
+            pass
+    return {k: est[k] for k in DIGEST_KEYS if k in est}
+
+
 def _looks_like_catalog(data) -> bool:
     return isinstance(data, dict) and (
         data.get("kind") == CATALOG_KIND or "catalog_schema_version" in data
@@ -117,20 +144,25 @@ def _looks_like_catalog(data) -> bool:
 def try_resolve_catalog(vault: Path, spec: str) -> Path | None:
     """Return catalog.json if spec names an existing catalog, else None.
 
-    Catalog resolve beats source parse when the spec exists on disk.
+    Slug-shaped specs resolve only under ``catalogs/``. Filesystem specs
+    require ``./``, ``~/``, or an absolute path (same as bundle addressing).
     """
+    from .vault import is_forced_path
+
     raw = (spec or "").strip()
     if not raw:
         return None
-    path = Path(raw).expanduser()
-    if path.is_file():
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return None
-        return path if _looks_like_catalog(data) else None
-    if path.is_dir() and (path / "catalog.json").is_file():
-        return path / "catalog.json"
+    if is_forced_path(raw):
+        path = Path(raw).expanduser()
+        if path.is_file():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                return None
+            return path if _looks_like_catalog(data) else None
+        if path.is_dir() and (path / "catalog.json").is_file():
+            return path / "catalog.json"
+        return None
     folded = fold_slug(raw)
     if SLUG_RE.fullmatch(folded):
         candidate = catalogs_dir(vault) / folded / "catalog.json"
@@ -158,11 +190,29 @@ def resolve_catalog(vault: Path, spec: str) -> Path:
     path = Path(raw).expanduser()
     if raw.startswith((".", "~")) or path.is_absolute():
         raise SystemExit(f"error: no catalog at {path}")
+    bundle_hint = _matching_bundle_hint(vault, raw)
+    if bundle_hint:
+        raise SystemExit(
+            f"error: no catalog matching {raw!r} in {catalogs_dir(vault)}/\n"
+            f"  {bundle_hint}\n"
+            f"  hint: darsay list ./path/to/catalog.json"
+        )
     raise SystemExit(
         f"error: no catalog matching {raw!r} in {catalogs_dir(vault)}/\n"
         f"  hint: darsay catalog new {fold_slug(raw) or raw}\n"
         f"  hint: darsay list ./path/to/catalog.json"
     )
+
+
+def _matching_bundle_hint(vault: Path, spec: str) -> str | None:
+    """If spec would resolve as a bundle, tell the user which command to use."""
+    from .vault import resolve_bundle
+
+    try:
+        resolve_bundle(vault, spec, require_manifest=False)
+    except SystemExit:
+        return None
+    return f"hint: {spec!r} is a bundle — darsay info {spec}"
 
 
 def catalog_is_vault_named(vault: Path, path: Path) -> bool:
@@ -179,7 +229,7 @@ def require_writable(vault: Path, path: Path, write_flag: bool, *, hint: str | N
     if write_flag:
         return
     shown = str(path.parent if path.name == "catalog.json" else path)
-    extra = hint or f"darsay catalog adopt reading {shown}"
+    extra = hint or f"darsay catalog adopt <name> {shown}"
     raise SystemExit(
         f"error: catalog at {shown} is read-only (not in this vault’s catalogs/)\n"
         f"  hint: {extra}\n"
@@ -245,9 +295,15 @@ def load_catalog(path: Path) -> dict:
             "desire": desire,
             "note": entry.get("note"),
             "added": entry.get("added"),
-            "estimate": entry.get("estimate"),
+            "estimate": project_stored_estimate(entry.get("estimate")),
         })
-    return {
+        try:
+            try_parse_source(source)
+        except SystemExit as exc:
+            raise SystemExit(
+                f"error: unreadable catalog at {path}: entry {i} {warning_detail(exc)}"
+            ) from None
+    loaded = {
         "catalog_schema_version": str(version),
         "kind": CATALOG_KIND,
         "id": fold_slug(ident),
@@ -259,6 +315,10 @@ def load_catalog(path: Path) -> dict:
         "entries": cleaned,
         "_path": str(path),
     }
+    for key, value in data.items():
+        if key not in _CATALOG_TOP_KEYS and key != "_path":
+            loaded[key] = value
+    return loaded
 
 
 def save_catalog(path: Path, catalog: dict) -> None:
@@ -280,11 +340,14 @@ def save_catalog(path: Path, catalog: dict) -> None:
                 "desire": e.get("desire"),
                 "note": e.get("note"),
                 "added": e.get("added"),
-                "estimate": e.get("estimate"),
+                "estimate": project_stored_estimate(e.get("estimate")),
             }
             for e in catalog.get("entries") or []
         ],
     }
+    for key, value in catalog.items():
+        if key not in _CATALOG_TOP_KEYS and not str(key).startswith("_"):
+            payload[key] = value
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
     try:
@@ -365,20 +428,23 @@ def upsert_entry(
     revision: str | None = None,
     include: list[str] | None = None,
 ) -> tuple[dict, str]:
-    """Insert or update by entry key. Returns (entry, 'added'|'updated')."""
+    """Insert or update by entry key. Returns (entry, 'added'|'updated'|'unchanged')."""
     ref = parse_source(source)
     key = entry_key(ref.canonical, revision, include)
     now = utc_now()
     for existing in catalog["entries"]:
         if entry_key(existing["source"], existing.get("revision"), existing.get("include")) == key:
-            before = existing.get("desire")
-            if desire is not None:
+            changed = False
+            if desire is not None and existing.get("desire") != desire:
                 existing["desire"] = desire
-            if note is not None:
+                changed = True
+            if note is not None and existing.get("note") != note:
                 existing["note"] = note
+                changed = True
+            if not changed:
+                return existing, "unchanged"
             catalog["updated"] = now
-            return existing, "updated" if before != existing.get("desire") or note is not None else "updated"
-        # same source, different include set — keep looking
+            return existing, "updated"
     entry = {
         "source": ref.canonical,
         "revision": revision or None,
@@ -451,16 +517,12 @@ def adopt_entries(dest: dict, other: dict) -> tuple[int, int]:
     existing = {
         entry_key(e["source"], e.get("revision"), e.get("include"))
         for e in dest["entries"]
-        if try_parse_source(e["source"]) is not None
     }
     adopted = 0
     skipped = 0
     for entry in other["entries"]:
         parsed = try_parse_source(entry["source"])
-        if parsed is None:
-            key = (entry["source"], (entry.get("revision") or ""), include_key(entry.get("include")))
-        else:
-            key = entry_key(parsed.canonical, entry.get("revision"), entry.get("include"))
+        key = entry_key(entry["source"], entry.get("revision"), entry.get("include"))
         if key in existing:
             skipped += 1
             continue
@@ -639,14 +701,23 @@ def vault_as_rows(records: list[dict]) -> list[dict]:
 
 
 def next_entry(rows: list[dict], *, desire: bool) -> dict | None:
-    """Unfinished = want|partial only (unknown is skipped)."""
+    """Unfinished = want|partial only (unknown is skipped).
+
+    ``desire=True`` (catalog ``--next``): partials before wants, then higher
+    desire. ``desire=False`` (vault ``--next``): largest remaining partial.
+    """
     unfinished = [r for r in rows if r.get("status") in ("want", "partial")]
     if not unfinished:
         return None
     if desire:
         def key(row):
             d = row.get("desire")
-            return (d is None, -(d or 0), 0 if row.get("status") == "partial" else 1, row.get("source") or "")
+            return (
+                0 if row.get("status") == "partial" else 1,
+                d is None,
+                -(d or 0),
+                row.get("source") or "",
+            )
         return sorted(unfinished, key=key)[0]
     partials = [r for r in unfinished if r.get("status") == "partial"]
     if not partials:
@@ -654,17 +725,39 @@ def next_entry(rows: list[dict], *, desire: bool) -> dict | None:
     return max(partials, key=lambda r: r.get("remaining_bytes") or 0)
 
 
+def next_idle_message(catalog: dict, rows: list[dict]) -> tuple[str, bool]:
+    """Why ``next_entry`` is None. Returns (message without ``error:``, is_error)."""
+    ident = catalog["id"]
+    if not catalog.get("entries"):
+        return (
+            f"catalog {ident} is empty\n"
+            f"  hint: darsay catalog add {ident} huggingface:owner/name --desire 8",
+            True,
+        )
+    unknowns = [r for r in rows if r.get("status") == "unknown"]
+    unfinished = [r for r in rows if r.get("status") in ("want", "partial")]
+    haves = sum(1 for r in rows if r.get("status") == "have")
+    if not unfinished and unknowns:
+        return (
+            f"cannot archive from {ident} — remaining entries use an unknown source provider",
+            True,
+        )
+    return (
+        f"nothing missing in catalog {ident} — {haves} have, every entry is in the vault",
+        False,
+    )
+
+
 def sort_rows(rows: list[dict], sort: str) -> list[dict]:
     if sort == "next":
         def key(row):
             status = row.get("status")
-            group = 0 if status in ("want", "partial") else (1 if status == "have" else 2)
+            group = {"partial": 0, "want": 1, "have": 2}.get(status, 3)
             d = row.get("desire")
             return (
                 group,
                 d is None,
                 -(d or 0),
-                0 if status == "partial" else 1,
                 (row.get("source") or "").lower(),
             )
         return sorted(rows, key=key)
@@ -756,21 +849,32 @@ def _remaining_label(stats: dict) -> str:
     return f"{human_size(known)} remaining"
 
 
+def _show_remaining(stats: dict) -> bool:
+    return bool(
+        stats.get("partial")
+        or stats.get("want")
+        or stats.get("remaining_bytes")
+        or stats.get("remaining_unknown")
+    )
+
+
 def catalog_header_line(catalog: dict, stats: dict, rows: list[dict]) -> str:
     unknown = f" · {stats['unknown']} unknown" if stats.get("unknown") else ""
     age = _estimate_age_label(rows, stats)
+    remaining = f"  ·  {_remaining_label(stats)}" if _show_remaining(stats) else ""
     return (
         f"Catalog {catalog['id']}  ·  {catalog.get('title') or catalog['id']}  ·  "
         f"{stats['sources']} sources  ·  {stats['have']} have · {stats['partial']} partial · "
-        f"{stats['want']} want{unknown}  ·  {_remaining_label(stats)}  ·  estimates {age}"
+        f"{stats['want']} want{unknown}{remaining}  ·  estimates {age}"
     )
 
 
 def vault_header_line(vault: Path, stats: dict) -> str:
     on_disk = human_size(stats.get("on_disk_bytes") or 0)
+    remaining = f"  ·  {_remaining_label(stats)}" if stats.get("partial") else ""
     return (
         f"Vault {vault}  ·  {stats['have']} have · {stats['partial']} partial  ·  "
-        f"{on_disk} on disk  ·  {_remaining_label(stats)}"
+        f"{on_disk} on disk{remaining}"
     )
 
 
@@ -832,18 +936,23 @@ def print_catalog_table(rows: list[dict], *, header_line: str | None = None) -> 
         print()
         print(header_line)
         print()
-    cells = [
-        (
-            r.get("status") or "—",
-            format_desire_cell(r),
-            format_source_cell(r),
-            format_have_cell(r),
-            format_size_cell(r),
-            format_note_cell(r),
-        )
-        for r in rows
-    ]
-    _print_table(("STATUS", "DESIRE", "SOURCE", "HAVE", "SIZE", "NOTE"), cells)
+    specs = (
+        ("STATUS", lambda r: r.get("status") or "—"),
+        ("DESIRE", format_desire_cell),
+        ("SOURCE", format_source_cell),
+        ("HAVE", format_have_cell),
+        ("SIZE", format_size_cell),
+        ("NOTE", format_note_cell),
+    )
+    raw = [[fmt(r) for _, fmt in specs] for r in rows]
+    keep = []
+    for i, (name, _) in enumerate(specs):
+        if name in _HIDE_IF_EMPTY and (not raw or all(row[i] in ("—", "") for row in raw)):
+            continue
+        keep.append(i)
+    header = tuple(specs[i][0] for i in keep)
+    cells = [tuple(row[i] for i in keep) for row in raw]
+    _print_table(header, cells)
 
 
 def print_catalog_index(catalogs: list[dict]) -> None:
@@ -870,6 +979,25 @@ def realize_from_overlay(row: dict, entry: dict | None = None) -> tuple[str, str
     rev = entry.get("revision") or None
     inc = entry.get("include")
     return source, rev, list(inc) if inc else None
+
+
+def format_archive_command(
+    source: str,
+    revision: str | None = None,
+    include: list[str] | None = None,
+    *,
+    vault: str | Path | None = None,
+) -> str:
+    """Copy-pasteable ``darsay archive`` line, including pin and include globs."""
+    parts = ["darsay"]
+    if vault is not None:
+        parts += ["--vault", str(vault)]
+    parts += ["archive", source]
+    if revision:
+        parts += ["--revision", str(revision)]
+    for glob in include or []:
+        parts += ["--include", glob]
+    return shlex.join(parts)
 
 
 def overlay_envelope(catalog: dict, vault: Path, rows: list[dict]) -> dict:

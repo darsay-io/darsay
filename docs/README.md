@@ -22,6 +22,7 @@
 |---|---|
 | Tool | **0.7.0** |
 | Manifest schema | **1.6.0** |
+| Catalog schema | **1.0.0** |
 | MVB format | **1.1** |
 | License | Apache 2.0 |
 
@@ -35,8 +36,8 @@ Major schema / format bumps are breaking; additive fields are minor.
 at the bundle, run it.
 
 **You want the picture in your head.**
-[Concepts](CONCEPTS.md) — vault, bundle, pin, payload vs metadata,
-why the formats outlive the tool.
+[Concepts](CONCEPTS.md) — vault, bundle, pin, catalog,
+payload vs metadata, why the formats outlive the tool.
 
 **You want a command that already exists.**
 [Examples](../examples/README.md) — estimate, resume, datasets, export,
@@ -44,7 +45,9 @@ shards, verify. Then the spec for the command you are about to run.
 
 **You are reading this in 2040 and the CLI is gone.**
 [Manifest](MANIFEST.md) and [MVB format](MVB-FORMAT.md) are the two
-documents that must survive. Everything else is how we got there.
+documents that must survive to open a bundle. [Catalogs](CATALOGS.md)
+are optional curator data — a want-list, not payload — and are not
+required to open a bundle. Everything else is how we got there.
 
 **You are changing the tool.**
 [Design](DESIGN.md) for why, [Testing](TESTING.md) and
@@ -67,14 +70,16 @@ documents that must survive. Everything else is how we got there.
 
 ## The formats
 
-These two documents are the archival surface. A bundle remains useful if
-the CLI is gone, as long as these are followed.
+Manifest and MVB are the archival surface of a bundle. A bundle remains
+useful if the CLI is gone, as long as those two are followed. Catalogs
+are an optional third surface: a shareable want-list. They are not inside
+`.mvb.tar` and are not required to open a bundle.
 
 | Document | What it specifies |
 |---|---|
 | [**manifest.json**](MANIFEST.md) | Every field of the machine-readable source of truth. `null` means unknown — the tool never fabricates. |
-| [**catalog.json**](CATALOGS.md) | Curated list of sources. Overlay is a view; the file does not record possession. |
 | [**.mvb.tar**](MVB-FORMAT.md) | Single-file export: uncompressed tar, marker first, deterministic metadata, manual recovery with stock `tar`. |
+| [**catalog.json**](CATALOGS.md) | Optional curator want-list. Overlay is a view; the file does not record possession. |
 
 ## Project
 

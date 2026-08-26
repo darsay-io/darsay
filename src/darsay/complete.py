@@ -38,6 +38,8 @@ BUNDLE_COMMANDS = (
     "export",
     "rm",
 )
+
+
 def script_for(shell: str) -> str:
     if shell == "zsh":
         return _zsh()
@@ -92,7 +94,9 @@ _darsay() {{
       _darsay_catalogs
       ;;
     archive)
-      _darsay_catalogs
+      if [[ ${{words[CURRENT-1]}} == --next ]]; then
+        _darsay_catalogs
+      fi
       ;;
     import)
       _files -g '*.mvb.tar'
@@ -133,6 +137,27 @@ _darsay() {{
       ids="$(darsay list --ids 2>/dev/null)"
       COMPREPLY=( $(compgen -W "${{ids}}" -- "${{cur}}") )
       ;;
+    list|estimate)
+      local ids
+      ids="$(darsay catalog --ids 2>/dev/null)"
+      COMPREPLY=( $(compgen -W "${{ids}}" -- "${{cur}}") )
+      ;;
+    catalog)
+      if [[ ${{COMP_CWORD}} -eq 2 ]]; then
+        COMPREPLY=( $(compgen -W "new add drop adopt regen" -- "${{cur}}") )
+      else
+        local ids
+        ids="$(darsay catalog --ids 2>/dev/null)"
+        COMPREPLY=( $(compgen -W "${{ids}}" -- "${{cur}}") )
+      fi
+      ;;
+    archive)
+      if [[ ${{COMP_WORDS[COMP_CWORD-1]}} == --next ]]; then
+        local ids
+        ids="$(darsay catalog --ids 2>/dev/null)"
+        COMPREPLY=( $(compgen -W "${{ids}}" -- "${{cur}}") )
+      fi
+      ;;
     import)
       COMPREPLY=( $(compgen -f -X '!*.mvb.tar' -- "${{cur}}") )
       ;;
@@ -153,8 +178,9 @@ def _fish() -> str:
 
 complete -c darsay -n "__fish_use_subcommand" -a "{cmds}"
 complete -c darsay -n "__fish_seen_subcommand_from {bundle}" -a "(darsay list --ids 2>/dev/null)"
-complete -c darsay -n "__fish_seen_subcommand_from list estimate archive catalog" -a "(darsay catalog --ids 2>/dev/null)"
+complete -c darsay -n "__fish_seen_subcommand_from list estimate catalog" -a "(darsay catalog --ids 2>/dev/null)"
 complete -c darsay -n "__fish_seen_subcommand_from catalog" -a "{' '.join(CATALOG_COMMANDS)}"
+complete -c darsay -n "__fish_seen_subcommand_from archive" -l next -r -a "(darsay catalog --ids 2>/dev/null)"
 complete -c darsay -n "__fish_seen_subcommand_from import" -F -a "*.mvb.tar"
 complete -c darsay -n "__fish_seen_subcommand_from complete" -a "bash zsh fish"
 """

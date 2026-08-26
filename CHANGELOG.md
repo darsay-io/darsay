@@ -23,9 +23,32 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
 ### Changed
 
 - `darsay list` is one table for the vault and for a catalog: STATUS,
-  DESIRE, SOURCE, HAVE, SIZE, NOTE. PATH / LICENSE / INTEGRITY / ARCHIVED
-  stay in `list --json` and `info`. `list --json` without a catalog remains
-  an array (additive keys). `list CATALOG --json` is an overlay envelope.
+  DESIRE, SOURCE, HAVE, SIZE, NOTE. Uniformly empty DESIRE/NOTE columns
+  hide; vault `list` omits “remaining” when nothing is unfinished. PATH /
+  LICENSE / INTEGRITY / ARCHIVED stay in `list --json` and `info`.
+  `list --json` without a catalog remains an array (additive keys).
+  `list CATALOG --json` is an overlay envelope. `list --next` prints a
+  copy-pasteable `darsay archive` line (source + `--revision` + `--include`).
+- Slug-shaped catalog specs resolve only under `catalogs/`; filesystem
+  specs require `./`, `~/`, or an absolute path.
+- `archive --next` / `--sort next` prefer `partial` over `want`.
+- Unknown top-level catalog keys round-trip; stored estimates are
+  projected onto digest keys (no disk paths). Known-provider locators
+  that do not parse fail `load_catalog`; `unknown` is reserved for
+  unregistered schemes.
+- Bash/fish complete catalog ids; `archive` completes them only after
+  `--next`.
+
+### Fixed
+
+- `archive --next` and `list --next` share one idle contract (empty
+  catalog / unknown remaining are errors; all-have is idempotent success
+  on stderr). `list --want` on a complete vault no longer says the vault
+  is empty.
+- `catalog add` no longer crashes when the file already has an
+  unknown-provider row.
+- `estimate CATALOG` regenerates `README.md` (sizes were cached in JSON
+  only).
 
 ## [0.6.0]
 

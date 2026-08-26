@@ -148,5 +148,7 @@ def test_resolve_miss_hints_catalog(tmp_path):
         }),
         encoding="utf-8",
     )
-    with pytest.raises(SystemExit, match="darsay list summer"):
+    with pytest.raises(SystemExit, match="darsay list summer") as exc:
         resolve_bundle(tmp_path, "summer")
+    assert "darsay archive --next summer" in str(exc.value)
+    assert "catalog regen" not in str(exc.value)
