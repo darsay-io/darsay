@@ -352,7 +352,7 @@ def cmd_info(args) -> int:
                         if last else "no runs yet")
             print(f"  hydration:  {hyd['engine']} in env {hyd['env']['key']} — {run_note}")
         else:
-            print(f"  hydration:  not hydrated (darsay hydrate {bundle})")
+            print(f"  hydration:  not hydrated (darsay hydrate {m['bundle_id']})")
     return 0
 
 
