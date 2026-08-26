@@ -68,7 +68,7 @@ Provenance of the download.
 | `access` | `{gated, notes}`. `gated` is the Hub gate status at archive time: `"auto"` (agree → instant access, contact info shared with the authors), `"manual"` (authors approve each request), or `false`. The gate agreement text lives in Hub repo settings, **not** in the repo tree, so it is not part of the snapshot — `notes` records that. Gates are enforced server-side on file downloads; an archive of a gated repo means the archiving account had accepted the terms. |
 | `upstream_stats_at_archive` | Downloads/month and likes at archive time — a popularity snapshot for the historical record. |
 | `upstream_tags` | Raw repo tags at archive time. |
-| `subset` | Present when `archive --include` pinned a globbed subset. `{include, sidecars, sidecar_file_count, full_file_count, full_total_size_bytes, kept_file_count, kept_total_size_bytes, full_files[]}`. `full_files` is the complete upstream inventory (path, size, sha256, git_sha1) so the bundle states exactly what it left out. `inventory.files` is only the kept payload. `null` when the pin is the whole repo. Added in 1.6.0. |
+| `subset` | Present when `archive --include` pinned a globbed subset. `{include, sidecars, sidecar_file_count, full_file_count, full_total_size_bytes, kept_file_count, kept_total_size_bytes, omitted_file_count, full_files[]}`. `full_files` is the complete upstream inventory (path, size, sha256, git_sha1, sorted by path) so the bundle states exactly what it left out. `inventory.files` is only the kept payload. `null` when the pin is the whole repo. Added in 1.6.0. |
 
 ## `licensing`
 

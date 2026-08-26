@@ -70,7 +70,11 @@ def matches_include(path: str, patterns: list[str]) -> bool:
 
 def is_sidecar(path: str) -> bool:
     name = _basename(path)
-    return any(fnmatch(name, pat) for pat in SIDECAR_GLOBS)
+    lowered = name.lower()
+    return any(
+        fnmatch(name, pat) or fnmatch(lowered, pat.lower())
+        for pat in SIDECAR_GLOBS
+    )
 
 
 def file_record(item) -> dict:
@@ -108,6 +112,7 @@ def select_subset(files, include: list[str], *, sidecars: bool = True) -> tuple[
                 kept_paths.add(path)
                 sidecar_count += 1
     kept.sort(key=lambda item: _path_of(item))
+    full_sorted = sorted(files, key=_path_of)
     subset = {
         "include": list(include),
         "sidecars": bool(sidecars),
@@ -116,6 +121,7 @@ def select_subset(files, include: list[str], *, sidecars: bool = True) -> tuple[
         "full_total_size_bytes": sum(_size_of(item) or 0 for item in files),
         "kept_file_count": len(kept),
         "kept_total_size_bytes": sum(_size_of(item) or 0 for item in kept),
-        "full_files": [file_record(item) for item in files],
+        "omitted_file_count": len(files) - len(kept),
+        "full_files": [file_record(item) for item in full_sorted],
     }
     return kept, subset

@@ -332,6 +332,12 @@ def cmd_info(args) -> int:
         meta = m["model_metadata"]
         print(f"  params:     {human_params(meta['parameter_count'])} {meta['precision'] or ''}  ctx={meta['context_length']}")
     print(f"  payload:    {m['inventory']['file_count']} files, {human_size(m['inventory']['total_size_bytes'])}")
+    subset = src.get("subset")
+    if subset:
+        print(
+            f"  subset:     {', '.join(subset.get('include') or [])}  "
+            f"{subset.get('kept_file_count')} of {subset.get('full_file_count')} upstream files"
+        )
     print(f"  integrity:  {m['security']['integrity_status']}  last check {m['archive']['last_integrity_check']}")
     smoke = m["validation"]["smoke_tests"]
     print("  smoke:      " + " ".join(f"{name}={r['status']}" for name, r in smoke.items()))

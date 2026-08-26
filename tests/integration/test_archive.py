@@ -122,7 +122,11 @@ def test_archive_include_records_subset_and_omits_unmatched(vault, test_provider
     subset = manifest["source"]["subset"]
     assert subset["include"] == ["*Q4_K_M*"]
     assert subset["sidecars"] is True
+    assert subset["omitted_file_count"] >= 1
     assert "Q8_0.gguf" in {item["path"] for item in subset["full_files"]}
+    readme = (bundle / "README.md").read_text()
+    assert "Subset:" in readme
+    assert "*Q4_K_M*" in readme
     inventory = {item["path"] for item in manifest["inventory"]["files"]}
     assert "model/Q4_K_M.gguf" in inventory
     assert "model/Q8_0.gguf" not in inventory

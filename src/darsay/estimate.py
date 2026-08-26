@@ -264,12 +264,14 @@ def print_estimate(est: dict, progress=print) -> None:
         if rest > 0:
             p(f"    ... and {rest} more (darsay estimate <source> to size any of them)")
 
-    cmd = f"darsay archive {ref}"
+    import shlex
+
+    cmd = f"darsay archive {shlex.quote(ref)}"
     if src["revision_ref"] != "main":
-        cmd += f" --revision {src['revision_ref']}"
+        cmd += f" --revision {shlex.quote(str(src['revision_ref']))}"
     if est["subset"]:
         for pat in est["subset"]["include"]:
-            cmd += f" --include {pat!r}"
+            cmd += f" --include {shlex.quote(pat)}"
         p(f"\nTo archive this subset: {cmd}\n")
     else:
         p(f"\nTo archive: {cmd}\n")

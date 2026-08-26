@@ -106,6 +106,18 @@ def _source_lines(src: dict) -> list[str]:
     if stats.get("downloads_last_month") is not None:
         lines.append(f"- Upstream popularity at archive time: {stats['downloads_last_month']:,} downloads/month, "
                      f"{stats.get('likes', 0):,} likes")
+    subset = src.get("subset")
+    if subset:
+        patterns = ", ".join(f"`{p}`" for p in subset.get("include") or [])
+        omitted = subset.get("omitted_file_count")
+        if omitted is None:
+            omitted = max(0, int(subset.get("full_file_count") or 0) - int(subset.get("kept_file_count") or 0))
+        extra = " + sidecars" if subset.get("sidecars") else ""
+        lines.append(
+            f"- Subset: kept {subset.get('kept_file_count')} of {subset.get('full_file_count')} "
+            f"upstream files matching {patterns}{extra} "
+            f"({omitted} omitted — full upstream list in `manifest.json` `source.subset.full_files`)"
+        )
     return lines
 
 

@@ -20,6 +20,8 @@ def test_is_sidecar_names():
     assert not is_sidecar("model.safetensors")
     assert not is_sidecar("Q4_K_M.gguf")
     assert not is_sidecar("extra.bin")
+    assert is_sidecar("License")
+    assert is_sidecar("readme.md")
 
 
 def test_select_subset_keeps_matches_and_sidecars():
@@ -38,7 +40,11 @@ def test_select_subset_keeps_matches_and_sidecars():
     assert subset["sidecar_file_count"] == 2
     assert subset["full_file_count"] == 5
     assert subset["kept_file_count"] == 3
+    assert subset["omitted_file_count"] == 2
     assert subset["full_total_size_bytes"] == 364
+    assert [item["path"] for item in subset["full_files"]] == sorted(
+        item["path"] for item in subset["full_files"]
+    )
     assert {item["path"] for item in subset["full_files"]} == {
         "Q4_K_M.gguf", "Q8_0.gguf", "config.json", "LICENSE", "extra.bin",
     }
