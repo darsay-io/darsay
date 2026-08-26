@@ -171,8 +171,9 @@ archived bytes were sufficient. Details: [Hydration](HYDRATION.md).
 Museum-grade does not mean “hope this CLI still runs.” Longevity sits in
 two boring formats:
 
-- **`manifest.json`** — plain JSON, field-by-field spec in
-  [MANIFEST.md](MANIFEST.md).
+- **`manifest.json`** — plain JSON, `kind: darsay.bundle`, field-by-field
+  spec in [MANIFEST.md](MANIFEST.md). Major-newer is a hard error; unknown
+  fields are ignored on read and preserved on write.
 - **`.mvb.tar`** — uncompressed tar, marker first, deterministic
   metadata, unpackable with stock `tar`. Spec and manual recovery:
   [MVB-FORMAT.md](MVB-FORMAT.md).

@@ -21,5 +21,6 @@ __version__ = "0.7.0"
 # 1.5.0: source.provider and source.address (canonical provider-qualified
 #        ref). origin remains the provider id. Additive.
 # 1.6.0: source.subset for archive --include (include globs, sidecar flag,
-#        full upstream file list with sizes/hashes). Additive.
+#        full upstream file list with sizes/hashes); kind "darsay.bundle"
+#        on newly written manifests (absent on pre-1.6 files). Additive.
 SCHEMA_VERSION = "1.6.0"

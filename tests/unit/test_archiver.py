@@ -1,13 +1,20 @@
 from __future__ import annotations
 
+import json
+
+import pytest
+
 from darsay.archiver import (
     _guess_version,
     archive_model,
     bundle_dir_for,
     bundle_name_for,
     hub_url,
+    load_manifest,
     parse_repo_ref,
+    write_manifest,
 )
+from darsay.schema import MANIFEST_KIND, MANIFEST_TOP_KEYS
 from darsay.sources import parse_source
 
 
@@ -70,3 +77,52 @@ def test_guess_version():
     assert _guess_version("Qwen3-0.6B", None) == "3"
     assert _guess_version("Llama-2-7b", None) is None
     assert _guess_version("toy", None) is None
+
+
+def _minimal_manifest(**overrides):
+    data = {
+        "schema_version": "1.6.0",
+        "kind": MANIFEST_KIND,
+        "artifact_type": "model",
+        "bundle_id": "acme--toy@aaaaaaaaaaaa",
+    }
+    data.update(overrides)
+    return data
+
+
+def test_load_manifest_requires_schema_version(tmp_path):
+    (tmp_path / "manifest.json").write_text('{"bundle_id": "x"}', encoding="utf-8")
+    with pytest.raises(SystemExit, match="schema_version missing"):
+        load_manifest(tmp_path)
+
+
+def test_load_manifest_refuses_major_newer(tmp_path):
+    write_manifest(tmp_path, _minimal_manifest(schema_version="2.0.0"))
+    with pytest.raises(SystemExit, match="newer than this darsay"):
+        load_manifest(tmp_path)
+
+
+def test_load_manifest_refuses_wrong_kind(tmp_path):
+    write_manifest(tmp_path, _minimal_manifest(kind="darsay.catalog"))
+    with pytest.raises(SystemExit, match="kind is not"):
+        load_manifest(tmp_path)
+
+
+def test_load_manifest_allows_missing_kind(tmp_path):
+    data = _minimal_manifest()
+    del data["kind"]
+    (tmp_path / "manifest.json").write_text(json.dumps(data), encoding="utf-8")
+    loaded = load_manifest(tmp_path)
+    assert "kind" not in loaded
+    assert loaded["bundle_id"] == "acme--toy@aaaaaaaaaaaa"
+
+
+def test_write_manifest_preserves_unknown_top_level(tmp_path):
+    write_manifest(tmp_path, _minimal_manifest(future_field=1, identity={"model_name": "toy"}))
+    raw = json.loads((tmp_path / "manifest.json").read_text(encoding="utf-8"))
+    assert raw["future_field"] == 1
+    keys = list(raw)
+    known = [k for k in MANIFEST_TOP_KEYS if k in raw]
+    assert keys[: len(known)] == known
+    assert keys[-1] == "future_field"
+    assert load_manifest(tmp_path)["future_field"] == 1

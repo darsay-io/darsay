@@ -32,7 +32,16 @@ from . import SCHEMA_VERSION, __version__
 from .hashing import bundle_hash
 from .licensing import build_licensing_record
 from .metadata import estimate_runtime, extract_dataset_metadata, extract_model_metadata
-from .schema import ARTIFACT_TYPES, BUNDLE_METADATA_FILES, check_completeness, payload_root_for
+from .schema import (
+    ARTIFACT_TYPES,
+    BUNDLE_METADATA_FILES,
+    MANIFEST_KIND,
+    MANIFEST_SCHEMA_MAJOR,
+    MANIFEST_TOP_KEYS,
+    check_completeness,
+    parse_schema_major,
+    payload_root_for,
+)
 from .sources import (
     SourceGatedError,
     SourceNotFoundError,
@@ -87,12 +96,48 @@ def bundle_dir_for(vault: Path, source: str | SourceRef, revision: str, repo_typ
 
 
 def write_manifest(bundle_dir: Path, manifest: dict) -> None:
+    """Write manifest.json. Known top-level keys first; unknown keys preserved."""
+    payload = {key: manifest[key] for key in MANIFEST_TOP_KEYS if key in manifest}
+    for key, value in manifest.items():
+        if key not in MANIFEST_TOP_KEYS and not str(key).startswith("_"):
+            payload[key] = value
     path = bundle_dir / "manifest.json"
-    path.write_text(json.dumps(manifest, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    path.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
 def load_manifest(bundle_dir: Path) -> dict:
-    return json.loads((bundle_dir / "manifest.json").read_text(encoding="utf-8"))
+    """Read + validate. Major-newer than 1.x → SystemExit. Missing kind is allowed."""
+    path = bundle_dir / "manifest.json"
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise SystemExit(f"error: no manifest.json in {bundle_dir}") from None
+    except OSError as exc:
+        raise SystemExit(f"error: unreadable manifest at {path}: {exc}") from None
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"error: unreadable manifest at {path}: {exc}") from None
+    if not isinstance(data, dict):
+        raise SystemExit(f"error: unreadable manifest at {path}: not a JSON object")
+    version = data.get("schema_version")
+    if not version:
+        raise SystemExit(f"error: unreadable manifest at {path}: schema_version missing")
+    try:
+        major = parse_schema_major(version)
+    except ValueError:
+        raise SystemExit(
+            f"error: unreadable manifest at {path}: schema_version {version!r}"
+        ) from None
+    if major > MANIFEST_SCHEMA_MAJOR:
+        raise SystemExit(
+            f"error: manifest schema {version} is newer than this darsay "
+            f"(supports {MANIFEST_SCHEMA_MAJOR}.x)"
+        )
+    kind = data.get("kind")
+    if kind is not None and kind != MANIFEST_KIND:
+        raise SystemExit(
+            f"error: unreadable manifest at {path}: kind is not {MANIFEST_KIND!r}"
+        )
+    return data
 
 
 def _guess_version(repo_name: str, model_type: str | None) -> str | None:
@@ -380,6 +425,7 @@ def _register_bundle(bundle_dir: Path, payload_dir: Path, ledger: dict, progress
 
     manifest = {
         "schema_version": SCHEMA_VERSION,
+        "kind": MANIFEST_KIND,
         "artifact_type": repo_type,
         "bundle_id": bundle_id,
         "identity": {

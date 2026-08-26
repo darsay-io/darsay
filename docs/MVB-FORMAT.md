@@ -39,7 +39,7 @@ tool can list and unpack it decades from now, with or without darsay.
   "mvb_format_version": "1.1",
   "bundle_id": "qwen--qwen3-0.6b@c1899de289a0",
   "artifact_type": "model",
-  "schema_version": "1.1.0",
+  "schema_version": "1.6.0",
   "bundle_hash": {"algorithm": "sha256-of-sorted-sha256-lines", "value": "…", "covers": "…"},
   "payload_file_count": 10,
   "payload_size_bytes": 1519114970,
@@ -68,8 +68,11 @@ label. Guaranteed by:
   `archive.date_archived`, `uid`/`gid` = 0, empty `uname`/`gname`, mode `0644`;
 - **no volatile content inside the tar**: export, hydration, and incremental
   transfer sidecars are excluded. In particular, the export *event* (timestamp,
-  tar sha256, destination) is appended to the bundle's `exports.json`, so
-  exporting doesn't change what the next export contains.
+  tar sha256, destination, tool version) is appended to the bundle's
+  `exports.json`, so exporting doesn't change what the next export contains.
+  Marker `written_by` names the format family (`darsay`) only — not the tool
+  version — so two tool releases packing the same bundle state stay
+  byte-identical.
 
 Scope of the guarantee: same bundle state and same format version. Bundle-root
 metadata is mutable by design (a `verify` run updates the manifest), and any
@@ -83,13 +86,14 @@ Three independent layers:
 | Layer | Field | Rule |
 |---|---|---|
 | Container | `mvb_format_version` in the marker | Import requires a matching **major** version. |
-| Record | `schema_version` in the embedded manifest | Interpreted per [MANIFEST.md](MANIFEST.md). |
+| Record | `schema_version` in the marker and the embedded manifest | Import refuses major `> 1` from the marker (before unpack) and again from `manifest.json`. Interpreted per [MANIFEST.md](MANIFEST.md). |
 | Content | the pinned commit in `bundle_id` | Different upstream revisions are different bundles. |
 
 ## Import procedure (what `darsay import` guarantees)
 
 1. Stream the first entry; refuse anything whose leading entry is not a
-   compatible `.mvb.json` marker.
+   compatible `.mvb.json` marker (container major, and embedded
+   `schema_version` major `> 1`).
 2. Hash the tar file itself (recorded as import provenance).
 3. Unpack into a staging directory using Python's safe `data` extraction
    filter (no path traversal, no specials).

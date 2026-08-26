@@ -13,6 +13,38 @@ from __future__ import annotations
 
 from fnmatch import fnmatch
 
+MANIFEST_KIND = "darsay.bundle"
+MANIFEST_SCHEMA_MAJOR = 1
+# Known top-level keys in document order. write_manifest emits these first,
+# then any extra keys (1.x readers ignore unknowns; writers must preserve them).
+MANIFEST_TOP_KEYS = (
+    "schema_version",
+    "kind",
+    "artifact_type",
+    "bundle_id",
+    "identity",
+    "source",
+    "licensing",
+    "inventory",
+    "model_metadata",
+    "dataset_metadata",
+    "runtime",
+    "validation",
+    "relationships",
+    "archive",
+    "security",
+    "curation",
+)
+
+
+def parse_schema_major(version) -> int:
+    """Integer major of a ``schema_version`` string. Unparseable → ValueError."""
+    try:
+        return int(str(version).split(".", 1)[0])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"schema_version {version!r}") from exc
+
+
 # artifact_type -> payload root + completeness rules. Each rule is
 # (label, [glob patterns]); the rule passes when any pattern matches at least
 # one inventory path.

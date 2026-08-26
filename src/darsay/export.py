@@ -97,6 +97,8 @@ def export_bundle(bundle_dir: Path, output_dir: Path, progress=print) -> Path:
             with open(abs_path, "rb") as f:
                 tar.addfile(_tarinfo(f"{bundle_id}/{rel}", abs_path.stat().st_size, mtime), f)
 
+    from . import __version__
+
     sha256 = hash_file(out_path, with_blake3=False)["sha256"]
     record = {
         "at": utc_now(),
@@ -104,6 +106,7 @@ def export_bundle(bundle_dir: Path, output_dir: Path, progress=print) -> Path:
         "sha256": sha256,
         "size_bytes": out_path.stat().st_size,
         "mvb_format_version": MVB_FORMAT_VERSION,
+        "written_by": {"tool": "darsay", "version": __version__},
     }
     exports_path = bundle_dir / "exports.json"
     data = json.loads(exports_path.read_text(encoding="utf-8")) if exports_path.exists() else {"exports": []}
@@ -127,6 +130,21 @@ def _read_marker(tar_path: Path) -> dict:
             f"error: export format {marker.get('mvb_format_version')} not supported "
             f"(this tool reads {MVB_FORMAT_VERSION.split('.')[0]}.x)"
         )
+    from .schema import MANIFEST_SCHEMA_MAJOR, parse_schema_major
+
+    embedded = marker.get("schema_version")
+    if embedded:
+        try:
+            schema_major = parse_schema_major(embedded)
+        except ValueError:
+            raise SystemExit(
+                f"error: export marker schema_version {embedded!r}"
+            ) from None
+        if schema_major > MANIFEST_SCHEMA_MAJOR:
+            raise SystemExit(
+                f"error: embedded manifest schema {embedded} is newer than this darsay "
+                f"(supports {MANIFEST_SCHEMA_MAJOR}.x)"
+            )
     return marker
 
 

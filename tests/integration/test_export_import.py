@@ -40,6 +40,8 @@ def test_export_is_byte_identical_and_excludes_volatile(vault, test_provider, tm
     # Export event is recorded outside the tar.
     exports = json.loads((bundle / "exports.json").read_text())
     assert exports["exports"][0]["sha256"] == _sha256(tar1)
+    assert exports["exports"][0]["written_by"]["tool"] == "darsay"
+    assert exports["exports"][0]["written_by"]["version"]
 
 
 def test_export_refuses_existing(vault, test_provider, tmp_path):

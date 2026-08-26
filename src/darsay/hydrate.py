@@ -698,14 +698,18 @@ def _chip() -> str | None:
 
 
 def _record_tested_hardware(manifest: dict, run_record: dict, result: dict, now: str) -> None:
-    """One entry per (host, device, engine), refreshed on each successful run."""
-    from . import SCHEMA_VERSION
+    """One entry per (host, device, engine), refreshed on each successful run.
 
-    # The entry shape is defined by schema 1.1.0; stamp the manifest as such
-    # (minor bump — additive, older consumers are unaffected).
-    numeric = lambda v: tuple(int(p) for p in v.split("."))
-    if numeric(manifest["schema_version"]) < numeric(SCHEMA_VERSION):
-        manifest["schema_version"] = SCHEMA_VERSION
+    ``tested_hardware`` is a 1.1 field. Bump a pre-1.1 record to 1.1.0; do
+    not stamp the tool's current schema — the version describes this file.
+    """
+    parts = str(manifest.get("schema_version") or "0").split(".")
+    try:
+        numeric = tuple(int(p) for p in parts)
+    except ValueError:
+        numeric = (0,)
+    if numeric < (1, 1, 0):
+        manifest["schema_version"] = "1.1.0"
     entry = {
         "at": now,
         "host": socket.gethostname(),

@@ -17,6 +17,7 @@ def test_archive_model_writes_immutable_payload_and_manifest(vault, test_provide
     assert bundle is not None
     manifest = load_manifest(bundle)
     assert manifest["schema_version"] == SCHEMA_VERSION
+    assert manifest["kind"] == "darsay.bundle"
     assert manifest["artifact_type"] == "model"
     assert manifest["source"]["provider"] == "test"
     assert manifest["source"]["address"] == "test:acme/toy"

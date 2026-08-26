@@ -13,8 +13,8 @@
 
 `manifest.json` is the machine-readable source of truth for a bundle. This
 document describes every field so a bundle remains interpretable without the
-tool. Consumers should check `schema_version` before parsing; the major
-component changes only on breaking layout changes.
+tool. Check `schema_version` before parsing; the major component changes
+only on breaking layout. See [Versioning](#versioning).
 
 Conventions:
 
@@ -32,7 +32,8 @@ Conventions:
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | Version of this schema (`"1.6.0"`; 1.1 defined `runtime.tested_hardware`; 1.2 added datasets; 1.3 added gate and structured-lineage provenance; 1.4 added incremental-transfer accounting and local-source provenance; 1.5 added `source.provider` / `source.address`; 1.6 added `source.subset` for `archive --include` — all additive). |
+| `schema_version` | Version of this schema (`"1.6.0"`; 1.1 defined `runtime.tested_hardware`; 1.2 added datasets; 1.3 added gate and structured-lineage provenance; 1.4 added incremental-transfer accounting and local-source provenance; 1.5 added `source.provider` / `source.address`; 1.6 added `source.subset` and `kind` — all additive). |
+| `kind` | Always `"darsay.bundle"` on files this tool writes. Absent on pre-1.6 manifests (still valid 1.x). A present value that is not this string is a load error. |
 | `artifact_type` | Registry key driving completeness rules and the payload root (`"model"` or `"dataset"`; future: GGUF packs, papers — see `src/darsay/schema.py`). |
 | `bundle_id` | `<bundle directory name>@<first 12 of pinned revision>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Hugging Face dataset bundles take a `datasets--` prefix (`datasets--saidutta69--fable-5-premium@684cb1f849fe`) since model and dataset namespaces can collide on that host. Other providers include their id in the directory name. Stable, deterministic, unique per (source, revision). |
 
@@ -228,8 +229,8 @@ Both:
 | `imported` | Present on imported bundles: `at`, `from_file`, `file_sha256`, `mvb_format_version`. |
 
 Export events are logged in the sibling file `exports.json`
-(`{"exports": [{at, file, sha256, size_bytes, mvb_format_version}]}`), not in
-the manifest — see [MVB-FORMAT.md](MVB-FORMAT.md) for why. Hydration state and
+(`{"exports": [{at, file, sha256, size_bytes, mvb_format_version, written_by}]}`),
+not in the manifest — see [MVB-FORMAT.md](MVB-FORMAT.md) for why. Hydration state and
 run history live in the sibling file `hydration.json` for the same reason:
 both are volatile machine-local state, excluded from exports — see
 [HYDRATION.md](HYDRATION.md). The resumable acquisition ledger
@@ -255,6 +256,35 @@ Structured mirror of the curator's notes: `historical_significance`,
 `curation.md` — the free-form file that `darsay regen` folds into the
 bundle README. Prose belongs in `curation.md`; use the structured fields when
 downstream tooling needs to query them.
+
+## Versioning
+
+`schema_version` is a property of **this file's shape**, not of the tool that
+last touched it. Tool version (`darsay.__version__`) moves independently.
+
+1.x is a closed major with an open minor:
+
+- **Major** changes only on breaking layout. A 1.x tool refuses
+  `schema_version` major `> 1` (`load_manifest`, and `import` on the
+  `.mvb.json` marker before unpacking). A 2.x bundle is unsupported, not
+  silently misread. Mixed 1.x minors may coexist in one vault.
+- **Minor / patch** are additive. Readers **ignore unknown fields**.
+  Missing additive fields mean `null`. Writers **preserve** unknown
+  top-level keys on round-trip (`verify`, `run`, `regen`).
+- **Stamp the version when the write introduces that version's field.**
+  A `darsay run` that records `runtime.tested_hardware` (a 1.1 field) may
+  bump a pre-1.1 file to `1.1.0`. It must not stamp the tool's current
+  schema onto an older honest record.
+- **1.x will not** rename or remove a field (including `source.origin` and
+  `identity.model_name`), change `payload_root` for `model` or `dataset`,
+  change `bundle_hash` or what it covers, or rewrite payload.
+- **New artifact types** (GGUF packs, papers) are a new `artifact_type`
+  plus payload root — not a 2.0. Readers take `inventory.layout.payload_root`
+  from the record.
+
+2.0, when it exists, is a second reader dispatched on `schema_version`
+major (and `kind`). It lives next to 1.x in the same vault. Payload stays
+byte-immutable; a migrate, if ever needed, rewrites only the record.
 
 ---
 

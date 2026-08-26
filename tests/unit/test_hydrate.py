@@ -6,6 +6,7 @@ from darsay.hydrate import (
     ENGINES,
     _env_key,
     _offline_env,
+    _record_tested_hardware,
     detect_engines,
     engine_supports_payload,
     pin_requirements,
@@ -182,3 +183,26 @@ def test_every_engine_ships_a_runner():
     root = Path(darsay.__file__).parent / "runners"
     missing = [spec["runner"] for spec in ENGINES.values() if not (root / spec["runner"]).is_file()]
     assert missing == []
+
+
+def test_record_tested_hardware_does_not_stamp_current_schema():
+    manifest = {"schema_version": "1.5.0", "runtime": {"tested_hardware": None}}
+    _record_tested_hardware(
+        manifest,
+        {"device": "cpu", "engine": "transformers", "tokens_per_second": 1.0},
+        {"versions": {}},
+        "2026-01-01T00:00:00+00:00",
+    )
+    assert manifest["schema_version"] == "1.5.0"
+    assert manifest["runtime"]["tested_hardware"][0]["engine"] == "transformers"
+
+
+def test_record_tested_hardware_bumps_pre_1_1_only():
+    manifest = {"schema_version": "1.0.0", "runtime": {}}
+    _record_tested_hardware(
+        manifest,
+        {"device": "cpu", "engine": "transformers", "tokens_per_second": 1.0},
+        {},
+        "2026-01-01T00:00:00+00:00",
+    )
+    assert manifest["schema_version"] == "1.1.0"

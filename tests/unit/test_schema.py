@@ -1,11 +1,23 @@
 from __future__ import annotations
 
+import pytest
+
 from darsay.schema import (
     ARTIFACT_TYPES,
+    MANIFEST_KIND,
     check_completeness,
+    parse_schema_major,
     payload_root,
     payload_root_for,
 )
+
+
+def test_parse_schema_major():
+    assert parse_schema_major("1.6.0") == 1
+    assert parse_schema_major("2.0.0") == 2
+    with pytest.raises(ValueError):
+        parse_schema_major("nope")
+    assert MANIFEST_KIND == "darsay.bundle"
 
 
 def test_payload_root_for_known_types():

@@ -63,6 +63,7 @@ def test_read_marker_rejects_incompatible_major(tmp_path):
     marker = {
         "mvb_format_version": "99.0",
         "bundle_id": "x@abc",
+        "schema_version": "1.6.0",
         "bundle_hash": {"value": "00"},
     }
     payload = (json.dumps(marker) + "\n").encode("utf-8")
@@ -77,3 +78,20 @@ def test_read_marker_rejects_incompatible_major(tmp_path):
 def test_current_format_major_is_readable():
     major = MVB_FORMAT_VERSION.split(".")[0]
     assert major == "1"
+
+
+def test_read_marker_rejects_embedded_schema_major(tmp_path):
+    tar_path = tmp_path / "future.tar"
+    marker = {
+        "mvb_format_version": "1.1",
+        "bundle_id": "x@abc",
+        "schema_version": "2.0.0",
+        "bundle_hash": {"value": "00"},
+    }
+    payload = (json.dumps(marker) + "\n").encode("utf-8")
+    with tarfile.open(tar_path, "w") as tar:
+        info = tarfile.TarInfo(name=f"x@abc/{MARKER_NAME}")
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    with pytest.raises(SystemExit, match="embedded manifest schema"):
+        _read_marker(tar_path)
