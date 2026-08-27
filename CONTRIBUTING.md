@@ -69,12 +69,39 @@ Field changes to `manifest.json` or `.mvb.tar` need a docs update
 (`docs/MANIFEST.md` / `docs/MVB-FORMAT.md`) and a schema / format version
 bump.
 
-## Versioning
+## Releasing
 
-Bump **both** `project.version` in `pyproject.toml` and `__version__` in
-`src/darsay/__init__.py`. Add a `CHANGELOG.md` section. Tag as `vX.Y.Z`.
+The tool version lives in exactly one place: `__version__` in
+`src/darsay/__init__.py`. `pyproject.toml` derives it via
+`[tool.setuptools.dynamic]`, so there is no second copy to keep in sync.
+
+Write the `CHANGELOG.md` section first. The script confirms it and will
+never invent one. Then prepare the release:
+
+```bash
+.venv/bin/python scripts/release.py 0.8.1
+```
+
+It refuses to start unless the tree is clean, you are on `main`, level
+with `origin/main`, and the tag is free both locally and on the remote.
+Then it bumps the version, dates the changelog, updates the docs version
+table, and runs the full CI gate: lint, format, tests with the coverage
+floor, `python -m build`, `twine check`. Only then does it commit and
+tag. If the gate fails it reverts the bump and commits nothing.
+
+The script pushes nothing. Releasing is pushing the tag:
+
+```bash
+git push origin main
+git push origin v0.8.1      # this is the release
+```
+
+`--dry-run` runs every check and writes nothing, `--skip-build` drops the
+slowest gate, and `--push` pushes `main` so the tag is the only step left.
+
 The `release` workflow attaches the wheel and sdist to the GitHub Release
-and publishes them to PyPI (Trusted Publishing, environment `pypi`).
+and publishes them to PyPI (Trusted Publishing, environment `pypi`),
+re-checking that the tag matches the artifacts it just built.
 
 `SCHEMA_VERSION` and `MVB_FORMAT_VERSION` bump independently, on format
 changes only. Editing `src/darsay/standalone_verify.py` is an MVB minor

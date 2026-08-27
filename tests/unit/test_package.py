@@ -10,11 +10,22 @@ from darsay.hydrate import ENGINES
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_published_versions_match():
+def test_version_is_single_sourced():
+    """pyproject must derive the version, never restate it.
+
+    A second literal is the one thing that can silently disagree with
+    ``darsay.__version__``; the build and the tag both read this one.
+    """
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
-    project = re.search(r'(?m)^version = "([^"]+)"', text)
-    assert project is not None
-    assert project.group(1) == __version__
+    assert 'dynamic = ["version"]' in text
+    assert 'attr = "darsay.__version__"' in text
+    assert re.search(r'(?m)^version = "', text) is None
+
+
+def test_version_is_semver():
+    parts = __version__.split(".")
+    assert len(parts) == 3
+    assert all(p.isdigit() for p in parts)
 
 
 def test_schema_version_is_semver():

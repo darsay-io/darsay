@@ -27,19 +27,22 @@ jobs:
           python -m build
           python -m twine check dist/*
 
-      - name: Check tag matches package version
+      - name: Check tag matches the built artifacts
         run: |
           python - <<'PY'
-          import os, re
+          import os
           from pathlib import Path
 
+          # Check the files we are about to publish, not a source file that
+          # could disagree with them.
           tag = os.environ["GITHUB_REF_NAME"]
           expected = tag[1:] if tag.startswith("v") else tag
-          text = Path("pyproject.toml").read_text(encoding="utf-8")
-          version = re.search(r'(?m)^version = "([^"]+)"', text).group(1)
-          if version != expected:
-              raise SystemExit(f"tag {tag!r} does not match version {version!r}")
-          print(f"tag {tag} matches {version}")
+          built = sorted(p.name for p in Path("dist").iterdir())
+          want = [f"darsay-{expected}-py3-none-any.whl", f"darsay-{expected}.tar.gz"]
+          missing = [n for n in want if n not in built]
+          if missing:
+              raise SystemExit(f"tag {tag!r} expected {missing}, dist/ has {built}")
+          print(f"tag {tag} matches {built}")
           PY
 
       - name: Publish GitHub Release

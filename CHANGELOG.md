@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
+Tool version (`darsay.__version__`) is independent of
 `schema_version` in manifests and of `MVB_FORMAT_VERSION` in exports.
 
 ## [0.8.0] - 2026-08-27

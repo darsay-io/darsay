@@ -4,7 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "darsay"
-version = "0.8.0"
+# Single-sourced from src/darsay/__init__.py; see [tool.setuptools.dynamic].
+dynamic = ["version"]
 description = "Download, archive, and curate full model ecosystems as reproducible, auditable bundles"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -53,6 +54,8 @@ datasets = ["pyarrow"]
 # Test suite (unit + integration; e2e needs only the core Hub client)
 # plus Ruff for lint + format
 dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.12"]
+# Build + publish tooling used by scripts/release.py
+release = ["build>=1.0", "twine>=5.0"]
 
 [project.urls]
 Homepage = "https://github.com/darsay-io/darsay"
@@ -65,6 +68,9 @@ darsay = "darsay.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.dynamic]
+version = { attr = "darsay.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
