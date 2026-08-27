@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
 `schema_version` in manifests and of `MVB_FORMAT_VERSION` in exports.
 
-## [Unreleased]
+## [0.8.0] - 2026-08-27
 
 ### Added
 
