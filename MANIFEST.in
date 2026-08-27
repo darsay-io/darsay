@@ -6,3 +6,9 @@ include SECURITY.md
 graft docs
 graft examples
 graft tests
+
+# `graft` sweeps up whatever is on the build machine; the release script runs
+# pytest before it builds, so __pycache__ is always there. Keep machine-local
+# junk out of the published sdist.
+global-exclude *.py[cod]
+global-exclude .DS_Store
