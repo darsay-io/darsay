@@ -192,18 +192,30 @@ class TestProvider(SourceProvider):
         dest.write_bytes(data)
         self.downloads.append(relative)
 
-    def progress_wrapper(self, counter):
+    def progress_wrapper(self, counter, meter=None):
         class _Bar:
             def __init__(self, *args, **kwargs):
-                pass
+                self.n = int(kwargs.get("initial") or 0)
+                self.total = kwargs.get("total")
+                self.desc = kwargs.get("desc") or ""
+                if meter is not None:
+                    meter.attach_bar(self, self.desc)
 
             def update(self, n=1):
+                self.n += n
                 counter.add(n)
+                if meter is not None:
+                    meter.note()
 
             def update_transfer(self, amount=1):
+                self.n += amount
                 counter.add(amount)
+                if meter is not None:
+                    meter.note()
 
             def close(self):
+                if meter is not None:
+                    meter.detach_bar(self)
                 return None
 
         return _Bar

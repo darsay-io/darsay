@@ -25,7 +25,10 @@ def test_tiny_gpt2_estimate_archive_verify_export_import(tmp_path, capsys):
 
     rc = main(["--vault", str(vault), "archive", TINY, "--jobs", "2"])
     assert rc == 0
-    capsys.readouterr()
+    archived = capsys.readouterr()
+    progress_blob = archived.out + archived.err
+    assert "Transfer plan:" in progress_blob
+    assert "%" in progress_blob
     bundles = list(vault.glob("sshleifer--tiny-gpt2/*/manifest.json"))
     assert len(bundles) == 1
     bundle = bundles[0].parent

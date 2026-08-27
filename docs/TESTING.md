@@ -90,6 +90,12 @@ The existing `release.yml` workflow is unchanged: it publishes artifacts on
 ## Adding tests
 
 - New pure helpers go in `tests/unit/test_<module>.py`.
+- Transfer progress: formatters, the meter, and the TTY panel live in
+  `tests/unit/test_progress.py`; the Hub `tqdm_class` wrapper is in
+  `tests/unit/test_huggingface.py`. Integration drives `archive` against
+  `TestProvider` and asserts log lines (`DARSAY_PROGRESS=line` so a TTY
+  does not flip the test into live mode). The live Hub `tqdm` path is the
+  e2e archive of `sshleifer/tiny-gpt2`.
 - Anything that needs a bundle uses `TestProvider.add_repo(...)` and
   `archive_quiet` from `tests/integration/conftest.py`. Synthetic payloads
   live in `tests/payloads.py`.

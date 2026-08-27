@@ -107,7 +107,9 @@ darsay archive Qwen/Qwen3.8-27B                 # finish, verify, register
 ```
 
 Ctrl-C is the same idea: rerun the command. Completed files are trusted;
-partial files resume with HTTP Range.
+partial files resume with HTTP Range. While it runs, a TTY shows percent
+of the whole payload, bytes in / total, rate, and time remaining — not
+a per-file bar that resets on every shard.
 
 Also valid: `--max-bytes 20G`, `--max-minutes 45`.
 

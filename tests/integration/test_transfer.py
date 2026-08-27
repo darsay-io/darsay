@@ -18,6 +18,36 @@ from tests.integration.conftest import archive_quiet
 from tests.payloads import model_files
 
 
+def test_archive_emits_payload_progress_log_lines(vault, test_provider, monkeypatch):
+    """Integration: archive against TestProvider reports whole-payload progress."""
+    monkeypatch.setenv("DARSAY_PROGRESS", "line")
+    from darsay.archiver import archive
+
+    test_provider.add_repo("acme/toy", model_files())
+    logs: list[str] = []
+    bundle = archive("test:acme/toy", vault=vault, progress=logs.append, jobs=1)
+    text = "\n".join(str(item) for item in logs)
+    assert bundle is not None
+    assert (bundle / "manifest.json").is_file()
+    assert "Transfer plan:" in text
+    assert "small files" in text
+    assert "%" in text
+    assert "files" in text
+
+
+def test_archive_progress_off_still_completes(vault, test_provider, monkeypatch):
+    monkeypatch.setenv("DARSAY_PROGRESS", "0")
+    from darsay.archiver import archive
+
+    test_provider.add_repo("acme/toy", model_files())
+    logs: list[str] = []
+    bundle = archive("test:acme/toy", vault=vault, progress=logs.append, jobs=1)
+    text = "\n".join(str(item) for item in logs)
+    assert bundle is not None
+    assert "Transfer plan:" in text
+    assert "%" not in text
+
+
 def test_budget_stop_is_resumable(vault, test_provider):
     files = model_files()
     test_provider.add_repo("acme/toy", files)

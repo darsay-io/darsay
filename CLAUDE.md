@@ -22,6 +22,7 @@ point `darsay` (argparse, subcommands in `cli.py`).
 - `src/darsay/` — `archiver.py` (download + manifest assembly),
   `transfer.py` (pin ledger, reconciliation, resumable/budgeted per-file
   transfer, cooperative lanes/assembly, sibling-blob reuse),
+  `progress.py` (archive-level live transfer panel: percent, bytes, rate, ETA),
   `estimate.py` (read-only preflight: sizes/params/disk from source metadata),
   `verify.py`, `standalone_verify.py` (stdlib-only; frozen into `.mvb.tar`
   as `darsay-verify.py` — changing it is an MVB minor bump), `smoke.py`,

@@ -134,6 +134,12 @@ have we got, what remains" at any moment.
 by path): configs, tokenizer, card, and license complete in the first
 minutes — making the partial payload inspectable early — and each budgeted
 session completes whole files rather than leaving many large stubs.
+While bytes move, a TTY shows one panel for the *whole* payload — percent
+complete, bytes in / total, smoothed rate, time remaining, files done, the
+file now in flight — because a per-file bar resetting at 0% on every shard
+is the wrong unit for a 50 GB archive. Piped or logged runs emit the same
+facts as a status line every 10 seconds. `DARSAY_PROGRESS=0` disables it;
+`DARSAY_PROGRESS=line` forces the log form even on a TTY.
 Per file: check local sources (§5) → else `hf_hub_download` at the pinned
 commit (the library's `.incomplete` + Range machinery provides byte-level
 resume) → hash → compare to upstream digest → append to ledger →

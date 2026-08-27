@@ -344,20 +344,35 @@ class HuggingFaceProvider(SourceProvider):
             else:
                 os.environ["HF_HUB_DISABLE_XET"] = old_xet_disabled_env
 
-    def progress_wrapper(self, counter):
+    def progress_wrapper(self, counter, meter=None):
         from tqdm.auto import tqdm
 
         class TransferTqdm(tqdm):
             def __init__(self, *args, **kwargs):
-                name = str(kwargs.get("name") or "")
+                kwargs = dict(kwargs)
+                name = str(kwargs.pop("name", "") or "")
                 desc = str(kwargs.get("desc") or "")
                 self._darsay_xet = name.startswith("huggingface_hub.xet_get") or (
                     "reconstructing file" in desc
                 )
+                self._meter = meter
+                if meter is not None:
+                    # Archive-level panel owns the screen; keep tqdm as a counter.
+                    kwargs["disable"] = True
                 super().__init__(*args, **kwargs)
+                if meter is not None:
+                    meter.attach_bar(self, desc)
+
+            def update(self, n=1):
+                result = super().update(n)
+                if self._meter is not None:
+                    self._meter.note()
+                return result
 
             def update_transfer(self, amount=1):
                 counter.add(amount, defer_only=self._darsay_xet)
+                if self._meter is not None:
+                    self._meter.note()
                 if self._darsay_xet and counter.pending_stop is not None:
                     from huggingface_hub.utils._xet import abort_xet_session
 
@@ -365,6 +380,11 @@ class HuggingFaceProvider(SourceProvider):
 
             def set_transfer_postfix_str(self, *args, **kwargs):
                 return None
+
+            def close(self):
+                if self._meter is not None:
+                    self._meter.detach_bar(self)
+                return super().close()
 
         return TransferTqdm
 

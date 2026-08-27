@@ -196,6 +196,16 @@ def _lock_was_copied(owner: dict, ours: dict) -> bool:
 
 
 @contextmanager
+def _live_transfer(display):
+    """Run the live panel and route log lines through it."""
+    display.start()
+    try:
+        yield display.echo
+    finally:
+        display.stop()
+
+
+@contextmanager
 def transfer_lock(bundle_dir: Path, progress=print):
     """Hold the per-bundle lock, reclaiming dead or copied owners."""
     bundle_dir.mkdir(parents=True, exist_ok=True)
@@ -731,6 +741,7 @@ def _download_one(
     counter: NetworkCounter,
     stop_controller: StopController | None,
     local_sources: dict[str, list[dict]],
+    meter=None,
 ) -> dict:
     """Worker-safe download/hash result; it never writes the ledger."""
     if stop_controller is not None:
@@ -742,100 +753,112 @@ def _download_one(
     events = []
     retries = 0
     record = None
+    try:
+        if meter is not None:
+            meter.set_current(relative, expected.get("size"), phase="download")
 
-    digest = expected.get("lfs_sha256")
-    for candidate in local_sources.get(digest, []) if digest else []:
-        attempts += 1
-        try:
-            method = _copy_local_file(candidate["path"], path)
-            record = _verified_record(
-                expected,
-                path,
-                f"local:{candidate['bundle_id']}",
-                attempts,
-            )
-        except OSError as exc:
-            _discard_payload_file(path, payload_dir)
+        digest = expected.get("lfs_sha256")
+        for candidate in local_sources.get(digest, []) if digest else []:
+            attempts += 1
+            try:
+                if meter is not None:
+                    meter.set_current(relative, expected.get("size"), phase="hashing")
+                method = _copy_local_file(candidate["path"], path)
+                record = _verified_record(
+                    expected,
+                    path,
+                    f"local:{candidate['bundle_id']}",
+                    attempts,
+                )
+            except OSError as exc:
+                _discard_payload_file(path, payload_dir)
+                events.append(
+                    {
+                        "at": _utc_now(),
+                        "path": relative,
+                        "event": "local_source_error",
+                        "detail": f"{candidate['bundle_id']} could not be copied: {exc}",
+                    }
+                )
+                continue
+            if record["verified_against_upstream"] is not False:
+                record["local_copy_method"] = method
+                return {
+                    "path": relative,
+                    "record": record,
+                    "events": events,
+                    "retries": retries,
+                    "bytes_local_sources": record["size"],
+                }
             events.append(
                 {
                     "at": _utc_now(),
                     "path": relative,
-                    "event": "local_source_error",
-                    "detail": f"{candidate['bundle_id']} could not be copied: {exc}",
+                    "event": "local_source_mismatch",
+                    "detail": f"{candidate['bundle_id']} failed re-verification; falling back",
                 }
             )
-            continue
-        if record["verified_against_upstream"] is not False:
-            record["local_copy_method"] = method
-            return {
-                "path": relative,
-                "record": record,
-                "events": events,
-                "retries": retries,
-                "bytes_local_sources": record["size"],
-            }
-        events.append(
-            {
-                "at": _utc_now(),
-                "path": relative,
-                "event": "local_source_mismatch",
-                "detail": f"{candidate['bundle_id']} failed re-verification; falling back",
-            }
-        )
-        _discard_payload_file(path, payload_dir)
-
-    from .sources import get_provider, source_from_ledger
-
-    provider = get_provider(ledger.get("provider") or "huggingface")
-    source = source_from_ledger(ledger)
-    tqdm_class = provider.progress_wrapper(counter)
-
-    for retry in range(2):
-        attempts += 1
-        try:
-            provider.download_file(
-                source,
-                ledger["revision"],
-                relative,
-                payload_dir,
-                force=retry > 0,
-                tqdm_class=tqdm_class,
-            )
-        except BaseException:
-            if counter.pending_stop is not None:
-                raise counter.pending_stop from None
-            raise
-        record = _verified_record(expected, path, "network", attempts)
-        if record["verified_against_upstream"] is not False:
-            break
-        events.append(
-            {
-                "at": _utc_now(),
-                "path": relative,
-                "event": "digest_mismatch",
-                "detail": f"download attempt {attempts} did not match pinned upstream digest",
-            }
-        )
-        if retry == 0:
-            retries += 1
             _discard_payload_file(path, payload_dir)
-    assert record is not None
-    if record["verified_against_upstream"] is False:
-        events.append(
-            {
-                "at": _utc_now(),
-                "path": relative,
-                "event": "persistent_digest_mismatch",
-                "detail": "second download mismatch; retained and marked as an upstream verification failure",
-            }
-        )
-    return {
-        "path": relative,
-        "record": record,
-        "events": events,
-        "retries": retries,
-        "bytes_local_sources": 0,
-    }
+
+        from .sources import get_provider, source_from_ledger
+
+        provider = get_provider(ledger.get("provider") or "huggingface")
+        source = source_from_ledger(ledger)
+        tqdm_class = provider.progress_wrapper(counter, meter=meter)
+
+        for retry in range(2):
+            attempts += 1
+            if meter is not None:
+                meter.set_current(relative, expected.get("size"), phase="download")
+            try:
+                provider.download_file(
+                    source,
+                    ledger["revision"],
+                    relative,
+                    payload_dir,
+                    force=retry > 0,
+                    tqdm_class=tqdm_class,
+                )
+            except BaseException:
+                if counter.pending_stop is not None:
+                    raise counter.pending_stop from None
+                raise
+            if meter is not None:
+                meter.set_current(relative, expected.get("size"), phase="hashing")
+            record = _verified_record(expected, path, "network", attempts)
+            if record["verified_against_upstream"] is not False:
+                break
+            events.append(
+                {
+                    "at": _utc_now(),
+                    "path": relative,
+                    "event": "digest_mismatch",
+                    "detail": f"download attempt {attempts} did not match pinned upstream digest",
+                }
+            )
+            if retry == 0:
+                retries += 1
+                _discard_payload_file(path, payload_dir)
+        assert record is not None
+        if record["verified_against_upstream"] is False:
+            events.append(
+                {
+                    "at": _utc_now(),
+                    "path": relative,
+                    "event": "persistent_digest_mismatch",
+                    "detail": "second download mismatch; retained and marked as an upstream verification failure",
+                }
+            )
+        return {
+            "path": relative,
+            "record": record,
+            "events": events,
+            "retries": retries,
+            "bytes_local_sources": 0,
+        }
+    finally:
+        if meter is not None:
+            meter.clear_current(relative)
 
 
 def _copy_local_file(source: Path, destination: Path) -> str:
@@ -925,6 +948,8 @@ def _transfer_small_files(
     stop_controller: StopController | None,
     jobs: int,
     progress,
+    meter=None,
+    live: bool = False,
 ) -> None:
     if not small:
         return
@@ -944,6 +969,7 @@ def _transfer_small_files(
                 counter,
                 stop_controller,
                 local_sources,
+                meter,
             ): expected
             for expected in small
         }
@@ -960,10 +986,13 @@ def _transfer_small_files(
             else:
                 source = result["record"]["source"]
                 suffix = f" from {source}" if source.startswith("local:") else ""
-                progress(
-                    f"Verified {expected['path']} ({result['record']['size']} bytes){suffix}"
-                )
+                if not live:
+                    progress(
+                        f"Verified {expected['path']} ({result['record']['size']} bytes){suffix}"
+                    )
                 _record_download_result(bundle_dir, ledger, session, result)
+                if meter is not None:
+                    meter.note()
                 if stop_controller is not None:
                     try:
                         stop_controller.check(session)
@@ -987,14 +1016,18 @@ def transfer_all(
     shard: tuple[int, int] | None = None,
 ) -> dict:
     """Fetch and immediately verify every remaining file at the pinned commit."""
+    from .progress import TransferDisplay, meter_from_plan
     from .sources import get_provider
 
     counter = NetworkCounter(session, stop_controller)
     local_sources = local_source_index(bundle_dir, ledger)
     groups = transfer_groups(ledger["expected"], shard)
     provider = get_provider(ledger.get("provider") or "huggingface")
+    plan = transfer_plan(payload_dir, ledger)
+    meter = meter_from_plan(plan, session, stop_controller)
+    display = TransferDisplay(meter, progress=progress)
 
-    with provider.transfer_session(payload_dir):
+    with provider.transfer_session(payload_dir), _live_transfer(display) as emit:
         for lane, assigned in groups:
             remaining = [
                 expected
@@ -1005,7 +1038,7 @@ def transfer_all(
             if not remaining:
                 continue
             if lane is not None:
-                progress(f"Cooperative lane {lane + 1}/{shard[1]} ...")
+                emit(f"Cooperative lane {lane + 1}/{shard[1]} ...")
             small = [
                 item for item in remaining if (item.get("size") or 0) < SMALL_FILE_LIMIT
             ]
@@ -1024,14 +1057,17 @@ def transfer_all(
                 local_sources,
                 stop_controller,
                 jobs,
-                progress,
+                emit,
+                meter=meter,
+                live=display.live,
             )
 
             for index, expected in enumerate(large, 1):
-                progress(
-                    f"Transferring large file {index}/{len(large)}: {expected['path']} "
-                    f"({expected.get('size') or 0} bytes)"
-                )
+                if not display.live:
+                    emit(
+                        f"Transferring large file {index}/{len(large)}: {expected['path']} "
+                        f"({expected.get('size') or 0} bytes)"
+                    )
                 result = _download_one(
                     expected,
                     payload_dir,
@@ -1039,8 +1075,10 @@ def transfer_all(
                     counter,
                     stop_controller,
                     local_sources,
+                    meter,
                 )
                 _record_download_result(bundle_dir, ledger, session, result)
+                meter.note()
                 if stop_controller is not None:
                     stop_controller.check(session)
 

@@ -11,6 +11,14 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
 
 ### Added
 
+- **Live archive progress** — `darsay archive` draws a three-line transfer
+  panel on a TTY: percent of the whole payload, bytes in / total, smoothed
+  rate with a sparkline, time remaining in plain language, files done, and
+  the file now in flight (or hashing). Piped / logged runs emit a status
+  line every 10 seconds. `DARSAY_PROGRESS=0` turns it off; `=line` forces
+  the log form even on a TTY. The Hub client's
+  per-file bar is replaced; budgets still use the same network-byte
+  callbacks. See [Incremental transfer](docs/INCREMENTAL.md).
 - **Standalone verifier** — `src/darsay/standalone_verify.py` is stdlib-only
   (no `huggingface_hub`, no `blake3`, no darsay imports). It re-hashes a
   bundle directory or a `.mvb.tar` against `manifest.json` and writes

@@ -118,8 +118,12 @@ class SourceProvider(ABC):
         """Wrap a transfer run (resume semantics, provider caches). Default is a no-op."""
         yield
 
-    def progress_wrapper(self, counter):
-        """Optional tqdm subclass that reports network bytes onto ``counter``."""
+    def progress_wrapper(self, counter, meter=None):
+        """Optional tqdm subclass that reports network bytes onto ``counter``.
+
+        ``meter`` is a ``TransferMeter`` when the CLI is drawing archive-level
+        progress; wrappers should feed it and hide the default per-file bar.
+        """
         return None
 
     def variants(self, source: SourceRef, progress) -> dict | None:
