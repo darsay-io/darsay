@@ -7,7 +7,7 @@
 | **Status** | Draft |
 | **Audience** | Implementers of the website; readers of the Python CLI who need the lane split |
 | **Related** | darsay 0.7.0 · catalog schema 1.0.0 · manifest schema 1.6.0 |
-| **Repos** | CLI: `darsay-io/darsay` (today still `jeremynorris/darsay`) · site: `darsay-io/website` |
+| **Repos** | CLI: `darsay-io/darsay` · site: `darsay-io/website` |
 
 This is a **proposal**. We will iterate on it before writing production code. Decisions already agreed in conversation are treated as closed unless a later trade-off truly needs a call; those are listed under [Key Decisions](#key-decisions). Genuine forks are under [Open Questions](#open-questions).
 
@@ -15,7 +15,7 @@ This is a **proposal**. We will iterate on it before writing production code. De
 
 ## Overview
 
-darsay is a Python CLI that archives model (and dataset) ecosystems as museum-grade, still-runnable vault bundles. The tool version today is **0.7.0**. Documentation lives as Markdown in `jeremynorris/darsay` (`docs/`, `examples/README.md`). There is no product website. `pyproject.toml` still points `Homepage` at GitHub.
+darsay is a Python CLI that archives model (and dataset) ecosystems as museum-grade, still-runnable vault bundles. The tool version today is **0.7.0**. Documentation lives as Markdown in `darsay-io/darsay` (`docs/`, `examples/README.md`). There is no product website. `pyproject.toml` still points `Homepage` at GitHub.
 
 This document proposes **darsay.io**: one hostname that is both the public documentation/product surface and a small coordination app — **anonymous want-list leaderboards**. A board is a shareable ranking of sources a group intends to archive into *their own* vaults, plus a typed “who has a copy” string so people can sneaker-net. The URL is the capability. There are no accounts.
 
@@ -28,7 +28,7 @@ The CLI remains the only thing that moves payload bytes. The site never stores m
 ### Current state
 
 - **Product docs** are GitHub Markdown. They are good (`docs/GETTING-STARTED.md`, `docs/CONCEPTS.md`, `docs/CATALOGS.md`, field-by-field specs). They are not a site. A 2040 reader of a bundle needs `docs/MANIFEST.md` and `docs/MVB-FORMAT.md`; a 2026 new user needs a URL that is not a repo tree.
-- **Catalogs** already exist as a local, file-shaped want-list. `darsay catalog new summer` writes `vault/catalogs/summer/catalog.json`. `darsay list summer` overlays that file on *this* vault (`have` / `partial` / `want` / `unknown`). `archive` does not rewrite the file. Sharing today is “copy the directory to a USB or a git repo” ([examples/README.md § Share a catalog](https://github.com/jeremynorris/darsay/blob/main/examples/README.md)).
+- **Catalogs** already exist as a local, file-shaped want-list. `darsay catalog new summer` writes `vault/catalogs/summer/catalog.json`. `darsay list summer` overlays that file on *this* vault (`have` / `partial` / `want` / `unknown`). `archive` does not rewrite the file. Sharing today is “copy the directory to a USB or a git repo” ([examples/README.md § Share a catalog](https://github.com/darsay-io/darsay/blob/main/examples/README.md)).
 - **What catalogs correctly refuse to store:** who has a copy. Possession is a *view* of a vault (`overlay()` in `src/darsay/catalog.py`). A friend’s overlay against an empty vault is all `want`. That is the right archival model. It is the wrong group-coordination model.
 
 ### Pain
@@ -37,7 +37,7 @@ A small group that wants to keep a set of models currently has to pick a git rep
 
 ### Why a website now, and why it must stay in its lane
 
-darsay’s longevity thesis ([docs/DESIGN.md](https://github.com/jeremynorris/darsay/blob/main/docs/DESIGN.md)) is that **formats outlive tools**. Bundles, manifests, `.mvb.tar`, and `catalog.json` are the archival surface. A website is coordination and a published view of the Markdown. If the site disappears, the CLI, the vaults, and the catalogs still work. If the CLI disappears, a 2040 reader still has the JSON and the specs. That split is an invariant of this design, not a slogan.
+darsay’s longevity thesis ([docs/DESIGN.md](https://github.com/darsay-io/darsay/blob/main/docs/DESIGN.md)) is that **formats outlive tools**. Bundles, manifests, `.mvb.tar`, and `catalog.json` are the archival surface. A website is coordination and a published view of the Markdown. If the site disappears, the CLI, the vaults, and the catalogs still work. If the CLI disappears, a 2040 reader still has the JSON and the specs. That split is an invariant of this design, not a slogan.
 
 ---
 
@@ -65,7 +65,7 @@ darsay’s longevity thesis ([docs/DESIGN.md](https://github.com/jeremynorris/da
 | Growing `who_has` / `holders` / `status` into `catalog.json` | Possession is a vault view in the CLI; a typed string on the site. `CATALOG_SCHEMA_VERSION` stays `1.0.0`. |
 | The website writing into vaults, calling `archive`, or proving a bundle exists | “Have” is a claim. The site does not verify disk. |
 | Rewriting CLI docs as part of this work | The website is a published view. Transform at build; source of truth stays `docs/`. |
-| Putting a Node toolchain in `jeremynorris/darsay` | See [Repository split](#repository-split). |
+| Putting a Node toolchain in `darsay-io/darsay` | See [Repository split](#repository-split). |
 | Next.js/Vercel, Netlify-as-CMS, Supabase, a VPS, MkDocs Material | Default stack is Astro + Starlight + Workers + D1. |
 
 ### Out of scope for v1 (soft, not forbidden later)
@@ -83,7 +83,7 @@ darsay’s longevity thesis ([docs/DESIGN.md](https://github.com/jeremynorris/da
 
 1. **One hostname, three surfaces.** `darsay.io/` product, `darsay.io/docs/` docs, `darsay.io/b/<id>` a board. Same deploy, same tech.
 
-2. **Separate git repo (`jeremynorris/darsay-io`), not a `website/` tree.** The Python package’s contributors and CI are a pytest pyramid (`docs/TESTING.md`, `.github/workflows/ci.yml`). Catalog/board people must not need that, and the CLI repo must not grow `package-lock.json`, Astro, or Wrangler. Docs stay in `darsay`; the site fetches a pinned ref at build. Justification in [Repository split](#repository-split).
+2. **Separate git repo (`darsay-io/website`), not a `website/` tree.** The Python package’s contributors and CI are a pytest pyramid (`docs/TESTING.md`, `.github/workflows/ci.yml`). Catalog/board people must not need that, and the CLI repo must not grow `package-lock.json`, Astro, or Wrangler. Docs stay in `darsay`; the site fetches a pinned ref at build. Justification in [Repository split](#repository-split).
 
 3. **Cloudflare Workers with static assets + a Worker script for `/api/*` + D1.** Not Pages (supported, but 2026 guidance and new investment are on Workers; Rate Limiting bindings exist on Workers and not Pages). Apex `darsay.io` requires the domain as a Cloudflare zone (nameservers at Cloudflare, CNAME flattening).
 
@@ -152,8 +152,8 @@ flowchart LR
   end
 
   subgraph gh [GitHub]
-    CLI[jeremynorris/darsay<br/>docs/ Markdown · catalog.py]
-    SITE[jeremynorris/darsay-io<br/>Astro · Starlight · Worker]
+    CLI[darsay-io/darsay<br/>docs/ Markdown · catalog.py]
+    SITE[darsay-io/website<br/>Astro · Starlight · Worker]
   end
 
   subgraph disk [Collector machines]
@@ -444,9 +444,9 @@ Optional later CLI nicety (not v1): `darsay catalog adopt MINE https://darsay.io
 
 ### Repository split
 
-**Pick: a new public repo `jeremynorris/darsay-io`.**
+**Pick: a new public repo `darsay-io/website`.**
 
-A `website/` directory inside `jeremynorris/darsay` would force every clone, every CLI contributor, and the pytest CI matrix (Python 3.10/3.12/3.14) to coexist with Node, Wrangler, and D1 migrations. `CONTRIBUTING.md` and `Claude.md` describe a Python venv and a hermetic pyramid. Board contributors should not run that pyramid; CLI contributors should not run `npm test`.
+A `website/` directory inside `darsay-io/darsay` would force every clone, every CLI contributor, and the pytest CI matrix (Python 3.10/3.12/3.14) to coexist with Node, Wrangler, and D1 migrations. `CONTRIBUTING.md` and `Claude.md` describe a Python venv and a hermetic pyramid. Board contributors should not run that pyramid; CLI contributors should not run `npm test`.
 
 | | `darsay` | `darsay-io` |
 |---|---|---|
@@ -463,7 +463,7 @@ Follow-up PRs **in the CLI repo** (after the site is live, not blocking): point 
 
 ### Docs publishing (do not rewrite the docs)
 
-Source of truth: `docs/*.md`, `examples/README.md`, `docs/darsay-logo.png` in `jeremynorris/darsay`.
+Source of truth: `docs/*.md`, `examples/README.md`, `docs/darsay-logo.png` in `darsay-io/darsay`.
 
 Build step in `darsay-io`:
 
@@ -471,7 +471,7 @@ Build step in `darsay-io`:
 
 ```json
 {
-  "repo": "jeremynorris/darsay",
+  "repo": "darsay-io/darsay",
   "ref": "v0.7.0",
   "sha": "<full commit sha>"
 }
@@ -507,8 +507,8 @@ Build step in `darsay-io`:
      - Bare `FOO.md` / `FOO.md#anchor` inside `docs/` → `/docs/<slug>/` (or `#anchor`).
      - `../docs/FOO.md` from `examples/README.md` (`../docs/GETTING-STARTED.md`, `../docs/INCREMENTAL.md`, `../docs/CATALOGS.md`, `../docs/SOURCES.md`, `../docs/CONCEPTS.md`, `../docs/README.md`, …) → `/docs/<slug>/`.
      - `../examples/README.md` → `/docs/examples/`.
-     - `../README.md` (repo root) → `https://github.com/jeremynorris/darsay`.
-     - `../CONTRIBUTING.md` → `https://github.com/jeremynorris/darsay/blob/<pinned-sha>/CONTRIBUTING.md`.
+     - `../README.md` (repo root) → `https://github.com/darsay-io/darsay`.
+     - `../CONTRIBUTING.md` → `https://github.com/darsay-io/darsay/blob/<pinned-sha>/CONTRIBUTING.md`.
      - `darsay-logo.png` / `docs/darsay-logo.png` → `/darsay-logo.png`.
    - Fail CI if the transformed tree still contains a Markdown link `](…)` whose target ends in `.md` or `.md#…` **unless** the target is an `http://` / `https://` URL. That catches `](MANIFEST.md)`, `](../docs/INCREMENTAL.md)`, `](README.md)`, etc. — not only GETTING-STARTED/CONCEPTS.
    - Snapshot tests: transformed GETTING-STARTED, CATALOGS, SOURCES, **and** `examples/README.md` (exercises `../docs/`) plus `docs/README.md` (fallback title).
@@ -804,7 +804,7 @@ Optional later: `If-Match` on board `updated` → 409. Not required to ship.
 
 ## Alternatives Considered
 
-### 1. `website/` tree inside `jeremynorris/darsay`
+### 1. `website/` tree inside `darsay-io/darsay`
 
 **Pros.** One clone; docs are local files, no fetch; atomic PRs that change a CLI flag and the docs site together.
 
@@ -985,7 +985,7 @@ None remaining.
 
 ## PR Plan
 
-Implementation lives primarily in **`jeremynorris/darsay-io`** (new). The CLI repo gets optional follow-up PRs that must not wait on, or block, the site. Each PR below is independently reviewable and mergeable; later PRs may sit as drafts until the earlier merge.
+Implementation lives primarily in **`darsay-io/website`** (new). The CLI repo gets optional follow-up PRs that must not wait on, or block, the site. Each PR below is independently reviewable and mergeable; later PRs may sit as drafts until the earlier merge.
 
 ### PR 1 — Scaffold the website repo
 
@@ -993,7 +993,7 @@ Implementation lives primarily in **`jeremynorris/darsay-io`** (new). The CLI re
 - **Repo:** `darsay-io` (initial commit series, or first PR if the repo is created empty)
 - **Files:** `package.json`, `astro.config.mjs` (Starlight + `site: https://darsay.io`, **sitemap disabled**), `wrangler.jsonc` (assets only; **no D1 yet**; `routes: [{ pattern: "darsay.io", custom_domain: true }]`), `src/pages/index.astro` (placeholder), `src/content/docs/docs/index.mdx`, `public/robots.txt` (`Disallow: /b/`, `Disallow: /api/`), `public/_headers` (`X-Frame-Options: DENY`, `frame-ancestors 'none'`, **CSP-Report-Only** `default-src 'self'`), `public/_redirects` (`/b/* /b/index.html 200` only — **not** www), `.github/workflows/ci.yml` (`npm test` / `astro build`), `LICENSE` (Apache 2.0), `README.md` (how to `npm run dev` / `wrangler deploy`; **does not** tell people to run pytest)
 - **Depends on:** none
-- **Description:** One hostname skeleton. Zone Redirect Rule for www → apex is operator DNS, not this PR. `PUBLIC_BOARDS_ENABLED` off in the build. No Node files in `jeremynorris/darsay`. CI runs on every push.
+- **Description:** One hostname skeleton. Zone Redirect Rule for www → apex is operator DNS, not this PR. `PUBLIC_BOARDS_ENABLED` off in the build. No Node files in `darsay-io/darsay`. CI runs on every push.
 
 ### PR 2 — Docs sync pipeline
 
@@ -1001,7 +1001,7 @@ Implementation lives primarily in **`jeremynorris/darsay-io`** (new). The CLI re
 - **Repo:** `darsay-io`
 - **Files:** `docs.lock.json`, `scripts/sync-docs.mjs`, `scripts/sync-docs.test.mjs` (snapshots: GETTING-STARTED, CATALOGS, SOURCES, `examples/README.md`, `docs/README.md`), committed `src/content/docs/docs/**`, Starlight `sidebar` matching `docs/README.md`
 - **Depends on:** PR 1
-- **Description:** Fetch `jeremynorris/darsay@<pinned SHA>`. Filename map as in [Docs publishing](#docs-publishing-do-not-rewrite-the-docs). Strip HTML nav on **every** file. Rewrite every mapped path including `../docs/*.md`. CI fails on any leftover `](*.md)` that is not an `http(s):` URL. `index.mdx` title fallback `Documentation`. `git diff --exit-code` on generated tree. Copy `darsay-logo.png`. Do not rewrite files in the Python repo.
+- **Description:** Fetch `darsay-io/darsay@<pinned SHA>`. Filename map as in [Docs publishing](#docs-publishing-do-not-rewrite-the-docs). Strip HTML nav on **every** file. Rewrite every mapped path including `../docs/*.md`. CI fails on any leftover `](*.md)` that is not an `http(s):` URL. `index.mdx` title fallback `Documentation`. `git diff --exit-code` on generated tree. Copy `darsay-logo.png`. Do not rewrite files in the Python repo.
 
 ### PR 3 — Product landing
 
@@ -1046,7 +1046,7 @@ Implementation lives primarily in **`jeremynorris/darsay-io`** (new). The CLI re
 ### PR 8 — CLI repo: point humans at the site (after launch)
 
 - **Title:** `docs: set Homepage to https://darsay.io`
-- **Repo:** `jeremynorris/darsay`
+- **Repo:** `darsay-io/darsay`
 - **Files:** `pyproject.toml` (`[project.urls] Homepage`, possibly Documentation), `README.md` (link/badge), `docs/GETTING-STARTED.md` (one line: docs also at darsay.io), `docs/README.md` if needed
 - **Depends on:** site live on the apex (PRs 1–3 at least; boards optional)
 - **Description:** **No** catalog schema change, **no** `holders` field, **no** Node. Do not document unshipped CLI flags (`catalog adopt <url>`). Bump nothing in `__version__` unless a release is anyway happening.
@@ -1054,7 +1054,7 @@ Implementation lives primarily in **`jeremynorris/darsay-io`** (new). The CLI re
 ### PR 9 (optional, later) — CLI adopt from HTTPS
 
 - **Title:** `feat: catalog adopt from https catalog.json URLs`
-- **Repo:** `jeremynorris/darsay`
+- **Repo:** `darsay-io/darsay`
 - **Files:** `src/darsay/catalog.py`, `cli.py`, `tests/unit/test_catalog.py`, `docs/CATALOGS.md`, `examples/README.md`
 - **Depends on:** PR 5 (export exists), PR 8
 - **Description:** Only if we want `darsay catalog adopt summer https://darsay.io/api/boards/<id>/catalog.json`. Separate design pass: timeout, size cap, still no holders. **The URL is a write capability and will land in shell history.** Not required for darsay.io v1. Prefer documenting `curl` + `./catalog.json` adopt.

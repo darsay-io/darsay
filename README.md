@@ -21,8 +21,8 @@ darsay run     qwen--qwen3-0.6b "Say hello"
 
 <p align="center">
   <a href="https://pypi.org/project/darsay/"><img src="https://img.shields.io/pypi/v/darsay?style=flat-square&color=22d3ee" alt="PyPI"></a>
-  <a href="https://github.com/jeremynorris/darsay/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/jeremynorris/darsay/ci.yml?style=flat-square&label=CI" alt="CI"></a>
-  <a href="https://github.com/jeremynorris/darsay/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-38bdf8?style=flat-square" alt="Apache 2.0"></a>
+  <a href="https://github.com/darsay-io/darsay/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/darsay-io/darsay/ci.yml?style=flat-square&label=CI" alt="CI"></a>
+  <a href="https://github.com/darsay-io/darsay/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-38bdf8?style=flat-square" alt="Apache 2.0"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-00b4ff?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
   <img src="https://img.shields.io/badge/schema-v1.6.0-0ea5e9?style=flat-square" alt="Manifest schema 1.6.0">
 </p>
@@ -94,12 +94,12 @@ uv tool install darsay
 ```
 
 <details>
-<summary><strong>Homebrew tap</strong> — personal tap, not homebrew/core</summary>
+<summary><strong>Homebrew tap</strong> — org tap, not homebrew/core</summary>
 
 Unqualified `brew install darsay` will not find it.
 
 ```bash
-brew install jeremynorris/darsay/darsay
+brew install darsay-io/darsay/darsay
 ```
 
 </details>

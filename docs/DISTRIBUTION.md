@@ -43,15 +43,15 @@ site-packages, and upgrades are one command (`pipx upgrade darsay`,
 ### Other sources
 
 Homebrew **tap** (not [homebrew/core](https://github.com/Homebrew/homebrew-core)).
-`brew install darsay` will not find it. This is a personal tap until the
+`brew install darsay` will not find it. This is an org tap until the
 project is old enough and notable enough for a core formula — do not open
 that PR yet.
 
 ```bash
-brew install jeremynorris/darsay/darsay
+brew install darsay-io/darsay/darsay
 ```
 
-The formula is in [`jeremynorris/homebrew-darsay`](https://github.com/jeremynorris/homebrew-darsay).
+The formula is in [`darsay-io/homebrew-darsay`](https://github.com/darsay-io/homebrew-darsay).
 It installs the PyPI sdist into an isolated venv (same idea as pipx).
 Hydrate/run still need a real interpreter.
 
@@ -64,8 +64,8 @@ pipx install ./darsay-0.7.0-py3-none-any.whl
 From a git tag or an unreleased commit (not the primary path):
 
 ```bash
-pipx install git+https://github.com/jeremynorris/darsay@v0.7.0
-uvx --from git+https://github.com/jeremynorris/darsay@v0.7.0 \
+pipx install git+https://github.com/darsay-io/darsay@v0.7.0
+uvx --from git+https://github.com/darsay-io/darsay@v0.7.0 \
     darsay estimate sshleifer/tiny-gpt2
 ```
 

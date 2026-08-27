@@ -9,6 +9,14 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Changed
+
+- GitHub repositories moved to the `darsay-io` org: [`darsay-io/darsay`](https://github.com/darsay-io/darsay)
+  and [`darsay-io/homebrew-darsay`](https://github.com/darsay-io/homebrew-darsay).
+  Install with `brew install darsay-io/darsay/darsay`. Old
+  `jeremynorris/darsay` URLs redirect. PyPI Trusted Publishing must use
+  owner `darsay-io` (already configured on the GitHub side).
+
 ## [0.7.0] - 2026-08-26
 
 ### Breaking
