@@ -3,7 +3,7 @@
 An export is a deterministic tar of the whole bundle directory:
 
 - entries rooted at `<bundle_id>/`, marker file `.mvb.json` first, then all
-  files in sorted order;
+  files in sorted order (including a frozen `darsay-verify.py`);
 - normalized tar metadata (mtime = the bundle's date_archived, uid/gid 0,
   mode 0644, no owner names), GNU format, no compression — model weights are
   essentially incompressible and a plain tar stays inspectable;
@@ -21,6 +21,7 @@ embedded manifest, and only then registers the bundle in the vault.
 
 from __future__ import annotations
 
+import io
 import json
 import shutil
 import tarfile
@@ -31,12 +32,19 @@ from pathlib import Path
 from .hashing import bundle_hash, hash_file, iter_payload_files
 
 # Bump major on incompatible layout changes; import requires a matching major.
-MVB_FORMAT_VERSION = "1.1"
+# Minor 1.2 adds a frozen copy of standalone_verify.py as darsay-verify.py.
+MVB_FORMAT_VERSION = "1.2"
 MARKER_NAME = ".mvb.json"
+STANDALONE_VERIFY_NAME = "darsay-verify.py"
 
 # Bundle-root files that never go into an export: volatile machine-local state
 # (export log, hydration/run records, resumable-transfer ledger/lock).
 EXPORT_EXCLUDE = {"exports.json", "hydration.json", "transfer.json", "transfer.lock"}
+
+
+def standalone_verify_bytes() -> bytes:
+    """Canonical stdlib verifier copied into every export. Do not transform."""
+    return Path(__file__).with_name("standalone_verify.py").read_bytes()
 
 
 def _bundle_files(bundle_dir: Path) -> list[tuple[str, Path]]:
@@ -44,6 +52,10 @@ def _bundle_files(bundle_dir: Path) -> list[tuple[str, Path]]:
     for p in bundle_dir.rglob("*"):
         rel = p.relative_to(bundle_dir).as_posix()
         if rel in EXPORT_EXCLUDE or p.name == ".DS_Store":
+            continue
+        # Always inject the canonical verifier; ignore an on-disk copy
+        # (imports unpack one into the bundle).
+        if rel == STANDALONE_VERIFY_NAME:
             continue
         if p.is_symlink():
             raise SystemExit(f"error: refusing to export symlink in bundle: {rel}")
@@ -90,19 +102,30 @@ def export_bundle(bundle_dir: Path, output_dir: Path, progress=print) -> Path:
         raise SystemExit(f"error: {out_path} already exists")
 
     files = _bundle_files(bundle_dir)
-    progress(f"Exporting {bundle_id}: {len(files)} files -> {out_path}")
+    verifier = standalone_verify_bytes()
+    members: list[tuple[str, Path | None, bytes | None]] = [
+        (STANDALONE_VERIFY_NAME, None, verifier),
+        *((rel, abs_path, None) for rel, abs_path in files),
+    ]
+    members.sort(key=lambda t: t[0])
+    progress(f"Exporting {bundle_id}: {len(members)} files -> {out_path}")
     with tarfile.open(out_path, "w", format=tarfile.GNU_FORMAT) as tar:
-        import io
-
         tar.addfile(
             _tarinfo(f"{bundle_id}/{MARKER_NAME}", len(marker_bytes), mtime),
             io.BytesIO(marker_bytes),
         )
-        for rel, abs_path in files:
-            with open(abs_path, "rb") as f:
+        for rel, abs_path, data in members:
+            if data is not None:
                 tar.addfile(
-                    _tarinfo(f"{bundle_id}/{rel}", abs_path.stat().st_size, mtime), f
+                    _tarinfo(f"{bundle_id}/{rel}", len(data), mtime),
+                    io.BytesIO(data),
                 )
+            elif abs_path is not None:
+                with open(abs_path, "rb") as f:
+                    tar.addfile(
+                        _tarinfo(f"{bundle_id}/{rel}", abs_path.stat().st_size, mtime),
+                        f,
+                    )
 
     from . import __version__
 

@@ -152,11 +152,12 @@ CPython plus the wheel is convenient for developers, hostile for archivists.
    interpreter. That split should be documented on the Release page, not
    papered over. Do not build this until someone actually needs it.
 
-A stdlib-only **standalone verifier** (proposed in
-[DESIGN.md](DESIGN.md)) is a better long-term binary than freezing the
-whole CLI: one `.py` file, no deps, shippable inside `.mvb.tar`. That is
-the component whose profile actually wants "runs in 2040 with nothing
-installed."
+A stdlib-only **standalone verifier** ships as
+`src/darsay/standalone_verify.py` and is copied verbatim into every
+`.mvb.tar` as `darsay-verify.py` (MVB 1.2). That is a better long-term
+binary than freezing the whole CLI: one `.py` file, no deps, runs with
+whatever Python exists. See [DESIGN.md](DESIGN.md) and
+[MVB-FORMAT.md](MVB-FORMAT.md).
 
 ### Why this does not threaten the archive
 

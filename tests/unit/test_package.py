@@ -40,6 +40,14 @@ def test_runner_scripts_are_packaged():
     assert missing == []
 
 
+def test_standalone_verifier_is_packaged():
+    import darsay
+
+    path = Path(darsay.__file__).parent / "standalone_verify.py"
+    assert path.is_file()
+    assert path.read_bytes().startswith(b"#!/usr/bin/env python3")
+
+
 def test_python_requires_matches_classifiers():
     text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert 'requires-python = ">=3.10"' in text

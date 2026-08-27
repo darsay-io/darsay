@@ -23,7 +23,9 @@ point `darsay` (argparse, subcommands in `cli.py`).
   `transfer.py` (pin ledger, reconciliation, resumable/budgeted per-file
   transfer, cooperative lanes/assembly, sibling-blob reuse),
   `estimate.py` (read-only preflight: sizes/params/disk from source metadata),
-  `verify.py`, `smoke.py`, `export.py` (.mvb.tar), `readme_gen.py`,
+  `verify.py`, `standalone_verify.py` (stdlib-only; frozen into `.mvb.tar`
+  as `darsay-verify.py` — changing it is an MVB minor bump), `smoke.py`,
+  `export.py` (.mvb.tar), `readme_gen.py`,
   `metadata.py`, `licensing.py`, `hashing.py`, `safetensors_meta.py`,
   `schema.py` (artifact-type registry), `hydrate.py` (ENGINES registry, env
   management, `hydrate`/`run`), `runners/` (standalone per-engine scripts run

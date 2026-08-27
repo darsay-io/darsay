@@ -6,7 +6,7 @@
   <a href="../README.md">README</a>
 </p>
 
-# .mvb.tar — single-file bundle format (v1.1)
+# .mvb.tar — single-file bundle format (v1.2)
 
 > **In one sentence.** One bundle, one uncompressed tar, recoverable with
 > stock `tar`. Same bundle state always exports the same bytes.
@@ -23,18 +23,20 @@ tool can list and unpack it decades from now, with or without darsay.
   incompressible, so compression would cost inspectability for ~no size win.
   (A compressed variant, if ever added, will bump the format version.)
 - **Entry order:** the marker `<bundle_id>/.mvb.json` first, then every bundle
-  file as `<bundle_id>/<path>`, sorted by path. Only regular files — no
-  directory entries, no symlinks (export refuses bundles containing them).
+  file as `<bundle_id>/<path>`, sorted by path — including a frozen copy of
+  the stdlib verifier as `<bundle_id>/darsay-verify.py`. Only regular files —
+  no directory entries, no symlinks (export refuses bundles containing them).
 - **Excluded from the tar:** `exports.json`, `hydration.json`, `transfer.json`,
   and `transfer.lock` — volatile machine-local state (see Determinism; run,
   transfer, and lock records are meaningless on another machine) — plus
-  `.DS_Store`.
+  `.DS_Store`. An on-disk `darsay-verify.py` (left behind by a previous
+  import) is ignored; export always injects the tool's canonical copy.
 
 ## Marker (`.mvb.json`, always the first entry)
 
 ```json
 {
-  "mvb_format_version": "1.1",
+  "mvb_format_version": "1.2",
   "bundle_id": "qwen--qwen3-0.6b@c1899de289a0",
   "artifact_type": "model",
   "schema_version": "1.6.0",
@@ -110,8 +112,18 @@ therefore refused at import time, before the bundle can enter the vault.
 ```bash
 tar -tf qwen--qwen3-0.6b@c1899de289a0.mvb.tar     # list
 tar -xf qwen--qwen3-0.6b@c1899de289a0.mvb.tar     # unpack
-# integrity: hash model/* and compare with inventory.files[].sha256 in manifest.json
+python3 qwen--qwen3-0.6b@c1899de289a0/darsay-verify.py qwen--qwen3-0.6b@c1899de289a0
+# or, without unpacking:
+python3 darsay-verify.py qwen--qwen3-0.6b@c1899de289a0.mvb.tar
 ```
+
+`darsay-verify.py` is stdlib-only (no darsay install). It re-hashes the
+payload against `manifest.json` and exits 0 on pass. It does not write
+anything. The algorithm is the same one in [MANIFEST.md](MANIFEST.md)
+(`inventory.files[].sha256` and `inventory.bundle_hash`): SHA-256 of
+each payload file, then SHA-256 of the sorted `"<sha256>  <path>"`
+lines. Hand-hashing `model/*` (or `data/*`) against the inventory is
+still enough if even the script is gone.
 
 ---
 

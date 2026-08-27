@@ -9,6 +9,17 @@ Tool version (`pyproject.toml` / `darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Added
+
+- **Standalone verifier** — `src/darsay/standalone_verify.py` is stdlib-only
+  (no `huggingface_hub`, no `blake3`, no darsay imports). It re-hashes a
+  bundle directory or a `.mvb.tar` against `manifest.json` and writes
+  nothing. Every export copies it verbatim into the tar as
+  `darsay-verify.py`. MVB format **1.2** (minor; 1.x imports still
+  accepted). Changing the script is an MVB minor bump so export
+  determinism holds. Spec: [docs/DESIGN.md](docs/DESIGN.md),
+  [docs/MVB-FORMAT.md](docs/MVB-FORMAT.md).
+
 ### Changed
 
 - GitHub repositories moved to the `darsay-io` org: [`darsay-io/darsay`](https://github.com/darsay-io/darsay)

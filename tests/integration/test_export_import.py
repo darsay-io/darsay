@@ -9,8 +9,16 @@ from pathlib import Path
 import pytest
 
 from darsay.archiver import load_manifest
-from darsay.export import EXPORT_EXCLUDE, MARKER_NAME, export_bundle, import_bundle
+from darsay.export import (
+    EXPORT_EXCLUDE,
+    MARKER_NAME,
+    STANDALONE_VERIFY_NAME,
+    export_bundle,
+    import_bundle,
+    standalone_verify_bytes,
+)
 from darsay.hashing import hash_file
+from darsay.standalone_verify import verify_path
 from tests.conftest import silent
 from tests.integration.conftest import archive_quiet
 from tests.payloads import dataset_files, model_files
@@ -28,6 +36,7 @@ def test_export_is_byte_identical_and_excludes_volatile(vault, test_provider, tm
     out1 = tmp_path / "e1"
     out2 = tmp_path / "e2"
     tar1 = export_bundle(bundle, out1, progress=silent)
+    (bundle / STANDALONE_VERIFY_NAME).write_text("stale-on-disk-copy\n")
     tar2 = export_bundle(bundle, out2, progress=silent)
     assert _sha256(tar1) == _sha256(tar2)
     # Marker first, then sorted entries.
@@ -37,6 +46,14 @@ def test_export_is_byte_identical_and_excludes_volatile(vault, test_provider, tm
     payload_names = names[1:]
     assert payload_names == sorted(payload_names)
     assert not any(Path(n).name in EXPORT_EXCLUDE for n in names)
+    assert any(Path(n).name == STANDALONE_VERIFY_NAME for n in names)
+    with tarfile.open(tar1, "r") as tar:
+        member = tar.getmember(
+            next(n for n in names if Path(n).name == STANDALONE_VERIFY_NAME)
+        )
+        extracted = tar.extractfile(member)
+        assert extracted is not None
+        assert extracted.read() == standalone_verify_bytes()
     # Export event is recorded outside the tar.
     exports = json.loads((bundle / "exports.json").read_text())
     assert exports["exports"][0]["sha256"] == _sha256(tar1)
@@ -69,6 +86,9 @@ def test_import_registers_after_verify(vault, test_provider, tmp_path):
         imported["archive"]["imported"]["file_sha256"]
         == hash_file(tar_path, with_blake3=False)["sha256"]
     )
+    assert (dest / STANDALONE_VERIFY_NAME).read_bytes() == standalone_verify_bytes()
+    assert verify_path(str(tar_path))["status"] == "pass"
+    assert verify_path(str(dest))["status"] == "pass"
 
 
 def test_import_failure_registers_nothing(vault, test_provider, tmp_path):

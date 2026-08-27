@@ -10,6 +10,7 @@ from darsay.export import (
     EXPORT_EXCLUDE,
     MARKER_NAME,
     MVB_FORMAT_VERSION,
+    STANDALONE_VERIFY_NAME,
     _bundle_files,
     _read_marker,
     _tarinfo,
@@ -24,11 +25,13 @@ def test_bundle_files_excludes_volatile_and_sorts(tmp_path):
     (tmp_path / "transfer.json").write_text("{}")
     (tmp_path / "transfer.lock").write_text("{}")
     (tmp_path / ".DS_Store").write_text("x")
+    (tmp_path / STANDALONE_VERIFY_NAME).write_text("stale copy")
     (tmp_path / "model").mkdir()
     (tmp_path / "model" / "a.bin").write_bytes(b"a")
     names = [rel for rel, _ in _bundle_files(tmp_path)]
     assert names == ["README.md", "manifest.json", "model/a.bin"]
     assert EXPORT_EXCLUDE.isdisjoint(set(names))
+    assert STANDALONE_VERIFY_NAME not in names
 
 
 def test_bundle_files_refuses_symlink(tmp_path):

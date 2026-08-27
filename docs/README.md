@@ -23,7 +23,7 @@
 | Tool | **0.7.0** |
 | Manifest schema | **1.6.0** |
 | Catalog schema | **1.0.0** |
-| MVB format | **1.1** |
+| MVB format | **1.2** |
 | License | Apache 2.0 |
 
 Tool version, schema version, and export-format version bump independently.
@@ -78,7 +78,7 @@ are an optional third surface: a shareable want-list. They are not inside
 | Document | What it specifies |
 |---|---|
 | [**manifest.json**](MANIFEST.md) | Every field of the machine-readable source of truth. `null` means unknown — the tool never fabricates. |
-| [**.mvb.tar**](MVB-FORMAT.md) | Single-file export: uncompressed tar, marker first, deterministic metadata, manual recovery with stock `tar`. |
+| [**.mvb.tar**](MVB-FORMAT.md) | Single-file export: uncompressed tar, marker first, frozen `darsay-verify.py`, deterministic metadata, manual recovery with stock `tar`. |
 | [**catalog.json**](CATALOGS.md) | Optional curator want-list. Overlay is a view; the file does not record possession. |
 
 ## Project

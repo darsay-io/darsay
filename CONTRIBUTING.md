@@ -77,7 +77,8 @@ The `release` workflow attaches the wheel and sdist to the GitHub Release
 and publishes them to PyPI (Trusted Publishing, environment `pypi`).
 
 `SCHEMA_VERSION` and `MVB_FORMAT_VERSION` bump independently, on format
-changes only.
+changes only. Editing `src/darsay/standalone_verify.py` is an MVB minor
+bump: that file is copied byte-for-byte into every `.mvb.tar`.
 
 ## License
 

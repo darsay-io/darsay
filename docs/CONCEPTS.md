@@ -174,9 +174,9 @@ two boring formats:
 - **`manifest.json`** — plain JSON, `kind: darsay.bundle`, field-by-field
   spec in [MANIFEST.md](MANIFEST.md). Unknown fields are ignored on read
   and preserved on write. Major-newer is a hard error.
-- **`.mvb.tar`** — uncompressed tar, marker first, deterministic
-  metadata, unpackable with stock `tar`. Spec and manual recovery:
-  [MVB-FORMAT.md](MVB-FORMAT.md).
+- **`.mvb.tar`** — uncompressed tar, marker first, frozen
+  `darsay-verify.py` (stdlib only), deterministic metadata, unpackable
+  with stock `tar`. Spec and manual recovery: [MVB-FORMAT.md](MVB-FORMAT.md).
 
 The payload is already a format the world knows: a Hugging Face repo
 layout. The tool is glue. The bundles are the product.

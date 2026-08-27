@@ -79,13 +79,26 @@ The tool is replaceable; the bundles are not — so the engineering
 investment goes into keeping the formats self-describing, not into making
 the binary immortal.
 
-### Proposed: standalone verifier
+### Standalone verifier
 
-A single-file, stdlib-only script (no `huggingface_hub`, no `blake3`) that
-re-hashes a payload against its manifest — runnable anywhere any Python
-exists, decades on. It could ship inside exports, with two constraints:
-adding it to the tar is an MVB format minor bump, and the script itself
-must be byte-stable across releases or export determinism breaks.
+A single-file, stdlib-only script (`src/darsay/standalone_verify.py`: no
+`huggingface_hub`, no `blake3`, no darsay imports) re-hashes a payload
+against its manifest — runnable anywhere any Python exists, decades on.
+
+Every export copies that file verbatim into the tar as `darsay-verify.py`
+(MVB format **1.2**). After unpack:
+
+```bash
+python3 darsay-verify.py .                  # bundle directory
+python3 darsay-verify.py bundle.mvb.tar     # the tar itself, no unpack
+```
+
+It is read-only: it never writes `manifest.json` or `verification.json`.
+`darsay verify` remains the tool that records a check in the bundle.
+
+The script is part of the export format. Changing it is an MVB minor bump;
+the same bundle state under the same format version still exports the
+same bytes.
 
 ## When to revisit
 

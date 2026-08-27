@@ -48,7 +48,7 @@ These match the list in `CLAUDE.md` / `CONTRIBUTING.md`:
 - `transfer.json` is relocatable: no source-machine absolute paths, a copied
   partial resumes in another vault, a copied lock is reclaimed.
 - The same bundle state exports to a byte-identical `.mvb.tar` (marker first,
-  volatile files excluded).
+  volatile files excluded, `darsay-verify.py` always the canonical copy).
 - Manifests record what was established; unknown is `null`; query caps are
   stored as `query_limit`.
 - `import` re-hashes before registering; a failed import writes nothing.

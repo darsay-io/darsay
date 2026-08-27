@@ -208,8 +208,16 @@ darsay --vault /other/vault import /Volumes/USB/backups/qwen--qwen3-0.6b@<rev>.m
 `import` streams the marker, unpacks to staging, **re-hashes the
 payload**, and only then registers. Failures write nothing.
 
-The file is plain uncompressed tar. Manual recovery without darsay:
-[MVB format](../docs/MVB-FORMAT.md).
+The file is plain uncompressed tar. It includes `darsay-verify.py` (stdlib
+only) so a reader without darsay can still check the payload:
+
+```bash
+python3 darsay-verify.py qwen--qwen3-0.6b@<rev>.mvb.tar
+tar -xf qwen--qwen3-0.6b@<rev>.mvb.tar
+python3 qwen--qwen3-0.6b@<rev>/darsay-verify.py qwen--qwen3-0.6b@<rev>
+```
+
+Manual recovery without even that script: [MVB format](../docs/MVB-FORMAT.md).
 
 ---
 
@@ -284,6 +292,10 @@ darsay verify qwen--qwen3-0.6b
 Re-hashes every payload file, diffs against the manifest. Modified,
 missing, or extra files flip integrity to `compromised` and the command
 exits non-zero.
+
+A 2040 reader without darsay uses the stdlib script shipped in every
+export: `python3 darsay-verify.py <bundle-or-tar>`. That check is
+read-only — it does not write `verification.json`.
 
 ```cron
 # nightly, mail on failure
