@@ -220,6 +220,20 @@ class TestProvider(SourceProvider):
 
         return _Bar
 
+    def partial_bytes(self, payload_dir: Path, expected: dict) -> int:
+        """Bank ``.cache/test/<path>.incomplete`` bytes, like the Hub provider."""
+        parts = Path(expected["path"]).parts
+        if not parts:
+            return 0
+        incomplete = (
+            payload_dir.joinpath(".cache", "test", *parts[:-1])
+            / f"{parts[-1]}.incomplete"
+        )
+        try:
+            return incomplete.stat().st_size if incomplete.is_file() else 0
+        except OSError:
+            return 0
+
     def relationships(self, source: SourceRef, metadata: dict) -> dict:
         return {
             "base_models": None,

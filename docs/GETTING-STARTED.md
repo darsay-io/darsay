@@ -46,9 +46,13 @@ are about to spend disk.
 darsay estimate sshleifer/tiny-gpt2
 ```
 
-You get a pinned revision, a file count, a size, a disk verdict, and the
-exact `archive` command to run next. If free space is short, the command
-exits non-zero — it is a script-friendly guard, not just a printout.
+You get a pinned revision, a file count, a size, a download bar (styled
+like the live archive panel), a disk verdict, and the exact `archive`
+command to run next. If you already hold part of this source — a
+budget-stopped archive, an interrupted download — the bar shows how much
+is banked and only the remaining bytes count against your free space. If
+free space is short, the command exits non-zero — it is a script-friendly
+guard, not just a printout.
 
 ## 3. Keep it
 

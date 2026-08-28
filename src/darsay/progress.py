@@ -172,6 +172,32 @@ def render_bar(fraction: float | None, width: int) -> str:
     return _BAR_FULL * full + partial + _BAR_EMPTY * (width - full - 1)
 
 
+def styled_bar(fraction: float | None, width: int, *, color: bool) -> str:
+    """A ``render_bar`` bar in the panel's styling: cyan fill, dim remainder.
+
+    Shared by the live panel and static previews of it (``darsay estimate``),
+    so both render the same brand.
+    """
+    bar = render_bar(fraction, width)
+    if not color:
+        return bar
+    cyan = _CYAN if _truecolor() else _CYAN16
+    filled_to = len(bar.rstrip(_BAR_EMPTY))
+    return _paint(bar[:filled_to], cyan, enabled=True) + _paint(
+        bar[filled_to:], _DIM, enabled=True
+    )
+
+
+def emphasized(text: str, *, color: bool) -> str:
+    """Bold when color is on; the text unchanged otherwise."""
+    return _paint(text, _BOLD, enabled=color)
+
+
+def dimmed(text: str, *, color: bool) -> str:
+    """Dim when color is on; the text unchanged otherwise."""
+    return _paint(text, _DIM, enabled=color)
+
+
 def render_sparkline(rates: list[float], width: int = _SPARK_POINTS) -> str:
     if width <= 0:
         return ""
@@ -226,15 +252,9 @@ def snapshot_lines(snap: dict, *, width: int = 80, color: bool = False) -> list[
     never shift columns as digits roll over.
     """
     width = max(40, width)
-    cyan = _CYAN if _truecolor() else _CYAN16
     fraction = snap.get("fraction")
     bar_width = min(28, max(12, width - 42))
-    bar = render_bar(fraction, bar_width)
-    if color:
-        filled_to = len(bar.rstrip(_BAR_EMPTY))
-        bar = _paint(bar[:filled_to], cyan, enabled=True) + _paint(
-            bar[filled_to:], _DIM, enabled=True
-        )
+    bar = styled_bar(fraction, bar_width, color=color)
     percent = _paint(format_percent(fraction), _BOLD, enabled=color)
     done = human_size(snap.get("done_bytes") or 0)
     total = snap.get("total_bytes") or 0

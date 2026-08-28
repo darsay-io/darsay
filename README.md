@@ -142,6 +142,8 @@ Qwen/Qwen3.8-27B @ main -> 1d4bf0f2ff60
   payload:      32 files, 51.8 GiB
   engines:      transformers
   completeness: complete
+  download:     ░░░░░░░░░░░░░░░░░░░░░░░░    0.0%   0 B / 51.8 GiB
+                nothing banked yet — full 51.8 GiB in 32 files to fetch
   bundle:       ~/darsay/qwen--qwen3.8-27b/1d4bf0f2ff60  (new)
   disk:         needs ~55.5 GiB, free 1022.6 GiB — OK
 
@@ -150,7 +152,16 @@ To archive: darsay archive Qwen/Qwen3.8-27B
 
 Exits non-zero when free space is insufficient, so it doubles as a guard
 in scripts. `--variants` lists the quantized ecosystem.
-`--include '*Q4_K_M*'` prices one file inside a huge GGUF pack.
+`--include '*Q4_K_M*'` prices one file inside a huge GGUF pack. When a
+partial archive already exists, the download block prices the resume
+instead — verified, partial, and unverified bytes are banked, and only
+the remainder counts against disk:
+
+```
+  download:     ██████▋░░░░░░░░░░░░░░░░░   27.4%   14.2 GiB / 51.8 GiB
+                banked 14.2 GiB = 12.1 GiB verified in 8 files + 2.1 GiB partial in 1 file
+                still to fetch 37.6 GiB in 24 files
+```
 
 **2. Archive** — pin a revision, fetch bytes, hash them, write the manifest.
 

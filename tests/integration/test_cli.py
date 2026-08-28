@@ -21,7 +21,113 @@ def test_cli_estimate_json_and_human(vault, test_provider, capsys):
     human = capsys.readouterr().out
     assert "test:acme/toy" in human
     assert "payload:" in human
+    assert "download:" in human
+    assert "nothing banked yet" in human
     assert "To archive:" in human
+
+
+def test_cli_estimate_reports_banked_transfer_state(vault, test_provider, capsys):
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    assert (
+        main(
+            [
+                "--vault",
+                str(vault),
+                "archive",
+                "test:acme/toy",
+                "--max-bytes",
+                "1",
+                "--jobs",
+                "1",
+            ]
+        )
+        == 10
+    )
+    capsys.readouterr()
+
+    # Bank a resumable partial for one still-missing file, as an interrupted
+    # provider download would.
+    bundle_dir = next((vault / "test--acme--toy").iterdir())
+    weight = "model.safetensors"
+    incomplete = bundle_dir / "model" / ".cache" / "test" / f"{weight}.incomplete"
+    incomplete.parent.mkdir(parents=True, exist_ok=True)
+    incomplete.write_bytes(files[weight][: len(files[weight]) // 2])
+
+    assert main(["--vault", str(vault), "estimate", "test:acme/toy", "--json"]) == 0
+    out = capsys.readouterr().out
+    transfer = json.loads(out[out.index("{") :])["transfer"]
+    assert transfer["status"] == "in_progress"
+    assert transfer["has_ledger"] is True
+    sizes = transfer["bytes"]
+    assert sizes["verified"] > 0
+    assert sizes["partial"] == len(files[weight]) // 2
+    assert sizes["banked"] == sizes["verified"] + sizes["unverified"] + sizes["partial"]
+    assert sizes["banked"] + sizes["remaining_network"] == sizes["total"]
+    assert transfer["pinned_revision"] == "a" * 40
+
+    assert main(["--vault", str(vault), "estimate", "test:acme/toy"]) == 0
+    human = capsys.readouterr().out
+    assert "banked" in human
+    assert "partial" in human
+    assert "still to fetch" in human
+    assert "in progress — archive resumes here" in human
+    assert "more," in human  # disk line prices only the remaining bytes
+
+
+def test_cli_estimate_adopts_ledgerless_payload(vault, test_provider, capsys):
+    test_provider.add_repo("acme/toy", model_files())
+    assert (
+        main(
+            [
+                "--vault",
+                str(vault),
+                "archive",
+                "test:acme/toy",
+                "--max-bytes",
+                "1",
+                "--jobs",
+                "1",
+            ]
+        )
+        == 10
+    )
+    bundle_dir = next((vault / "test--acme--toy").iterdir())
+    (bundle_dir / "transfer.json").unlink()
+    capsys.readouterr()
+
+    assert main(["--vault", str(vault), "estimate", "test:acme/toy", "--json"]) == 0
+    out = capsys.readouterr().out
+    data = json.loads(out[out.index("{") :])
+    transfer = data["transfer"]
+    assert transfer["has_ledger"] is False
+    assert transfer["bytes"]["verified"] == 0
+    assert transfer["bytes"]["unverified"] > 0
+    assert data["bundle"]["state"] == "adoptable"
+
+    assert main(["--vault", str(vault), "estimate", "test:acme/toy"]) == 0
+    human = capsys.readouterr().out
+    assert "unverified" in human
+    assert "no transfer ledger" in human
+
+
+def test_cli_estimate_registered_bundle_has_nothing_to_fetch(
+    vault, test_provider, capsys
+):
+    test_provider.add_repo("acme/toy", model_files())
+    archive_quiet("test:acme/toy", vault=vault)
+    assert main(["--vault", str(vault), "estimate", "test:acme/toy", "--json"]) == 0
+    out = capsys.readouterr().out
+    data = json.loads(out[out.index("{") :])
+    assert data["transfer"]["status"] == "registered"
+    assert data["transfer"]["bytes"]["remaining_network"] == 0
+    assert data["disk"]["needed_bytes"] == 0
+    assert data["bundle"]["state"] == "registered"
+
+    assert main(["--vault", str(vault), "estimate", "test:acme/toy"]) == 0
+    human = capsys.readouterr().out
+    assert "100.0%" in human
+    assert "bundle already archived — nothing left to fetch" in human
 
 
 def test_cli_list_partial_bundle(vault, test_provider, capsys):

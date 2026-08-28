@@ -128,7 +128,12 @@ verified / partial / missing, bytes already banked inside partials,
 estimated remaining network transfer, and a disk preflight of remaining
 bytes against free space (reusing `estimate`'s headroom check). `--dry-run`
 stops here — this is the rsync `-n` of the system, and the answer to "what
-have we got, what remains" at any moment.
+have we got, what remains" at any moment. `darsay estimate` performs the
+same read-only classification (without hashing, so adoptable bytes report
+as `unverified`) and renders it as a static download bar in the live
+panel's style: banked bytes over the pinned total, the
+verified/unverified/partial breakdown, and a disk verdict that counts
+only the remaining network bytes.
 
 **Transfer** — fetch `remaining` in ascending size order (stable tie-break
 by path): configs, tokenizer, card, and license complete in the first

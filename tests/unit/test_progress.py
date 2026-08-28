@@ -20,6 +20,7 @@ from darsay.progress import (
     render_sparkline,
     snapshot_lines,
     snapshot_log_line,
+    styled_bar,
 )
 
 
@@ -82,6 +83,16 @@ def test_render_bar_bounds_and_partial_cell():
     assert mid.startswith("█")
     assert mid.endswith("░")
     assert render_bar(0.42, 0) == ""
+
+
+def test_styled_bar_matches_render_bar_and_paints_fill():
+    assert styled_bar(0.5, 10, color=False) == render_bar(0.5, 10)
+    colored = styled_bar(0.5, 10, color=True)
+    assert "\033[" in colored
+    stripped = colored
+    for code in ("\033[38;2;34;211;238m", "\033[96m", "\033[2m", "\033[0m"):
+        stripped = stripped.replace(code, "")
+    assert stripped == render_bar(0.5, 10)
 
 
 def test_sparkline_pads_and_scales():

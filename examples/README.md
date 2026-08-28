@@ -73,10 +73,17 @@ Typical output:
 Qwen/Qwen3.8-27B @ main -> 1d4bf0f2ff60
   parameters:   27.78B BF16
   payload:      32 files, 51.8 GiB
+  download:     ░░░░░░░░░░░░░░░░░░░░░░░░    0.0%   0 B / 51.8 GiB
+                nothing banked yet — full 51.8 GiB in 32 files to fetch
   disk:         needs ~55.5 GiB, free 1022.6 GiB — OK
 
 To archive: darsay archive Qwen/Qwen3.8-27B
 ```
+
+Re-estimating a source you have already partially archived prices the
+resume instead: the download bar shows how much is banked (verified,
+partial, and unverified-but-adoptable bytes) and the disk verdict counts
+only what still has to cross the network.
 
 Useful flags:
 

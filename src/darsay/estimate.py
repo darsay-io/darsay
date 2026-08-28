@@ -15,10 +15,12 @@ manifest's `query_limit` convention.
 from __future__ import annotations
 
 import shutil
+import sys
 from pathlib import Path
 
 from .archiver import bundle_dir_for, utc_now
 from .hydrate import detect_engines
+from .progress import color_enabled, dimmed, emphasized, format_percent, styled_bar
 from .readme_gen import human_params, human_size
 from .schema import check_completeness, payload_root_for
 from .sources import SourceError, SourceRef, get_provider, parse_source
@@ -46,6 +48,121 @@ def _format_breakdown(files: list[dict]) -> dict:
     return dict(
         sorted(by_ext.items(), key=lambda kv: (-kv[1]["total_size_bytes"], kv[0]))
     )
+
+
+def _existing_transfer(
+    ref: SourceRef,
+    revision: str | None,
+    vault: Path,
+    bundle_dir: Path,
+    files: list[dict],
+) -> dict | None:
+    """Read-only look at bytes this vault has already banked for the source.
+
+    Mirrors what ``archive`` would find on its next run: a registered bundle
+    at the pinned revision, an in-progress transfer ledger, or a ledger-less
+    payload that reconciliation would hash and adopt. Nothing is written or
+    hashed here, so ``unverified`` means a size match pending a digest check.
+    """
+    from .hashing import iter_payload_files
+    from .transfer import find_resume
+
+    root = payload_root_for(ref.artifact_type)
+    if (bundle_dir / "manifest.json").is_file():
+        total = sum(f["size"] or 0 for f in files)
+        count = len(files)
+        return {
+            "status": "registered",
+            "resume_dir": str(bundle_dir),
+            "has_ledger": False,
+            "pinned_revision": None,
+            "pinned_revision_ref": None,
+            "files": {
+                "total": count,
+                "verified": count,
+                "unverified": 0,
+                "partial": 0,
+                "missing": 0,
+            },
+            "bytes": {
+                "total": total,
+                "verified": total,
+                "unverified": 0,
+                "partial": 0,
+                "missing": 0,
+                "banked": total,
+                "remaining_network": 0,
+            },
+            "scratch_bytes": 0,
+        }
+    try:
+        resume = find_resume(vault, ref, revision, root)
+    except SystemExit:
+        # Ambiguous partials; archive will explain — price a fresh download.
+        return None
+    if resume is None:
+        return None
+    resume_dir, ledger = resume
+    payload_dir = resume_dir / root
+    if ledger is not None:
+        expected = ledger["expected"]
+        states = ledger["files"]
+        provider = get_provider(ledger.get("provider") or ref.provider)
+    else:
+        expected = [
+            {
+                "path": f["path"],
+                "size": f["size"],
+                "lfs_sha256": f["sha256"],
+                "git_sha1": f["git_sha1"],
+            }
+            for f in files
+        ]
+        states = {}
+        provider = get_provider(ref.provider)
+
+    present = dict(iter_payload_files(payload_dir)) if payload_dir.is_dir() else {}
+    counts = {"verified": 0, "unverified": 0, "partial": 0, "missing": 0}
+    sizes = {"verified": 0, "unverified": 0, "partial": 0, "missing": 0}
+    total = 0
+    scratch = 0
+    for item in expected:
+        size = item.get("size") or 0
+        total += size
+        path = present.get(item["path"])
+        size_ok = path is not None and (
+            item.get("size") is None or path.stat().st_size == size
+        )
+        state = states.get(item["path"]) or {}
+        if size_ok:
+            bucket = "verified" if state.get("status") == "verified" else "unverified"
+            counts[bucket] += 1
+            sizes[bucket] += size
+            continue
+        banked = min(provider.partial_bytes(payload_dir, item), size) if size else 0
+        if banked:
+            counts["partial"] += 1
+            sizes["partial"] += banked
+        else:
+            counts["missing"] += 1
+            sizes["missing"] += size
+        scratch = max(scratch, size)
+    banked_total = sizes["verified"] + sizes["unverified"] + sizes["partial"]
+    return {
+        "status": "in_progress",
+        "resume_dir": str(resume_dir),
+        "has_ledger": ledger is not None,
+        "pinned_revision": ledger["revision"] if ledger else None,
+        "pinned_revision_ref": ledger["revision_ref"] if ledger else None,
+        "files": {"total": len(expected), **counts},
+        "bytes": {
+            "total": total,
+            **sizes,
+            "banked": banked_total,
+            "remaining_network": max(0, total - banked_total),
+        },
+        "scratch_bytes": scratch,
+    }
 
 
 def estimate(
@@ -91,8 +208,14 @@ def estimate(
     completeness = check_completeness(repo_type, prospective_paths)
 
     bundle_dir = bundle_dir_for(vault, ref, snapshot.revision)
-    scratch = (largest["size"] or 0) if largest else 0
-    needed = total + scratch
+    transfer = _existing_transfer(ref, revision, vault, bundle_dir, files)
+    if transfer is not None:
+        remaining = transfer["bytes"]["remaining_network"]
+        scratch = transfer["scratch_bytes"]
+    else:
+        remaining = total
+        scratch = (largest["size"] or 0) if largest else 0
+    needed = remaining + scratch
     checked_path, free = _disk_probe(vault)
     if free >= needed * 1.1:
         verdict = "ok"
@@ -106,6 +229,14 @@ def estimate(
         if repo_type == "model" and primary_bytes
         else None
     )
+    if transfer is None:
+        bundle_state = "new"
+    elif transfer["status"] == "registered":
+        bundle_state = "registered"
+    elif transfer["has_ledger"]:
+        bundle_state = "resuming"
+    else:
+        bundle_state = "adoptable"
     est = {
         "as_of": utc_now(),
         "artifact_type": repo_type,
@@ -135,11 +266,13 @@ def estimate(
             "largest_file": largest,
             "unknown_size_count": sum(1 for f in files if f["size"] is None),
         },
+        "transfer": transfer,
         "engines": engines,
         "completeness": completeness,
         "bundle": {
-            "dir": str(bundle_dir),
+            "dir": transfer["resume_dir"] if transfer else str(bundle_dir),
             "exists": (bundle_dir / "manifest.json").is_file(),
+            "state": bundle_state,
         },
         "estimates": {
             "download_scratch_bytes": scratch,
@@ -192,6 +325,72 @@ def estimate_repo(
     )
 
 
+def _n_files(n: int) -> str:
+    return f"{n} file{'s' if n != 1 else ''}"
+
+
+def _download_lines(est: dict, *, width: int = 80, color: bool = False) -> list[str]:
+    """The download block: a static preview of the archive transfer panel.
+
+    Same bar, percent, and ``done / total`` layout as ``progress.snapshot_lines``,
+    fed from banked-vs-remaining state instead of a live meter, with dim
+    breakdown lines showing how banked bytes work into the total.
+    """
+    transfer = est.get("transfer")
+    pay = est["payload"]
+    total = transfer["bytes"]["total"] if transfer else pay["total_size_bytes"]
+    files_total = transfer["files"]["total"] if transfer else pay["file_count"]
+    label = f"  {'download:':<14}"
+    indent = " " * len(label)
+    if not total:
+        return [label + "nothing to fetch (no sized files upstream)"]
+
+    banked = transfer["bytes"]["banked"] if transfer else 0
+    remaining = transfer["bytes"]["remaining_network"] if transfer else total
+    fraction = min(1.0, banked / total)
+    bar_width = min(28, max(12, max(60, width) - 56))
+    bar = styled_bar(fraction, bar_width, color=color)
+    percent = emphasized(format_percent(fraction), color=color)
+    bytes_part = f"{human_size(banked)} / {emphasized(human_size(total), color=color)}"
+    lines = [f"{label}{bar}  {percent}   {bytes_part}"]
+
+    def note(text: str) -> None:
+        lines.append(indent + dimmed(text, color=color))
+
+    if transfer is None:
+        note(
+            f"nothing banked yet — full {human_size(total)} in {_n_files(files_total)} to fetch"
+        )
+        return lines
+    if transfer["status"] == "registered":
+        note("bundle already archived — nothing left to fetch")
+        return lines
+
+    sizes, counts = transfer["bytes"], transfer["files"]
+    segments = [
+        f"{human_size(sizes[bucket])} {bucket} in {_n_files(counts[bucket])}"
+        for bucket in ("verified", "unverified", "partial")
+        if counts[bucket]
+    ]
+    if segments:
+        note(f"banked {human_size(banked)} = " + " + ".join(segments))
+    if remaining:
+        fetch_files = counts["partial"] + counts["missing"]
+        note(f"still to fetch {human_size(remaining)} in {_n_files(fetch_files)}")
+    else:
+        note("nothing left to fetch — next archive run verifies and registers")
+    if not transfer["has_ledger"]:
+        note("no transfer ledger — archive re-hashes the payload and adopts matches")
+    pinned = transfer["pinned_revision"]
+    estimated = est["source"]["revision"]
+    if pinned and pinned != estimated:
+        note(
+            f"resumes pinned revision {pinned[:12]} — "
+            f"upstream {transfer['pinned_revision_ref']} has since moved to {estimated[:12]}"
+        )
+    return lines
+
+
 def print_estimate(est: dict, progress=print) -> None:
     p = progress
     src, pay = est["source"], est["payload"]
@@ -240,17 +439,14 @@ def print_estimate(est: dict, progress=print) -> None:
     else:
         p("  parameters:   not published upstream")
 
-    def n_files(n):
-        return f"{n} file{'s' if n != 1 else ''}"
-
     primary_key, primary_label = (
         ("data", "data") if is_dataset else ("weights", "weights")
     )
     p(
-        f"  payload:      {n_files(pay['file_count'])}, {human_size(pay['total_size_bytes'])}"
+        f"  payload:      {_n_files(pay['file_count'])}, {human_size(pay['total_size_bytes'])}"
     )
     p(
-        f"                {primary_label} {human_size(pay[primary_key]['bytes'])} in {n_files(pay[primary_key]['count'])}"
+        f"                {primary_label} {human_size(pay[primary_key]['bytes'])} in {_n_files(pay[primary_key]['count'])}"
         + (
             f" (largest {human_size(pay['largest_file']['size'])}: {pay['largest_file']['path']})"
             if pay["largest_file"]
@@ -258,7 +454,7 @@ def print_estimate(est: dict, progress=print) -> None:
         )
     )
     p(
-        f"                support {human_size(pay['support']['bytes'])} in {n_files(pay['support']['count'])}"
+        f"                support {human_size(pay['support']['bytes'])} in {_n_files(pay['support']['count'])}"
     )
     if pay["unknown_size_count"]:
         p(
@@ -275,6 +471,11 @@ def print_estimate(est: dict, progress=print) -> None:
         + (f" (missing: {missing})" if missing else "")
     )
 
+    color = color_enabled(sys.stdout)
+    width = shutil.get_terminal_size(fallback=(80, 24)).columns
+    for line in _download_lines(est, width=width, color=color):
+        p(line)
+
     e = est["estimates"]
     if is_dataset:
         p(
@@ -287,17 +488,26 @@ def print_estimate(est: dict, progress=print) -> None:
         )
 
     b, d = est["bundle"], est["disk"]
-    p(
-        f"  bundle:       {b['dir']}"
-        + ("  (EXISTS — archive would need --force)" if b["exists"] else "  (new)")
-    )
+    bundle_note = {
+        "registered": "  (EXISTS — archive would need --force)",
+        "resuming": "  (in progress — archive resumes here)",
+        "adoptable": "  (payload present without a ledger — archive re-hashes and adopts)",
+        "new": "  (new)",
+    }[b.get("state") or ("registered" if b["exists"] else "new")]
+    p(f"  bundle:       {b['dir']}{bundle_note}")
     verdict_note = {
         "ok": "OK",
         "tight": "TIGHT — under 10% headroom",
         "insufficient": "INSUFFICIENT",
     }[d["verdict"]]
+    transfer = est.get("transfer")
+    more = (
+        " more"
+        if transfer and transfer["bytes"]["banked"] and d["needed_bytes"]
+        else ""
+    )
     p(
-        f"  disk:         needs ~{human_size(d['needed_bytes'])}, "
+        f"  disk:         needs ~{human_size(d['needed_bytes'])}{more}, "
         f"free {human_size(d['free_bytes'])} at {d['checked_path']} — {verdict_note}"
     )
 
