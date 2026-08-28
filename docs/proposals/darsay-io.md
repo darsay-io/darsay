@@ -131,6 +131,8 @@ darsay’s longevity thesis ([docs/DESIGN.md](https://github.com/darsay-io/darsa
 
 25. **No Turnstile in v1.** Create-board is a button; D1’s 100 creates/UTC day is the spam limit. Wire a later hook if bots appear. Not a CAPTCHA at launch.
 
+26. **Wrangler is the provisioning tool; no Terraform or Ansible in v1.** `wrangler.jsonc` + `migrations/` is the source of truth for the Worker and D1. Dashboard/registrar work that Wrangler cannot own stays in `website/ops/RUNBOOK.md` (nameservers, `www` → apex Redirect Rule, Access on preview, `wrangler login`). Create the two D1 databases explicitly and commit `database_id` values — do not omit IDs for Wrangler auto-provision (prod and preview must never share data; `d1 migrations apply --remote` needs the UUID). Revisit Terraform for **zone** resources only if there is a second account/domain, unattended CI for Access/Redirect/DNS, or more than one person recreating the zone. Never let Terraform and Wrangler both manage the Worker.
+
 ---
 
 ## Proposed Design
@@ -862,6 +864,14 @@ Optional later: `If-Match` on board `updated` → 409. Not required to ship.
 
 **Keep D1.** KV is the obvious alternative and loses on uniqueness and operator SQL. Revisit only if D1’s single-threaded writer becomes a measured problem (it will not at thousands of rows).
 
+### 10. Terraform or Ansible for Cloudflare / D1
+
+**Pros.** Zone Redirect Rules, Access, and DNS would be in a plan file; a second operator could `apply` without reading the runbook; recreating an account would be closer to one command.
+
+**Cons.** One operator, one zone, one Worker, two D1 databases. Terraform is a second source of truth and a state backend for ~5 resources. Cloudflare’s own guidance: Wrangler and Terraform must not manage the same Worker. Ansible assumes hosts and SSH; there are none. Wrangler auto-provision (omit `database_id`, let `deploy` create D1) looks like less typing but collapses the prod/preview split and still requires the UUID in config before remote migrations.
+
+**Keep Wrangler + `ops/RUNBOOK.md`.** Recreating the account is a short operator procedure, not an IaC project. Revisit as in Key Decision 26.
+
 ---
 
 ## Security & Privacy Considerations
@@ -948,7 +958,7 @@ When darsay tags `v0.7.1`, a small `darsay-io` PR bumps `docs.lock.json`. That P
 
 ## Open Questions
 
-Closed and moved to [Key Decisions](#key-decisions): include UI (advanced-only), `catalog_id` slugify, copy-URL checkbox, no catalog import in v1, generated docs committed, timestamp/`desire` wire format, D1 create/mutate/lookup caps, PR 4 safety, blob catalog download, CSP report-only, repo name `darsay-io`, holders as one string, hard delete, Hub estimate on add, docs from CLI tags, no official board, no HTTPS adopt in v1, no Rate Limit bindings on Free, no Turnstile in v1.
+Closed and moved to [Key Decisions](#key-decisions): include UI (advanced-only), `catalog_id` slugify, copy-URL checkbox, no catalog import in v1, generated docs committed, timestamp/`desire` wire format, D1 create/mutate/lookup caps, PR 4 safety, blob catalog download, CSP report-only, repo name `darsay-io`, holders as one string, hard delete, Hub estimate on add, docs from CLI tags, no official board, no HTTPS adopt in v1, no Rate Limit bindings on Free, no Turnstile in v1, Wrangler (not Terraform/Ansible) as v1 provisioning.
 
 None remaining.
 
