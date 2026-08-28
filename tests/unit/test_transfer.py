@@ -76,6 +76,39 @@ def test_network_counter_defers_first_overage():
         counter.add(1)
 
 
+def test_network_counter_poll_raises_only_banked_stop():
+    session = {"bytes_network": 0}
+    ctrl = StopController()
+    counter = NetworkCounter(session, ctrl)
+    counter.poll()  # nothing banked, nothing raised
+    ctrl.interrupted = True
+    counter.add(10)  # banks the stop; that chunk's bytes are durable
+    with pytest.raises(CleanStop) as exc:
+        counter.poll()
+    assert exc.value.reason == "interrupt"
+
+
+def test_sigint_escalates_across_presses(monkeypatch):
+    import os
+    import signal
+    import threading
+
+    if threading.current_thread() is not threading.main_thread():
+        pytest.skip("signal delivery needs the main thread")
+
+    exits: list[int] = []
+    monkeypatch.setattr(os, "_exit", lambda code: exits.append(code))
+    ctrl = StopController()
+    with ctrl.sigint_handler():
+        signal.raise_signal(signal.SIGINT)
+        assert ctrl.interrupted is True
+        assert ctrl.sigints == 1
+        with pytest.raises(KeyboardInterrupt):
+            signal.raise_signal(signal.SIGINT)
+        signal.raise_signal(signal.SIGINT)
+    assert exits == [130]
+
+
 def test_payload_path_rejects_unsafe():
     root = __import__("pathlib").Path("/tmp/payload")
     with pytest.raises(SystemExit, match="unsafe path"):

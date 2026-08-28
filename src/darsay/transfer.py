@@ -18,7 +18,7 @@ import subprocess
 import sys
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
 
@@ -55,13 +55,20 @@ class PartialTransfer(Exception):
 
 
 class StopController:
-    """Coordinate byte/time budgets and a non-destructive SIGINT."""
+    """Coordinate byte/time budgets and a non-destructive SIGINT.
+
+    Ctrl-C escalates: the first press requests a clean stop (checked at every
+    transfer callback and hash chunk, so it lands fast), the second raises
+    KeyboardInterrupt in the main thread to abort even a stalled connection,
+    and a third hard-exits the process.
+    """
 
     def __init__(self, max_bytes: int | None = None, max_minutes: float | None = None):
         self.max_bytes = max_bytes
         self.max_seconds = max_minutes * 60 if max_minutes is not None else None
         self.deadline: float | None = None
         self.interrupted = False
+        self.sigints = 0
 
     def start(self) -> None:
         if self.max_seconds is not None:
@@ -86,7 +93,18 @@ class StopController:
         previous = signal.getsignal(signal.SIGINT)
 
         def request_stop(_signum, _frame):
-            self.interrupted = True
+            self.sigints += 1
+            if self.sigints == 1:
+                self.interrupted = True
+                return
+            if self.sigints == 2:
+                # The handler runs in the main thread, so this aborts even a
+                # blocked read; workers stop at their next callback check.
+                raise KeyboardInterrupt
+            # Leave the terminal usable even though cleanup is skipped.
+            if os.isatty(2):
+                os.write(2, b"\x1b[?2026l\x1b[?25h\r\ndarsay: killed\r\n")
+            os._exit(130)
 
         signal.signal(signal.SIGINT, request_stop)
         try:
@@ -408,8 +426,14 @@ def _digest_matches(expected: dict, hashes: dict) -> bool | None:
     return None
 
 
-def _verified_record(expected: dict, path: Path, source: str, attempts: int) -> dict:
-    hashes = hash_file(path, with_git_sha1=True)
+def _verified_record(
+    expected: dict,
+    path: Path,
+    source: str,
+    attempts: int,
+    interrupt_check=None,
+) -> dict:
+    hashes = hash_file(path, with_git_sha1=True, interrupt_check=interrupt_check)
     return {
         "status": "verified",
         "size": path.stat().st_size,
@@ -452,11 +476,13 @@ def reconcile(
     progress=print,
     apply: bool = True,
     rehash: bool = False,
+    stop: StopController | None = None,
 ) -> dict:
     """Reconcile ledger acceleration state with authoritative payload bytes."""
     payload_dir.mkdir(parents=True, exist_ok=True)
     expected_by_path = {item["path"]: item for item in ledger["expected"]}
     present_by_path = dict(iter_payload_files(payload_dir))
+    interrupt_check = (lambda: stop.check(session)) if stop is not None else None
 
     for relative in sorted(set(present_by_path) - set(expected_by_path)):
         path = present_by_path[relative]
@@ -470,6 +496,8 @@ def reconcile(
     adopted_files = 0
     adopted_bytes = 0
     for relative, expected in sorted(expected_by_path.items()):
+        if interrupt_check is not None:
+            interrupt_check()
         path = _payload_path(payload_dir, relative)
         state = ledger["files"].get(relative) or {}
         expected_size = expected.get("size")
@@ -485,6 +513,7 @@ def reconcile(
                 path,
                 str(state.get("source") or "adopted"),
                 int(state.get("attempts") or 0),
+                interrupt_check=interrupt_check,
             )
             matches = record["verified_against_upstream"]
             if matches is None and state.get("sha256"):
@@ -525,7 +554,11 @@ def reconcile(
                 _discard_payload_file(path, payload_dir)
         elif path.is_file():
             record = _verified_record(
-                expected, path, "adopted", int(state.get("attempts") or 0)
+                expected,
+                path,
+                "adopted",
+                int(state.get("attempts") or 0),
+                interrupt_check=interrupt_check,
             )
             if record["verified_against_upstream"] is not False:
                 ledger["files"][relative] = record
@@ -733,6 +766,12 @@ class NetworkCounter:
                 except CleanStop as stop:
                     self.pending_stop = stop
 
+    def poll(self) -> None:
+        """Raise a stop banked by an earlier callback (its bytes are durable)."""
+        stop = self.pending_stop
+        if stop is not None:
+            raise stop
+
 
 def _download_one(
     expected: dict,
@@ -753,6 +792,11 @@ def _download_one(
     events = []
     retries = 0
     record = None
+    interrupt_check = (
+        (lambda: stop_controller.check(counter.session))
+        if stop_controller is not None
+        else None
+    )
     try:
         if meter is not None:
             meter.set_current(relative, expected.get("size"), phase="download")
@@ -769,6 +813,7 @@ def _download_one(
                     path,
                     f"local:{candidate['bundle_id']}",
                     attempts,
+                    interrupt_check=interrupt_check,
                 )
             except OSError as exc:
                 _discard_payload_file(path, payload_dir)
@@ -825,7 +870,9 @@ def _download_one(
                 raise
             if meter is not None:
                 meter.set_current(relative, expected.get("size"), phase="hashing")
-            record = _verified_record(expected, path, "network", attempts)
+            record = _verified_record(
+                expected, path, "network", attempts, interrupt_check=interrupt_check
+            )
             if record["verified_against_upstream"] is not False:
                 break
             events.append(
@@ -959,7 +1006,9 @@ def _transfer_small_files(
     )
     clean_stop = None
     first_error = None
-    with ThreadPoolExecutor(max_workers=jobs) as executor:
+    cancelled = False
+    executor = ThreadPoolExecutor(max_workers=jobs)
+    try:
         futures = {
             executor.submit(
                 _download_one,
@@ -973,13 +1022,20 @@ def _transfer_small_files(
             ): expected
             for expected in small
         }
+        # Keep draining after a stop so results already earned by running
+        # workers still land in the ledger; queued work is cancelled instead
+        # of being started only to fail its own stop check.
         for future in as_completed(futures):
             expected = futures[future]
             try:
                 result = future.result()
+            except CancelledError:
+                continue
             except CleanStop as stop:
                 if clean_stop is None or stop.reason == "interrupt":
                     clean_stop = stop
+            except KeyboardInterrupt:
+                raise
             except BaseException as exc:
                 if first_error is None:
                     first_error = exc
@@ -999,6 +1055,12 @@ def _transfer_small_files(
                     except CleanStop as stop:
                         if clean_stop is None or stop.reason == "interrupt":
                             clean_stop = stop
+            if (clean_stop is not None or first_error is not None) and not cancelled:
+                cancelled = True
+                for pending in futures:
+                    pending.cancel()
+    finally:
+        executor.shutdown(wait=True, cancel_futures=True)
     if first_error is not None:
         raise first_error
     if clean_stop is not None:

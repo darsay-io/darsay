@@ -71,3 +71,23 @@ def test_iter_payload_files_skips_cache_and_sorts(tmp_path):
     (nested / "incomplete").write_bytes(b"not payload")
     names = [rel for rel, _path in iter_payload_files(payload)]
     assert names == ["a.txt", "z.txt"]
+
+
+def test_hash_file_interrupt_check_can_abort(tmp_path):
+    from darsay.hashing import CHUNK_SIZE
+
+    path = tmp_path / "big.bin"
+    path.write_bytes(b"\0" * (CHUNK_SIZE * 33))
+
+    class Abort(Exception):
+        pass
+
+    def raise_abort():
+        raise Abort
+
+    import pytest
+
+    with pytest.raises(Abort):
+        hash_file(path, with_blake3=False, interrupt_check=raise_abort)
+    # A None check hashes the same file normally.
+    assert hash_file(path, with_blake3=False)["sha256"]

@@ -306,6 +306,11 @@ def cmd_archive(args) -> int:
             "Re-run the same archive command to continue from verified and partial bytes."
         )
         return 10
+    except KeyboardInterrupt:
+        # Outside the transfer window (e.g. during pin) nothing durable has
+        # started, so a plain interrupt exit is honest.
+        print("\nInterrupted.", file=sys.stderr)
+        return 130
     if bundle is None:  # --dry-run printed the plan and intentionally did not register
         return 0
     bundle_id = f"{bundle.parent.name}@{bundle.name}"

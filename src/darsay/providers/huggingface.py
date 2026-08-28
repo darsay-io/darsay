@@ -367,6 +367,10 @@ class HuggingFaceProvider(SourceProvider):
                 result = super().update(n)
                 if self._meter is not None:
                     self._meter.note()
+                if not self._darsay_xet:
+                    # A stop banked by the previous chunk's transfer callback
+                    # can raise here; that chunk's bytes are already on disk.
+                    counter.poll()
                 return result
 
             def update_transfer(self, amount=1):

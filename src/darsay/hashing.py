@@ -23,9 +23,16 @@ except ImportError:
 
 
 def hash_file(
-    path: Path, with_blake3: bool = True, with_git_sha1: bool = False
+    path: Path,
+    with_blake3: bool = True,
+    with_git_sha1: bool = False,
+    interrupt_check=None,
 ) -> dict:
-    """Hash one file in a single pass. Returns {"sha256": ..., "blake3": ...?, "git_sha1": ...?}."""
+    """Hash one file in a single pass. Returns {"sha256": ..., "blake3": ...?, "git_sha1": ...?}.
+
+    ``interrupt_check`` is called every 32 MiB; it may raise to abandon the
+    hash (the file on disk is untouched and can simply be re-hashed later).
+    """
     sha256 = hashlib.sha256()
     b3 = _blake3.blake3() if (with_blake3 and HAVE_BLAKE3) else None
     git = None
@@ -33,8 +40,13 @@ def hash_file(
         git = hashlib.sha1()
         git.update(b"blob %d\0" % path.stat().st_size)
 
+    chunks = 0
     with open(path, "rb") as f:
         while chunk := f.read(CHUNK_SIZE):
+            if interrupt_check is not None:
+                chunks += 1
+                if chunks % 32 == 0:
+                    interrupt_check()
             sha256.update(chunk)
             if b3 is not None:
                 b3.update(chunk)

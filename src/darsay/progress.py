@@ -5,13 +5,28 @@ module tracks the whole payload — percent, bytes in / total, smoothed rate,
 time remaining, files done, the file now in flight — and draws a compact
 three-line panel on a TTY. Piped runs emit a status line every few seconds.
 
+Panel discipline (the terminal is shared, so the panel defends itself):
+
+- Every numeric field renders at a fixed width, so digit rollovers
+  (9.9 → 10.0 MiB/s) never shift columns.
+- Frames repaint in place with per-line erases inside a synchronized-output
+  block — no whole-panel clear, no flicker.
+- While the panel is live, ``sys.stdout``/``sys.stderr`` writes from other
+  code (Hub client warnings, logging) are captured and printed *above* the
+  panel instead of tearing through it, and the terminal's ``^C`` echo is
+  suppressed.
+- The rate history sparkline advances one cell per ``_SPARK_INTERVAL_S``,
+  so it shows minutes of trend, not the last few chunks.
+
 The Hub client still owns HTTP Range and retries; we only consume its
 tqdm callbacks and render.
 """
 
 from __future__ import annotations
 
+import io
 import os
+import re
 import shutil
 import sys
 import threading
@@ -32,7 +47,15 @@ _RESET = "\033[0m"
 _HIDE_CURSOR = "\033[?25l"
 _SHOW_CURSOR = "\033[?25h"
 _CLEAR_DOWN = "\033[J"
-_UP = "\033[{n}A"
+_ERASE_LINE = "\033[2K"
+# Cursor to column 1, n lines up — the first line of the drawn panel.
+_PANEL_HOME = "\033[{n}F"
+# Synchronized output: terminals that support it apply the frame atomically;
+# the rest ignore the private-mode sequence.
+_SYNC_ON = "\033[?2026h"
+_SYNC_OFF = "\033[?2026l"
+
+_ANSI_RE = re.compile(r"\033\[[0-9;?]*[A-Za-z]")
 
 _BAR_FULL = "█"
 _BAR_EMPTY = "░"
@@ -44,7 +67,10 @@ _STALL_AFTER_S = 15.0
 _LIVE_HZ = 0.1
 _LOG_INTERVAL_S = 10.0
 _SPARK_POINTS = 8
-_PANEL_LINES = 3
+# One sparkline cell per interval: 8 cells ≈ 40s of rate history.
+_SPARK_INTERVAL_S = 5.0
+_RATE_WIDTH = len("1023.9 MiB/s")
+_ETA_WIDTH = len("12h 26 min left")
 
 ProgressFn = Callable[..., None]
 
@@ -82,6 +108,10 @@ def _paint(text: str, *codes: str, enabled: bool) -> str:
     if not enabled or not codes:
         return text
     return f"{''.join(codes)}{text}{_RESET}"
+
+
+def _visible_len(text: str) -> int:
+    return len(_ANSI_RE.sub("", text))
 
 
 def human_rate(bytes_per_sec: float | None) -> str:
@@ -175,8 +205,26 @@ def format_percent(fraction: float | None) -> str:
     return f"{min(100.0, max(0.0, fraction * 100.0)):5.1f}%"
 
 
+def _size_field_width(total: int) -> int:
+    """Widest ``human_size`` rendering for any byte count from 0 to total.
+
+    Right-aligning the moving counter in this field keeps the ``/ total``
+    column fixed even across unit rollovers ("1024.0 KiB" → "1.0 MiB").
+    """
+    width = len(human_size(total))
+    boundary = 1024**2
+    while boundary <= total:
+        width = max(width, len(human_size(boundary - 1)))
+        boundary *= 1024
+    return width
+
+
 def snapshot_lines(snap: dict, *, width: int = 80, color: bool = False) -> list[str]:
-    """Render the three-line panel. Always returns exactly three lines."""
+    """Render the three-line panel. Always returns exactly three lines.
+
+    Every numeric field has a stable width for a given transfer, so repaints
+    never shift columns as digits roll over.
+    """
     width = max(40, width)
     cyan = _CYAN if _truecolor() else _CYAN16
     fraction = snap.get("fraction")
@@ -190,48 +238,59 @@ def snapshot_lines(snap: dict, *, width: int = 80, color: bool = False) -> list[
     percent = _paint(format_percent(fraction), _BOLD, enabled=color)
     done = human_size(snap.get("done_bytes") or 0)
     total = snap.get("total_bytes") or 0
-    bytes_part = f"{done} / {human_size(total)}" if total else f"{done} downloaded"
+    if total:
+        bytes_part = f"{done:>{_size_field_width(total)}} / {human_size(total)}"
+    else:
+        bytes_part = f"{done} downloaded"
     line1 = f"  {bar}  {percent}   {bytes_part}"
 
-    rate = human_rate(snap.get("rate"))
+    rate = f"{human_rate(snap.get('rate')):>{_RATE_WIDTH}}"
     spark = render_sparkline(list(snap.get("rate_history") or []), _SPARK_POINTS)
-    eta = _paint(
-        human_eta(snap.get("eta_seconds"), stalled=bool(snap.get("stalled"))),
-        _BOLD,
-        enabled=color,
-    )
+    if snap.get("interrupted"):
+        eta_text = "stopping (^C aborts)"
+    else:
+        eta_text = human_eta(snap.get("eta_seconds"), stalled=bool(snap.get("stalled")))
+    eta = _paint(f"{eta_text:<{_ETA_WIDTH}}", _BOLD, enabled=color)
     budget = snap.get("budget_bytes")
     if budget:
-        tail = (
-            f"budget {human_size(snap.get('budget_used') or 0)} / {human_size(budget)}"
-        )
+        used = human_size(snap.get("budget_used") or 0)
+        tail = f"budget {used:>{_size_field_width(budget)}} / {human_size(budget)}"
     else:
         tail = f"{human_duration(snap.get('elapsed') or 0)} elapsed"
     line2 = f"  {rate}  {spark}   {eta}   {tail}"
 
     files_done = int(snap.get("files_done") or 0)
     files_total = int(snap.get("files_total") or 0)
-    files = f"{files_done}/{files_total} files" if files_total else "files"
+    if files_total:
+        files = f"{files_done:>{len(str(files_total))}}/{files_total} files"
+    else:
+        files = "files"
     current = snap.get("current") or []
     if not current:
         detail = files
     elif len(current) == 1:
         item = current[0]
-        name = _truncate_end(str(item.get("path") or ""), max(12, width - 36))
+        path = str(item.get("path") or "")
         phase = item.get("phase") or "download"
+        name_budget = max(12, width - _visible_len(files) - 8)
         if phase == "hashing":
-            detail = f"{files} · hashing {name}"
+            detail = f"{files} · hashing {_truncate_end(path, name_budget)}"
         else:
             file_total = item.get("total")
             file_n = int(item.get("n") or 0)
             if file_total:
-                frac = min(1.0, file_n / file_total) if file_total else 0.0
-                detail = (
-                    f"{files} · {name}  {format_percent(frac).strip()}  "
-                    f"{human_size(file_n)} / {human_size(file_total)}"
+                file_width = _size_field_width(int(file_total))
+                file_part = (
+                    f"{format_percent(min(1.0, file_n / file_total))}  "
+                    f"{human_size(file_n):>{file_width}} / {human_size(int(file_total))}"
                 )
+                name_budget = max(12, width - _visible_len(files) - len(file_part) - 9)
+                detail = f"{files} · {_truncate_end(path, name_budget)}  {file_part}"
             else:
-                detail = f"{files} · {name}  {human_size(file_n)}"
+                detail = (
+                    f"{files} · {_truncate_end(path, name_budget)}  "
+                    f"{human_size(file_n)}"
+                )
     else:
         lead = max(current, key=lambda item: int(item.get("total") or 0))
         name = _truncate_end(str(lead.get("path") or ""), max(12, width - 40))
@@ -240,11 +299,9 @@ def snapshot_lines(snap: dict, *, width: int = 80, color: bool = False) -> list[
 
     def _fit(line: str) -> str:
         # ANSI sequences must not count toward width; if over, drop to plain.
-        plain = line
-        for code in (_CYAN, _CYAN16, _DIM, _BOLD, _RESET):
-            plain = plain.replace(code, "")
-        if len(plain) <= width:
+        if _visible_len(line) <= width:
             return line
+        plain = _ANSI_RE.sub("", line)
         return plain[: width - 1] + "…"
 
     return [_fit(line1), _fit(line2), _fit(line3)]
@@ -292,6 +349,7 @@ class TransferMeter:
         session: dict,
         files_completed_base: int = 0,
         budget_bytes: int | None = None,
+        stop_controller=None,
         clock=time.monotonic,
     ):
         self.total_bytes = max(0, int(total_bytes or 0))
@@ -302,6 +360,7 @@ class TransferMeter:
         self.session = session
         self.files_completed_base = int(files_completed_base or 0)
         self.budget_bytes = budget_bytes
+        self.stop_controller = stop_controller
         self._clock = clock
         self.started = clock()
         self.lock = threading.Lock()
@@ -309,6 +368,7 @@ class TransferMeter:
         self._inflight: dict[str, dict] = {}
         self._samples: deque[tuple[float, int]] = deque()
         self._rates: deque[float] = deque(maxlen=24)
+        self._last_spark: float | None = None
         self._ema: float | None = None
         self._last_byte_at = self.started
         self._last_done = self.verified_bytes + self.partial_bytes
@@ -371,7 +431,14 @@ class TransferMeter:
                     self._ema = rate
                 else:
                     self._ema = (0.35 * rate) + (0.65 * self._ema)
-                self._rates.append(self._ema)
+                # The sparkline history advances on a clock, not per chunk
+                # callback, so it holds a readable window of trend.
+                if (
+                    self._last_spark is None
+                    or now - self._last_spark >= _SPARK_INTERVAL_S
+                ):
+                    self._last_spark = now
+                    self._rates.append(self._ema)
 
     def _done_bytes(self) -> int:
         network = int(self.session.get("bytes_network") or 0)
@@ -443,8 +510,58 @@ class TransferMeter:
                 + int(self.session.get("bytes_local_sources") or 0),
                 "budget_bytes": self.budget_bytes,
                 "budget_used": int(self.session.get("bytes_network") or 0),
+                "interrupted": bool(
+                    getattr(self.stop_controller, "interrupted", False)
+                ),
                 "current": current,
             }
+
+
+class _LineProxy(io.TextIOBase):
+    """Stand-in for a TTY stream while the panel is live.
+
+    Buffers writes and hands complete lines to the display, which prints
+    them above the panel instead of letting them tear through it.
+    """
+
+    def __init__(self, display: TransferDisplay, real: TextIO):
+        self._display = display
+        self._real = real
+        self._buf = ""
+        self._lock = threading.Lock()
+
+    def write(self, s) -> int:
+        s = str(s)
+        lines: list[str]
+        with self._lock:
+            self._buf += s
+            *lines, self._buf = self._buf.split("\n")
+        for line in lines:
+            self._display.emit_above(line, self._real)
+        return len(s)
+
+    def drain(self) -> None:
+        with self._lock:
+            rest, self._buf = self._buf, ""
+        if rest:
+            self._display.emit_above(rest, self._real)
+
+    def flush(self) -> None:
+        with suppress(OSError):
+            self._real.flush()
+
+    def isatty(self) -> bool:
+        return True
+
+    def writable(self) -> bool:
+        return True
+
+    def fileno(self) -> int:
+        return self._real.fileno()
+
+    @property
+    def encoding(self):
+        return getattr(self._real, "encoding", "utf-8")
 
 
 class TransferDisplay:
@@ -485,9 +602,14 @@ class TransferDisplay:
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self._drawn = 0
+        self._last_width: int | None = None
         self._suspended = 0
         self._last_log = 0.0
         self._cursor_hidden = False
+        self._painted = False
+        self._interrupt_announced = False
+        self._captured: list[tuple[str, TextIO, _LineProxy]] = []
+        self._saved_termios = None
 
     def start(self) -> None:
         if not self.live and not self._log:
@@ -497,6 +619,8 @@ class TransferDisplay:
                 self.stream.write(_HIDE_CURSOR)
                 self.stream.flush()
                 self._cursor_hidden = True
+            self._quiet_ctrl_echo()
+            self._capture_std_streams()
         self._thread = threading.Thread(
             target=self._loop, name="darsay-progress", daemon=True
         )
@@ -508,8 +632,16 @@ class TransferDisplay:
         if self._thread is not None:
             self._thread.join(timeout=1.0)
             self._thread = None
+        self._release_std_streams()
+        final = self._final_line() if self.live and self._painted else None
+        self._painted = False
         with self._io:
             self._restore_locked()
+            if final:
+                self.stream.write(final + "\n")
+                with suppress(OSError):
+                    self.stream.flush()
+        self._restore_terminal_modes()
 
     def echo(self, *args, **kwargs) -> None:
         """Print a log line without corrupting the live panel."""
@@ -518,6 +650,24 @@ class TransferDisplay:
             self.progress(*args, **kwargs)
         finally:
             self.resume()
+
+    def emit_above(self, text: str, stream: TextIO | None = None) -> None:
+        """Write one line of ordinary output above the live panel."""
+        out = stream if stream is not None else self.stream
+        with self._io:
+            if self._drawn and not self._suspended and not self._stop.is_set():
+                self.stream.write(_PANEL_HOME.format(n=self._drawn) + _CLEAR_DOWN)
+                self._drawn = 0
+                with suppress(OSError):
+                    self.stream.flush()
+                out.write(text + "\n")
+                with suppress(OSError):
+                    out.flush()
+                self._paint_locked(self.meter.snapshot())
+            else:
+                out.write(text + "\n")
+                with suppress(OSError):
+                    out.flush()
 
     def suspend(self) -> None:
         with self._io:
@@ -536,6 +686,9 @@ class TransferDisplay:
 
     def refresh(self) -> None:
         snap = self.meter.snapshot()
+        if snap.get("interrupted") and not self._interrupt_announced:
+            self._interrupt_announced = True
+            self._announce_interrupt()
         with self._io:
             if self._suspended or self._stop.is_set():
                 return
@@ -547,6 +700,17 @@ class TransferDisplay:
                     self._last_log = now
                     self.progress(snapshot_log_line(snap))
 
+    def _announce_interrupt(self) -> None:
+        note = (
+            "Interrupt received — stopping cleanly; verified and partial bytes "
+            "are banked. Press Ctrl-C again to abort now, a third time to "
+            "force-quit."
+        )
+        if self.live:
+            self.emit_above(note)
+        elif self._log:
+            self.progress(note)
+
     def _loop(self) -> None:
         interval = _LIVE_HZ if self.live else _LOG_INTERVAL_S
         while not self._stop.wait(interval):
@@ -554,22 +718,40 @@ class TransferDisplay:
 
     def _columns(self) -> int:
         try:
+            return max(40, os.get_terminal_size(self.stream.fileno()).columns)
+        except (OSError, ValueError, AttributeError):
+            pass
+        try:
             return max(40, shutil.get_terminal_size(fallback=(80, 24)).columns)
         except OSError:
             return 80
 
     def _paint_locked(self, snap: dict) -> None:
-        lines = snapshot_lines(snap, width=self._columns(), color=self.color)
+        width = self._columns()
+        lines = snapshot_lines(snap, width=width, color=self.color)
+        frame = [_SYNC_ON]
         if self._drawn:
-            self.stream.write(_UP.format(n=self._drawn))
-            self.stream.write(_CLEAR_DOWN)
-        self.stream.write("\n".join(lines) + "\n")
-        self.stream.flush()
+            frame.append(_PANEL_HOME.format(n=self._drawn))
+            # A narrower terminal may have rewrapped old rows; start clean.
+            if len(lines) < self._drawn or (
+                self._last_width is not None and width < self._last_width
+            ):
+                frame.append(_CLEAR_DOWN)
+        else:
+            frame.append("\r")
+        for line in lines:
+            frame.append(_ERASE_LINE + line + "\n")
+        frame.append(_SYNC_OFF)
+        self.stream.write("".join(frame))
+        with suppress(OSError):
+            self.stream.flush()
         self._drawn = len(lines)
+        self._last_width = width
+        self._painted = True
 
     def _restore_locked(self) -> None:
         if self._drawn:
-            self.stream.write(_UP.format(n=self._drawn))
+            self.stream.write(_PANEL_HOME.format(n=self._drawn))
             self.stream.write(_CLEAR_DOWN)
             self._drawn = 0
         if self._cursor_hidden:
@@ -577,6 +759,72 @@ class TransferDisplay:
             self._cursor_hidden = False
         with suppress(OSError):
             self.stream.flush()
+
+    def _final_line(self) -> str:
+        """One scrollback line recording where the transfer ended."""
+        snap = self.meter.snapshot()
+        done = human_size(snap.get("done_bytes") or 0)
+        total = snap.get("total_bytes") or 0
+        if total:
+            percent = format_percent(snap.get("fraction")).strip()
+            bytes_part = f"{done} / {human_size(total)} ({percent})"
+        else:
+            bytes_part = f"{done} downloaded"
+        files_total = int(snap.get("files_total") or 0)
+        files_done = int(snap.get("files_done") or 0)
+        files = f"{files_done}/{files_total} files" if files_total else None
+        elapsed = f"{human_duration(snap.get('elapsed') or 0)} elapsed"
+        bits = [bit for bit in (bytes_part, files, elapsed) if bit]
+        return _paint("  " + " · ".join(bits), _DIM, enabled=self.color)
+
+    def _capture_std_streams(self) -> None:
+        """Route other writers' TTY output above the panel while it is live."""
+        self._captured = []
+        for name in ("stdout", "stderr"):
+            stream = getattr(sys, name)
+            try:
+                is_tty = bool(stream.isatty())
+            except (AttributeError, OSError, ValueError):
+                is_tty = False
+            if not is_tty or isinstance(stream, _LineProxy):
+                continue
+            proxy = _LineProxy(self, stream)
+            setattr(sys, name, proxy)
+            self._captured.append((name, stream, proxy))
+
+    def _release_std_streams(self) -> None:
+        captured, self._captured = self._captured, []
+        for name, real, proxy in captured:
+            if getattr(sys, name) is proxy:
+                setattr(sys, name, real)
+            proxy.drain()
+
+    def _quiet_ctrl_echo(self) -> None:
+        """Suppress the terminal's ``^C`` echo while the panel owns rows."""
+        try:
+            import termios
+
+            fd = self.stream.fileno()
+            if not os.isatty(fd):
+                return
+            attrs = termios.tcgetattr(fd)
+            self._saved_termios = (fd, list(attrs))
+            attrs[3] &= ~getattr(termios, "ECHOCTL", 0)
+            termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        except Exception:
+            self._saved_termios = None
+
+    def _restore_terminal_modes(self) -> None:
+        saved, self._saved_termios = self._saved_termios, None
+        if not saved:
+            return
+        try:
+            import termios
+
+            fd, attrs = saved
+            termios.tcsetattr(fd, termios.TCSANOW, attrs)
+        except Exception:
+            pass
 
 
 def meter_from_plan(
@@ -596,4 +844,5 @@ def meter_from_plan(
         session=session,
         files_completed_base=int(session.get("files_completed") or 0),
         budget_bytes=budget,
+        stop_controller=stop_controller,
     )

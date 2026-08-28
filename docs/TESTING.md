@@ -91,7 +91,12 @@ The existing `release.yml` workflow is unchanged: it publishes artifacts on
 
 - New pure helpers go in `tests/unit/test_<module>.py`.
 - Transfer progress: formatters, the meter, and the TTY panel live in
-  `tests/unit/test_progress.py`; the Hub `tqdm_class` wrapper is in
+  `tests/unit/test_progress.py` — including the panel's defenses: fixed-width
+  columns across digit rollovers, sparkline cadence, stray-output capture
+  (`_LineProxy`), the interrupt notice, and the final record line. The
+  Ctrl-C ladder and stop plumbing are in `tests/unit/test_transfer.py`;
+  `test_sigint_escalates_across_presses` delivers real SIGINTs and skips
+  itself off the main thread. The Hub `tqdm_class` wrapper is in
   `tests/unit/test_huggingface.py`. Integration drives `archive` against
   `TestProvider` and asserts log lines (`DARSAY_PROGRESS=line` so a TTY
   does not flip the test into live mode). The live Hub `tqdm` path is the

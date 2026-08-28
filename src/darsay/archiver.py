@@ -327,6 +327,7 @@ def archive(
                     session,
                     progress=progress,
                     rehash=rehash,
+                    stop=stop_controller,
                 )
                 add_disk_preflight(bundle_dir, plan)
                 print_plan(plan, progress=progress)
@@ -355,21 +356,25 @@ def archive(
                 finish_session(bundle_dir, ledger, session, "complete")
                 session_finished = True
                 return _register_bundle(bundle_dir, payload_dir, ledger, progress)
-            except CleanStop as stop:
+            except (CleanStop, KeyboardInterrupt) as stop:
+                # A second Ctrl-C raises KeyboardInterrupt to break out of a
+                # stalled transfer; the ledger and payload bytes stay valid, so
+                # it pauses the archive the same way a clean stop does.
+                aborted = not isinstance(stop, CleanStop)
+                reason = "interrupt" if aborted else stop.reason
+                detail = "aborted by user" if aborted else stop.detail
                 plan = add_disk_preflight(
                     bundle_dir, transfer_plan(payload_dir, ledger)
                 )
-                if plan["complete"]:
+                if plan["complete"] and not aborted:
                     finish_session(bundle_dir, ledger, session, "complete")
                     session_finished = True
                     return _register_bundle(bundle_dir, payload_dir, ledger, progress)
-                session["stop_detail"] = stop.detail
-                finish_session(bundle_dir, ledger, session, stop.reason)
+                session["stop_detail"] = detail
+                finish_session(bundle_dir, ledger, session, reason)
                 session_finished = True
                 print_plan(plan, progress=progress)
-                raise PartialTransfer(
-                    bundle_dir, stop.reason, stop.detail, plan
-                ) from stop
+                raise PartialTransfer(bundle_dir, reason, detail, plan) from stop
             except SourceGatedError as exc:
                 record_event(
                     ledger,

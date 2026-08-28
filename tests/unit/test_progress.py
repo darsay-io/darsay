@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import io
+import types
 
 from darsay.progress import (
     TransferDisplay,
     TransferMeter,
+    _LineProxy,
+    _size_field_width,
     color_enabled,
     format_percent,
     human_duration,
@@ -389,6 +392,166 @@ def test_line_mode_wins_over_tty(monkeypatch):
     assert display._log is True
     display.refresh()
     assert logs and "%" in logs[0]
+
+
+def test_columns_stay_fixed_across_digit_rollovers():
+    base = {
+        "total_bytes": int(305.8 * 1024**3),
+        "rate_history": [8e6, 10e6, 12e6],
+        "eta_seconds": 12 * 3600,
+        "stalled": False,
+        "files_done": 11,
+        "files_total": 72,
+        "elapsed": 43,
+        "current": [
+            {
+                "path": "model-00061-of-00062.safetensors",
+                "n": int(2.8 * 1024**3),
+                "total": int(4.9 * 1024**3),
+                "phase": "download",
+            }
+        ],
+    }
+    before = snapshot_lines(
+        {
+            **base,
+            "fraction": 0.013,
+            "done_bytes": int(4.0 * 1024**3),
+            "rate": 9.9 * 1024**2,
+        },
+        width=100,
+        color=False,
+    )
+    after = snapshot_lines(
+        {
+            **base,
+            "fraction": 0.145,
+            "done_bytes": int(44.4 * 1024**3),
+            "rate": 10.0 * 1024**2,
+        },
+        width=100,
+        color=False,
+    )
+    assert [len(line) for line in before] == [len(line) for line in after]
+    # The rate field is fixed-width, so everything after it stays put.
+    assert before[1].index("left") == after[1].index("left")
+    assert before[0].index("/") == after[0].index("/")
+
+
+def test_size_field_width_covers_unit_rollovers():
+    total = int(305.8 * 1024**3)
+    width = _size_field_width(total)
+    assert width >= len("1024.0 MiB")
+    assert _size_field_width(500) == len("500 B")
+
+
+def test_rate_history_advances_on_a_clock_not_per_chunk():
+    session = {"bytes_network": 0, "bytes_local_sources": 0, "files_completed": 0}
+    clock = Clock(0.0)
+    meter = _meter(session=session, clock=clock, total_bytes=10**9)
+    meter.note()
+    for _ in range(50):
+        clock.t += 0.05
+        session["bytes_network"] += 1_000_000
+        meter.note()
+    # 2.5s of very chatty callbacks: at most one sparkline point.
+    assert len(meter.snapshot()["rate_history"]) <= 1
+    clock.t = 6.0
+    session["bytes_network"] += 1_000_000
+    meter.note()
+    assert len(meter.snapshot()["rate_history"]) == 2
+
+
+def test_interrupted_snapshot_shows_stopping():
+    stop = types.SimpleNamespace(interrupted=True, max_bytes=None)
+    session = {"bytes_network": 100, "bytes_local_sources": 0, "files_completed": 0}
+    meter = TransferMeter(
+        total_bytes=1000,
+        total_files=4,
+        verified_bytes=0,
+        verified_files=0,
+        partial_bytes=0,
+        session=session,
+        stop_controller=stop,
+        clock=Clock(3.0),
+    )
+    snap = meter.snapshot()
+    assert snap["interrupted"] is True
+    lines = snapshot_lines(snap, width=80, color=False)
+    assert "stopping" in lines[1]
+
+
+def test_display_announces_interrupt_once():
+    stop = types.SimpleNamespace(interrupted=True, max_bytes=None)
+    session = {"bytes_network": 10, "bytes_local_sources": 0, "files_completed": 0}
+    meter = TransferMeter(
+        total_bytes=100,
+        total_files=1,
+        verified_bytes=0,
+        verified_files=0,
+        partial_bytes=0,
+        session=session,
+        stop_controller=stop,
+    )
+    logs: list[str] = []
+    display = TransferDisplay(
+        meter, progress=logs.append, stream=io.StringIO(), live=False, color=False
+    )
+    display.refresh()
+    display.refresh()
+    notices = [line for line in logs if "Interrupt received" in line]
+    assert len(notices) == 1
+
+
+def test_emit_above_prints_line_then_repaints_panel():
+    session = {"bytes_network": 250, "bytes_local_sources": 0, "files_completed": 1}
+    meter = _meter(total_bytes=1000, session=session, clock=Clock(5.0))
+    buf = io.StringIO()
+    display = TransferDisplay(
+        meter, progress=lambda *a, **k: None, stream=buf, live=True, color=False
+    )
+    display.start()
+    display.refresh()
+    display.emit_above("Reclaiming stale transfer lock")
+    tail = buf.getvalue().split("Reclaiming stale transfer lock\n", 1)[1]
+    assert "25.0%" in tail  # the panel came back below the message
+    display.stop()
+
+
+def test_line_proxy_buffers_partial_lines():
+    meter = _meter()
+    display = TransferDisplay(
+        meter,
+        progress=lambda *a, **k: None,
+        stream=io.StringIO(),
+        live=True,
+        color=False,
+    )
+    real = io.StringIO()
+    proxy = _LineProxy(display, real)
+    proxy.write("partial")
+    assert real.getvalue() == ""
+    proxy.write(" line\nnext")
+    assert "partial line\n" in real.getvalue()
+    assert "next" not in real.getvalue()
+    proxy.drain()
+    assert "next\n" in real.getvalue()
+    assert proxy.isatty() is True
+
+
+def test_display_stop_leaves_final_record_line():
+    session = {"bytes_network": 250, "bytes_local_sources": 0, "files_completed": 1}
+    meter = _meter(total_bytes=1000, session=session, clock=Clock(5.0))
+    buf = io.StringIO()
+    display = TransferDisplay(
+        meter, progress=lambda *a, **k: None, stream=buf, live=True, color=False
+    )
+    display.start()
+    display.refresh()
+    display.stop()
+    after_restore = buf.getvalue().rsplit("\033[?25h", 1)[1]
+    assert "elapsed" in after_restore
+    assert "25.0%" in after_restore
 
 
 def test_progress_off_emits_nothing(monkeypatch):
