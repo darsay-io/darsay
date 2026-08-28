@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Tool version (`darsay.__version__`) is independent of
 `schema_version` in manifests and of `MVB_FORMAT_VERSION` in exports.
 
+## [0.9.0] - 2026-08-27
+
+### Added
+
+- **Estimate download panel** — `darsay estimate` draws a download block
+  in the live transfer panel's look: the pinned total as the headline, a
+  bar of banked bytes (verified, size-matched unverified, provider
+  `.incomplete` partials, missing), and a disk verdict that prices only
+  the remaining network bytes plus scratch. A registered bundle, an
+  in-progress `transfer.json`, or a ledger-less payload all classify the
+  same way as reconciliation, without writing or hashing. `--json` gains
+  a `transfer` section and `bundle.state`; the catalog digest is
+  unchanged. See [Incremental transfer](docs/INCREMENTAL.md).
+
+### Changed
+
+- **Live archive panel** — the TTY panel keeps its columns still across
+  digit rollovers, repaints in place (no flicker), captures stray Hub /
+  logging lines above the panel instead of tearing through it, suppresses
+  the terminal's `^C` echo while live, and leaves one dim record line in
+  scrollback on stop. The rate sparkline advances one cell per ~5 s
+  instead of one per chunk callback.
+- **Ctrl-C** — first press requests a clean stop (panel shows "stopping",
+  current chunk is banked, CLI exits 10 with the resume hint). Second
+  press aborts a stalled connection or in-flight hash and still pauses
+  cleanly. Third press hard-kills after restoring the cursor. Queued
+  small-file downloads are cancelled on stop instead of drained. See
+  [Getting started](docs/GETTING-STARTED.md).
+
 ## [0.8.0] - 2026-08-27
 
 ### Added
