@@ -185,7 +185,7 @@ def test_unexpected_error_is_one_line_unless_debug(monkeypatch, capsys):
     monkeypatch.delenv("DARSAY_DEBUG", raising=False)
     assert _run(boom, None) == 1
     err = capsys.readouterr().err
-    assert "unexpected RuntimeError: kaboom" in err
+    assert "unexpected RuntimeError: kaboom (test_cli_parse.py:" in err
     assert "DARSAY_DEBUG=1" in err
     assert "Traceback" not in err
     monkeypatch.setenv("DARSAY_DEBUG", "1")

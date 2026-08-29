@@ -393,12 +393,7 @@ def snapshot_log_line(snap: dict) -> str:
         if total
         else human_size(snap.get("done_bytes") or 0)
     )
-    status = status_text(snap)
     link = snap.get("link")
-    if link:
-        status = f"{status} {human_duration(link.get('since') or 0)}"
-        if link.get("retry_in") is not None:
-            status += f", retry in {human_duration(link['retry_in'])}"
     files_done = int(snap.get("files_done") or 0)
     files_total = int(snap.get("files_total") or 0)
     current = snap.get("current") or []
@@ -411,7 +406,8 @@ def snapshot_log_line(snap: dict) -> str:
         bytes_part,
         human_rate(snap.get("rate")),
         f"cap {human_rate(cap)}" if cap else "",
-        status,
+        status_text(snap),
+        _link_tail(link) if link else "",
         f"{files_done}/{files_total} files" if files_total else "",
         name,
     ]
@@ -817,7 +813,7 @@ class TransferDisplay:
 
     def _announce_link(self) -> None:
         """Say once, in scrollback, when the network goes and when it returns."""
-        link = getattr(self.meter, "link", None)
+        link = self.meter.link
         if link is None:
             return
         for serial, kind, info in link.transitions_after(self._link_serial):

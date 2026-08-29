@@ -2,18 +2,29 @@ from __future__ import annotations
 
 import pytest
 
-from darsay.providers.base import FileSpec, Snapshot, SourceRef
+from darsay.providers.base import (
+    FileSpec,
+    Snapshot,
+    SourceRef,
+    describe_network_error,
+)
 from darsay.transfer import (
     DISK_PROBE_INTERVAL_S,
+    PACE_SLICE_S,
+    RECONNECT_WAITS_S,
     TRANSFER_VERSION,
     CleanStop,
     LedgerError,
+    Link,
     NetworkCounter,
     StopController,
+    Throttle,
     _digest_matches,
+    _fetch_with_reconnect,
     _lock_was_copied,
     _payload_path,
     _same_transfer_set,
+    _wait_for_link,
     add_disk_preflight,
     disk_verdict,
     load_ledger,
@@ -23,6 +34,7 @@ from darsay.transfer import (
     transfer_plan,
     transfer_summary,
 )
+from tests.fakes import Clock
 
 
 def _source() -> SourceRef:
@@ -328,37 +340,28 @@ def test_transfer_summary_aggregates_sessions():
     assert summary["retries"] == 3
 
 
-class _Clock:
-    def __init__(self, t: float = 0.0):
-        self.t = t
-
-    def __call__(self) -> float:
-        return self.t
+def _advance(clock: Clock):
+    """A ``time.sleep`` stand-in that moves the injected clock instead."""
+    return lambda seconds: setattr(clock, "t", clock.t + seconds)
 
 
 def test_throttle_accepts_chunks_and_bills_the_debt():
-    from darsay.transfer import Throttle
-
-    clock = _Clock(0.0)
-    throttle = Throttle(1000, clock=clock)  # 1000 B/s, 1 s of credit
-    assert throttle.debit(500) == 0.0
-    # Credit is spent; the next 2500 bytes cost 2.5 s of sleep... minus the
-    # 500 B still in the bucket: (500 - 2500) / 1000 = -2 s.
-    assert throttle.debit(2500) == pytest.approx(2.0)
-    clock.t = 2.0  # slept it off
+    clock = Clock(0.0)
+    throttle = Throttle(1000, clock=clock)  # 1000 B/s
+    # Every chunk is accepted; the caller sleeps off exactly what it added.
+    assert throttle.debit(500) == pytest.approx(0.5)
+    assert throttle.debit(2500) == pytest.approx(3.0)
+    clock.t = 3.0  # slept it off
     assert throttle.debit(0) == 0.0
     assert throttle.debit(1000) == pytest.approx(1.0)
-    # A long pause refills at most one second of credit: no burst later.
+    # A long pause drains the debt but never banks credit: no burst later.
     clock.t = 100.0
-    assert throttle.debit(1000) == 0.0
     assert throttle.debit(1000) == pytest.approx(1.0)
 
 
 def test_network_counter_paces_when_throttled(monkeypatch):
-    from darsay.transfer import Throttle
-
     slept: list[float] = []
-    clock = _Clock(0.0)
+    clock = Clock(0.0)
 
     def sleep(seconds):
         slept.append(seconds)
@@ -368,31 +371,36 @@ def test_network_counter_paces_when_throttled(monkeypatch):
     monkeypatch.setattr("darsay.transfer.time.monotonic", clock)
     session = {"bytes_network": 0}
     counter = NetworkCounter(session, throttle=Throttle(1000, clock=clock))
-    counter.add(1000)
-    assert slept == []
-    counter.add(1000)  # 1 s over the cap -> paced in slices
-    assert slept and sum(slept) == pytest.approx(1.0)
-    assert session["bytes_network"] == 2000
+    counter.add(1000)  # 1 s of debt -> paced in slices
+    assert sum(slept) == pytest.approx(1.0)
+    assert all(0 < s <= PACE_SLICE_S for s in slept)
+    assert session["bytes_network"] == 1000
 
 
 def test_network_counter_pacing_yields_to_a_stop(monkeypatch):
-    from darsay.transfer import Throttle
-
     slept: list[float] = []
-    monkeypatch.setattr("darsay.transfer.time.sleep", lambda s: slept.append(s))
+    clock = Clock(0.0)
     ctrl = StopController()
-    counter = NetworkCounter({"bytes_network": 0}, ctrl, throttle=Throttle(10))
-    counter.add(10)
-    ctrl.interrupted = True
-    counter.add(10)  # banks the interrupt; must not sleep off a 1 s debt
-    assert slept == []
+
+    def sleep(seconds):
+        slept.append(seconds)
+        clock.t += seconds
+        ctrl.interrupted = True  # Ctrl-C lands mid-sleep
+
+    monkeypatch.setattr("darsay.transfer.time.sleep", sleep)
+    monkeypatch.setattr("darsay.transfer.time.monotonic", clock)
+    counter = NetworkCounter(
+        {"bytes_network": 0}, ctrl, throttle=Throttle(10, clock=clock)
+    )
+    counter.add(10)  # 1 s of debt; the first slice sees the interrupt
+    assert slept == [PACE_SLICE_S]
+    counter.add(10)  # banks the interrupt; must not sleep off the debt
+    assert slept == [PACE_SLICE_S]
     assert counter.pending_stop is not None
 
 
 def test_link_tracks_outage_and_reports_bytes_as_recovery():
-    from darsay.transfer import RECONNECT_WAITS_S, Link
-
-    clock = _Clock(100.0)
+    clock = Clock(100.0)
     session = {"reconnects": 0}
     link = Link(3600, session, clock=clock)
     assert link.snapshot() is None
@@ -403,12 +411,13 @@ def test_link_tracks_outage_and_reports_bytes_as_recovery():
     assert snap["reason"] == "DNS lookup failed"
     assert snap["retry_in"] == pytest.approx(RECONNECT_WAITS_S[0])
     assert snap["attempts"] == 1
-    # Bytes draining from an older stream do not end the outage ...
+    # Bytes draining from a stream opened before the drop do not end the
+    # outage ...
     link.online()
     assert link.offline
-    # ... but a retry that receives bytes does.
+    # ... but an attempt begun during it does, whichever path it is for.
     clock.t = 102.0
-    link.retrying("a.bin")
+    link.retrying("b.bin")
     assert link.snapshot()["state"] == "reconnecting"
     assert link.snapshot()["retry_in"] is None
     clock.t = 103.0
@@ -429,30 +438,37 @@ def test_link_tracks_outage_and_reports_bytes_as_recovery():
     assert link.transitions_after(2)[0][1] == "lost"
 
 
-def test_wait_for_link_sleeps_then_retries(monkeypatch):
-    from darsay.transfer import Link, _wait_for_link
-
-    clock = _Clock(0.0)
+def test_wait_for_link_sleeps_out_the_interval(monkeypatch):
+    clock = Clock(0.0)
     monkeypatch.setattr("darsay.transfer.time.monotonic", clock)
+    monkeypatch.setattr("darsay.transfer.time.sleep", _advance(clock))
+    link = Link(60, {"reconnects": 0}, clock=clock)
+    _wait_for_link(link, "a.bin", "timed out", 0, None, {"bytes_network": 0})
+    assert clock.t == pytest.approx(RECONNECT_WAITS_S[0])
+    # Still offline: the attempt, not the wait, is what proves the link.
+    assert link.snapshot()["state"] == "offline"
+
+
+def test_wait_for_link_ends_early_once_another_worker_is_back(monkeypatch):
+    clock = Clock(0.0)
+    monkeypatch.setattr("darsay.transfer.time.monotonic", clock)
+    link = Link(60, {"reconnects": 0}, clock=clock)
 
     def sleep(seconds):
         clock.t += seconds
+        link.retrying("b.bin")  # another worker's attempt receives bytes
+        link.online()
 
     monkeypatch.setattr("darsay.transfer.time.sleep", sleep)
-    link = Link(60, {"reconnects": 0}, clock=clock)
     _wait_for_link(link, "a.bin", "timed out", 0, None, {"bytes_network": 0})
-    assert clock.t >= 2.0
-    assert link.snapshot()["state"] == "reconnecting"
+    assert clock.t < RECONNECT_WAITS_S[0]
+    assert not link.offline
 
 
 def test_wait_for_link_gives_up_after_patience(monkeypatch):
-    from darsay.transfer import Link, _wait_for_link
-
-    clock = _Clock(0.0)
+    clock = Clock(0.0)
     monkeypatch.setattr("darsay.transfer.time.monotonic", clock)
-    monkeypatch.setattr(
-        "darsay.transfer.time.sleep", lambda s: setattr(clock, "t", clock.t + s)
-    )
+    monkeypatch.setattr("darsay.transfer.time.sleep", _advance(clock))
     link = Link(5, {"reconnects": 0}, clock=clock)
     session = {"bytes_network": 0}
     _wait_for_link(link, "a.bin", "connection reset", 0, None, session)
@@ -464,8 +480,6 @@ def test_wait_for_link_gives_up_after_patience(monkeypatch):
 
 
 def test_wait_for_link_zero_patience_pauses_at_once():
-    from darsay.transfer import Link, _wait_for_link
-
     link = Link(0, {"reconnects": 0})
     with pytest.raises(CleanStop) as stop:
         _wait_for_link(link, "a.bin", "DNS lookup failed", 0, None, {})
@@ -474,8 +488,6 @@ def test_wait_for_link_zero_patience_pauses_at_once():
 
 
 def test_wait_for_link_honors_interrupt(monkeypatch):
-    from darsay.transfer import Link, _wait_for_link
-
     monkeypatch.setattr("darsay.transfer.time.sleep", lambda s: None)
     ctrl = StopController()
     ctrl.interrupted = True
@@ -483,6 +495,88 @@ def test_wait_for_link_honors_interrupt(monkeypatch):
     with pytest.raises(CleanStop) as stop:
         _wait_for_link(link, "a.bin", "timed out", 0, ctrl, {"bytes_network": 0})
     assert stop.value.reason == "interrupt"
+
+
+class _FlakyProvider:
+    """``download_file`` raises the queued errors first, then succeeds."""
+
+    def __init__(self, link: Link, *errors: BaseException):
+        self.link = link
+        self.errors = list(errors)
+        self.calls: list[dict] = []
+
+    def download_file(
+        self, source, revision, relative, payload_dir, *, force, tqdm_class
+    ):
+        self.calls.append({"force": force, "link": self.link.snapshot()})
+        if self.errors:
+            raise self.errors.pop(0)
+
+    def transient_network_error(self, exc):
+        return describe_network_error(exc)
+
+
+def _outage_fixture(monkeypatch, patience: float = 60):
+    clock = Clock(0.0)
+    monkeypatch.setattr("darsay.transfer.time.monotonic", clock)
+    monkeypatch.setattr("darsay.transfer.time.sleep", _advance(clock))
+    session = {"bytes_network": 0, "reconnects": 0}
+    link = Link(patience, session, clock=clock)
+    return link, NetworkCounter(session, link=link)
+
+
+def test_fetch_with_reconnect_marks_the_attempt_and_resumes(monkeypatch, tmp_path):
+    link, counter = _outage_fixture(monkeypatch)
+    provider = _FlakyProvider(link, ConnectionResetError("reset"))
+    events: list[dict] = []
+    _fetch_with_reconnect(
+        provider,
+        None,
+        {"revision": "r"},
+        "a.bin",
+        tmp_path,
+        force=True,
+        tqdm_class=None,
+        counter=counter,
+        events=events,
+    )
+    first, retry = provider.calls
+    assert first["link"] is None and first["force"] is True
+    # The retry is announced as in flight, and resumes rather than restarts.
+    assert retry["link"]["state"] == "reconnecting"
+    assert retry["force"] is False
+    assert link.snapshot() is None
+    assert counter.session["reconnects"] == 1
+    assert [e["event"] for e in events] == ["network_lost", "network_restored"]
+    assert events[1]["detail"] == "resumed after 1 reconnect attempt"
+
+
+def test_fetch_with_reconnect_never_waits_out_an_interrupt(monkeypatch, tmp_path):
+    # A KeyboardInterrupt raised while a transport error was being handled
+    # carries that error as its context; it must still propagate.
+    try:
+        try:
+            raise ConnectionResetError("reset")
+        except ConnectionResetError:
+            raise KeyboardInterrupt() from None
+    except KeyboardInterrupt as exc:
+        interrupt = exc
+    assert describe_network_error(interrupt) == "connection reset"
+    link, counter = _outage_fixture(monkeypatch)
+    provider = _FlakyProvider(link, interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        _fetch_with_reconnect(
+            provider,
+            None,
+            {"revision": "r"},
+            "a.bin",
+            tmp_path,
+            force=False,
+            tqdm_class=None,
+            counter=counter,
+            events=[],
+        )
+    assert link.snapshot() is None
 
 
 def test_print_plan_prices_the_rate_cap(tmp_path):

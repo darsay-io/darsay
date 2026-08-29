@@ -412,8 +412,9 @@ its expected size) does not propagate. Instead:
   partial is durable (§10), and the next attempt resumes it with a Range
   request rather than starting over.
 - The worker waits on a shared **link** state — 2 s, 4 s, 8 s, 15 s, then
-  every 30 s — and tries the same `download_file` again. Several
-  small-file workers hitting the same outage share one outage record.
+  every 30 s, or until another worker's bytes prove the link is back — and
+  tries the same `download_file` again. Several small-file workers hitting
+  the same outage share one outage record.
 - The panel says so. The time-remaining slot reads `offline` (amber) with
   `retry in 8s · 2 min 10s offline` in the tail, `reconnecting` while an
   attempt is in flight, and the file line keeps its banked bytes
@@ -421,10 +422,11 @@ its expected size) does not propagate. Instead:
   scrollback line marks the drop — `Network unreachable (DNS lookup
   failed) — waiting to reconnect; verified and partial bytes are banked.`
   — and one marks the return — `Reconnected after 4 min 12s (7 attempts).`
-  Log mode prints the same two lines and `offline 2 min 10s, retry in 8s`
-  in its status line.
-- The first network byte that a retry receives ends the outage. Bytes
-  still draining from a stream that was open before the drop do not.
+  Log mode prints the same two lines, and its status line carries the
+  same words: `offline  retry in 8s · 2 min 10s offline`.
+- The first network byte received by an attempt begun during the outage —
+  a retry, or a fresh file — ends it. Bytes still draining from a stream
+  that was open before the drop do not.
 - Budgets, the floor, and Ctrl-C keep their meaning while waiting: the
   wait loop checks the stop controller every 0.2 s, so a time budget
   still expires on schedule and the first Ctrl-C still pauses within a
@@ -447,11 +449,12 @@ lookup failed. Check the connection and re-run.`
 ### The rate cap
 
 An archive left running all day should not own the connection. `max_rate`
-paces every received chunk through one token bucket shared by every
+paces every received chunk through one leaky bucket shared by every
 worker: a chunk is always accepted (it is already in memory) and the
-caller sleeps off the debt, so the running average settles at the cap
-while TCP flow control slows the sender upstream. One second of credit
-means a cold start or a reconnect never bursts. Under a cap the Hub
+caller sleeps off the debt it adds, so the running average never exceeds
+the cap while TCP flow control slows the sender upstream. Debt drains at
+the cap and never turns into credit, so a cold start, a hashing pause, or
+a reconnect earns no burst. Under a cap the Hub
 client reads in chunks worth about a quarter second (never below 64 KiB)
 so pacing sleeps are short and the panel's rate stays smooth; pacing
 sleeps run in 0.2 s slices and yield to a stop request at once. The plan

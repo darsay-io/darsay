@@ -183,19 +183,18 @@ def pace(seconds: float, stop_controller: StopController | None = None) -> None:
 
 
 class Throttle:
-    """Token bucket over network bytes for an operator's rate cap.
+    """Leaky bucket over network bytes for an operator's rate cap.
 
     Every chunk the transport hands over is accepted — it is already in
-    memory — and the caller sleeps off the debt, so the running average
-    settles at the cap while TCP flow control does the rest upstream. One
-    second of credit means a cold start or a pause never builds a backlog
-    that later bursts through the cap.
+    memory — and the caller sleeps off the debt it adds, so the running
+    average never exceeds the cap while TCP flow control slows the sender
+    upstream. Debt drains at the cap and never turns into credit: a cold
+    start, a hashing pause, or a reconnect earns no burst.
     """
 
     def __init__(self, bytes_per_second: int, clock=time.monotonic):
         self.rate = float(bytes_per_second)
-        self.burst = max(self.rate, 1.0)
-        self._credit = self.burst
+        self._debt = 0.0
         self._clock = clock
         self._at = clock()
         self._lock = threading.Lock()
@@ -204,10 +203,10 @@ class Throttle:
         """Charge ``amount`` bytes; return how long the caller should sleep."""
         with self._lock:
             now = self._clock()
-            self._credit = min(self.burst, self._credit + (now - self._at) * self.rate)
+            drained = (now - self._at) * self.rate
+            self._debt = max(0.0, self._debt - drained) + max(0, int(amount))
             self._at = now
-            self._credit -= max(0, int(amount))
-            return max(0.0, -self._credit / self.rate)
+            return self._debt / self.rate
 
 
 class Link:
@@ -215,8 +214,11 @@ class Link:
     waiting, when the next attempt is due, how many attempts so far.
 
     Workers report ``lost`` and ``retrying``; the first network byte that
-    arrives afterwards reports ``online``. The meter renders ``snapshot``;
-    the display announces each transition once via ``transitions``.
+    arrives afterwards reports ``online``. Only an attempt begun during the
+    outage can prove the link — bytes still draining from a stream that was
+    open before the drop cannot — so ``online`` counts only while some path
+    is ``retrying``. The meter renders ``snapshot``; the display announces
+    each transition once via ``transitions``.
     """
 
     def __init__(self, patience_s: float, session: dict, clock=time.monotonic):
@@ -258,21 +260,18 @@ class Link:
             return retry_at
 
     def retrying(self, path: str) -> None:
+        """An attempt for ``path`` is in flight; its bytes will prove the link."""
         with self._lock:
             self._waiting.pop(path, None)
             self._retrying.add(path)
 
     def online(self) -> None:
-        """Bytes arrived: the network is back."""
+        """Bytes arrived: the network is back, if an attempt was in flight."""
         if self.offline_since is None:
             return
         with self._lock:
             since = self.offline_since
-            if since is None:
-                return
-            # Bytes still draining from a stream that was open before the
-            # drop do not prove anything; a retry that receives bytes does.
-            if self._waiting and not self._retrying:
+            if since is None or not self._retrying:
                 return
             seconds = max(0.0, self._clock() - since)
             self.serial += 1
@@ -283,7 +282,7 @@ class Link:
                     {"seconds": seconds, "attempts": self.attempts},
                 )
             )
-            self.session["reconnects"] = int(self.session.get("reconnects") or 0) + 1
+            self.session["reconnects"] += 1
             self.offline_since = None
             self.reason = None
             self.attempts = 0
@@ -1027,6 +1026,7 @@ def _wait_for_link(
 ) -> None:
     """Sleep out one reconnect interval, or raise the clean ``offline`` stop.
 
+    Returns early once another worker's bytes prove the link is back.
     Budgets, the floor, and Ctrl-C keep their meaning while waiting: the
     stop controller is checked every slice, so a wait never outlives them.
     """
@@ -1035,7 +1035,7 @@ def _wait_for_link(
     if link.patience <= 0:
         raise CleanStop("offline", f"network unreachable ({reason})")
     retry_at = link.lost(path, reason, attempt)
-    while True:
+    while link.offline:
         if stop_controller is not None:
             stop_controller.check(session)
         offline_for = link.offline_for()
@@ -1046,9 +1046,8 @@ def _wait_for_link(
             )
         left = retry_at - time.monotonic()
         if left <= 0:
-            break
+            return
         time.sleep(min(PACE_SLICE_S, left))
-    link.retrying(path)
 
 
 def _fetch_with_reconnect(
@@ -1061,8 +1060,6 @@ def _fetch_with_reconnect(
     force: bool,
     tqdm_class,
     counter: NetworkCounter,
-    stop_controller: StopController | None,
-    link: Link | None,
     events: list[dict],
 ) -> None:
     """One ``download_file`` that outlives a network outage.
@@ -1072,8 +1069,13 @@ def _fetch_with_reconnect(
     partial rather than discarding it. Anything that is not the network
     propagates unchanged.
     """
+    link = counter.link
     attempt = 0
     while True:
+        if link is not None and link.offline:
+            # Every attempt begun during the outage — a retry, or a fresh
+            # file — is one whose first byte proves the link.
+            link.retrying(relative)
         try:
             provider.download_file(
                 source,
@@ -1086,7 +1088,9 @@ def _fetch_with_reconnect(
         except BaseException as exc:
             if counter.pending_stop is not None:
                 raise counter.pending_stop from None
-            reason = provider.transient_network_error(exc) if link is not None else None
+            reason = None
+            if link is not None and isinstance(exc, Exception):
+                reason = provider.transient_network_error(exc)
             if reason is None:
                 raise
             if attempt == 0:
@@ -1094,7 +1098,12 @@ def _fetch_with_reconnect(
                     _event(relative, "network_lost", f"{reason}; waiting to reconnect")
                 )
             _wait_for_link(
-                link, relative, reason, attempt, stop_controller, counter.session
+                link,
+                relative,
+                reason,
+                attempt,
+                counter.stop_controller,
+                counter.session,
             )
             attempt += 1
             force = False
@@ -1120,7 +1129,6 @@ def _download_one(
     stop_controller: StopController | None,
     local_sources: dict[str, list[dict]],
     meter=None,
-    link: Link | None = None,
 ) -> dict:
     """Worker-safe download/hash result; it never writes the ledger."""
     if stop_controller is not None:
@@ -1204,8 +1212,6 @@ def _download_one(
                 force=retry > 0,
                 tqdm_class=tqdm_class,
                 counter=counter,
-                stop_controller=stop_controller,
-                link=link,
                 events=events,
             )
             if meter is not None:
@@ -1337,7 +1343,6 @@ def _transfer_small_files(
     progress,
     meter=None,
     live: bool = False,
-    link: Link | None = None,
 ) -> None:
     if not small:
         return
@@ -1360,7 +1365,6 @@ def _transfer_small_files(
                 stop_controller,
                 local_sources,
                 meter,
-                link,
             ): expected
             for expected in small
         }
@@ -1478,7 +1482,6 @@ def transfer_all(
                 emit,
                 meter=meter,
                 live=display.live,
-                link=link,
             )
 
             for index, expected in enumerate(large, 1):
@@ -1495,7 +1498,6 @@ def transfer_all(
                     stop_controller,
                     local_sources,
                     meter,
-                    link,
                 )
                 _record_download_result(bundle_dir, ledger, session, result)
                 meter.note()

@@ -1578,11 +1578,23 @@ def _run(func, args) -> int:
         if os.environ.get("DARSAY_DEBUG"):
             raise
         print(
-            f"darsay: unexpected {type(exc).__name__}: {exc}\n"
+            f"darsay: unexpected {type(exc).__name__}: {exc} ({_raised_at(exc)})\n"
             "  Set DARSAY_DEBUG=1 to see the full traceback.",
             file=sys.stderr,
         )
         return 1
+
+
+def _raised_at(exc: BaseException) -> str:
+    """``file.py:line`` of the innermost darsay frame — enough for a bug report."""
+    import traceback
+
+    package = Path(__file__).resolve().parent
+    # The outermost frame is ``_run`` itself; the error came from below it.
+    frames = traceback.extract_tb(exc.__traceback__)[1:]
+    ours = [f for f in frames if Path(f.filename).resolve().is_relative_to(package)]
+    frame = (ours or frames)[-1]
+    return f"{Path(frame.filename).name}:{frame.lineno}"
 
 
 if __name__ == "__main__":

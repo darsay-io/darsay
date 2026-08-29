@@ -35,8 +35,10 @@ Tool version (`darsay.__version__`) is independent of
   resolve … — DNS lookup failed` — for `estimate` and `archive` alike.
 - **Bandwidth cap** — `transfer.max_rate` in config (`"5M"` = 5 MiB/s),
   `$DARSAY_MAX_RATE`, or `--max-rate 5M` per run (`0` lifts a configured
-  cap) paces the whole transfer with a token bucket across every worker,
-  so an archive can run all day without owning the connection. The plan
+  cap) paces the whole transfer with a leaky bucket across every worker,
+  so an archive can run all day without owning the connection; the
+  bucket never banks credit, so the rate holds at the cap from the first
+  chunk rather than bursting past it after every pause. The plan
   block prices it — `rate: capped at 5.0 MiB/s — about 40h for the
   remaining 703.8 GiB` — the panel shows `· cap 5.0 MiB/s` in its tail,
   and the Hub client reads in quarter-second chunks under a cap so the
@@ -55,7 +57,8 @@ Tool version (`darsay.__version__`) is independent of
   (`DARSAY_PROGRESS=line`) polls every second so outage notices land
   promptly while status lines keep their 10 s cadence.
 - **No more tracebacks for users** — an unexpected error ends every
-  subcommand as one line (`darsay: unexpected ConnectError: …`) with a
+  subcommand as one line naming the darsay frame it came from
+  (`darsay: unexpected ConnectError: … (huggingface.py:301)`) with a
   `DARSAY_DEBUG=1` hint for the full traceback; provider errors
   (`SourceError`) print their message and exit 1.
 

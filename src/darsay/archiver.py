@@ -45,7 +45,6 @@ from .schema import (
 from .sources import (
     SourceError,
     SourceGatedError,
-    SourceNotFoundError,
     SourceRef,
     get_provider,
     parse_source,
@@ -252,14 +251,10 @@ def archive(
         )
         try:
             snapshot = provider.pin(ref, pin_revision, require_access=True)
-        except SourceGatedError as exc:
-            if orphan_dir is not None:
-                shutil.rmtree(orphan_dir, ignore_errors=True)
-            raise SystemExit(str(exc)) from None
-        except SourceNotFoundError as exc:
-            raise SystemExit(str(exc)) from None
         except SourceError as exc:
-            # Unreachable host, upstream outage: nothing durable has started.
+            # Gated, missing, or unreachable: nothing durable has started.
+            if isinstance(exc, SourceGatedError) and orphan_dir is not None:
+                shutil.rmtree(orphan_dir, ignore_errors=True)
             raise SystemExit(str(exc)) from None
         bundle_dir = bundle_dir_for(vault, ref, snapshot.revision)
 

@@ -22,6 +22,16 @@ from darsay.providers.base import (
 )
 
 
+class Clock:
+    """An injectable ``time.monotonic``: tests move ``t`` by hand."""
+
+    def __init__(self, t: float = 0.0):
+        self.t = t
+
+    def __call__(self) -> float:
+        return self.t
+
+
 @dataclass
 class PinnedRepo:
     files: dict[str, bytes]

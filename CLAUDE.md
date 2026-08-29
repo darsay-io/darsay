@@ -22,7 +22,7 @@ point `darsay` (argparse, subcommands in `cli.py`).
 - `src/darsay/` — `archiver.py` (download + manifest assembly),
   `transfer.py` (pin ledger, reconciliation, resumable/budgeted per-file
   transfer, cooperative lanes/assembly, sibling-blob reuse, the rate-cap
-  token bucket, and reconnect-after-network-loss via the shared `Link`),
+  leaky bucket, and reconnect-after-network-loss via the shared `Link`),
   `progress.py` (archive-level live transfer panel: percent, bytes, rate,
   ETA, offline/reconnecting states; captures stray stdout/stderr *and*
   library `StreamHandler`s above the panel),

@@ -159,7 +159,7 @@ run that cannot finish says so before the first byte. Design:
 ## Cap the bandwidth
 
 An archive that runs all day should not own the connection. The cap is
-one token bucket shared by every worker, in bytes per second.
+one leaky bucket shared by every worker, in bytes per second.
 
 ```bash
 darsay archive Qwen/Qwen3.8-27B --max-rate 5M    # this run: 5 MiB/s

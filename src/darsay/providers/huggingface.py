@@ -7,6 +7,7 @@ ref, or the unprefixed Hub shorthand (``owner/name``, ``datasets/owner/name``).
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -127,14 +128,10 @@ def throttled_chunk_size(max_rate: int, default: int) -> int:
     return max(_MIN_THROTTLED_CHUNK, min(default, max_rate // 4))
 
 
-class _RetryChatterFilter:
-    """Drop the Hub client's retry notices while darsay's transfer runs.
+class _RetryChatterFilter(logging.Filter):
+    """Drop the Hub client's retry notices while darsay's transfer runs."""
 
-    A ``logging.Filter`` stand-in (any object with ``filter`` works) so the
-    provider does not import ``logging`` at module load.
-    """
-
-    def filter(self, record) -> bool:
+    def filter(self, record: logging.LogRecord) -> bool:
         return not record.getMessage().startswith(_HUB_RETRY_CHATTER)
 
 
@@ -332,7 +329,6 @@ class HuggingFaceProvider(SourceProvider):
         sleeps stay short, and the client's own retry log lines are filtered:
         darsay owns the outage story on the terminal.
         """
-        import logging
         import os
 
         import huggingface_hub.constants as hub_constants

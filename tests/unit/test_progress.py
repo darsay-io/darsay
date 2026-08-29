@@ -25,14 +25,7 @@ from darsay.progress import (
     snapshot_log_line,
     styled_bar,
 )
-
-
-class Clock:
-    def __init__(self, t: float = 0.0):
-        self.t = t
-
-    def __call__(self) -> float:
-        return self.t
+from tests.fakes import Clock
 
 
 def _meter(**kwargs) -> TransferMeter:
@@ -582,38 +575,6 @@ def test_progress_off_emits_nothing(monkeypatch):
     assert buf.getvalue() == ""
 
 
-def test_describe_network_error_walks_the_cause_chain():
-    import errno
-    import socket
-
-    from darsay.providers.base import describe_network_error
-
-    assert describe_network_error(socket.gaierror(8, "no")) == "DNS lookup failed"
-    assert describe_network_error(ConnectionRefusedError()) == "connection refused"
-    assert describe_network_error(TimeoutError()) == "timed out"
-    assert describe_network_error(OSError(errno.ENETUNREACH, "x")) == (
-        "network unreachable"
-    )
-    assert describe_network_error(OSError(errno.ENOSPC, "full")) is None
-    assert describe_network_error(ValueError("nope")) is None
-    try:
-        try:
-            raise BrokenPipeError()
-        except BrokenPipeError as inner:
-            raise RuntimeError("wrapped") from inner
-    except RuntimeError as exc:
-        assert describe_network_error(exc) == "connection closed"
-    # httpcore translates socket errors with ``raise ... from None``; the
-    # hidden context is still the truth.
-    try:
-        try:
-            raise socket.gaierror(8, "nodename nor servname provided")
-        except socket.gaierror:
-            raise RuntimeError("translated") from None
-    except RuntimeError as exc:
-        assert describe_network_error(exc) == "DNS lookup failed"
-
-
 def _offline_snap(**overrides) -> dict:
     snap = {
         "fraction": 0.002,
@@ -705,10 +666,15 @@ def test_rate_cap_shows_in_the_tail_when_it_fits():
 
 
 def test_log_line_reports_outage_and_cap():
+    """The log line is the panel's fields in a row: the same words, once."""
     line = snapshot_log_line({**_offline_snap(), "max_rate": 5 * 1024**2})
-    assert "offline 2 min 10s, retry in 8s" in line
+    assert "offline  retry in 8s · 2 min 10s offline" in line
     assert "cap 5.0 MiB/s" in line
     assert "\n" not in line
+    reconnecting = snapshot_log_line(
+        _offline_snap(link={"state": "reconnecting", "since": 132.0, "attempts": 6})
+    )
+    assert "reconnecting  attempt 6 · 2 min 12s offline" in reconnecting
 
 
 def test_meter_holds_last_eta_until_stalled():

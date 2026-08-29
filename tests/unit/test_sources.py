@@ -120,3 +120,35 @@ def test_source_from_ledger_canonical_address():
     dataset = source_from_ledger({"address": "huggingface:datasets/owner/name"})
     assert dataset.artifact_type == "dataset"
     assert dataset.canonical == "huggingface:datasets/owner/name"
+
+
+def test_describe_network_error_walks_the_cause_chain():
+    import errno
+    import socket
+
+    from darsay.providers.base import describe_network_error
+
+    assert describe_network_error(socket.gaierror(8, "no")) == "DNS lookup failed"
+    assert describe_network_error(ConnectionRefusedError()) == "connection refused"
+    assert describe_network_error(TimeoutError()) == "timed out"
+    assert describe_network_error(OSError(errno.ENETUNREACH, "x")) == (
+        "network unreachable"
+    )
+    assert describe_network_error(OSError(errno.ENOSPC, "full")) is None
+    assert describe_network_error(ValueError("nope")) is None
+    try:
+        try:
+            raise BrokenPipeError()
+        except BrokenPipeError as inner:
+            raise RuntimeError("wrapped") from inner
+    except RuntimeError as exc:
+        assert describe_network_error(exc) == "connection closed"
+    # httpcore re-raises a translated socket error with ``raise ... from
+    # None``; the suppressed context is still the truth.
+    try:
+        try:
+            raise socket.gaierror(8, "nodename nor servname provided")
+        except socket.gaierror:
+            raise RuntimeError("translated") from None
+    except RuntimeError as exc:
+        assert describe_network_error(exc) == "DNS lookup failed"
