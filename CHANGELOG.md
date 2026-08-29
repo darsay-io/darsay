@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Tool version (`darsay.__version__`) is independent of
 `schema_version` in manifests and of `MVB_FORMAT_VERSION` in exports.
 
+## [0.10.0] - 2026-08-28
+
+### Added
+
+- **Free-space floor** — `archive` pauses cleanly when the destination's
+  free space drops below a floor (default 2 GiB) instead of running an
+  unattended machine into a full partition. The floor is checked at the
+  same points as byte and time budgets, probed at most every 2 s, and
+  stops every worker once tripped. The session records
+  `end_reason: "disk"`, the CLI exits 10 with a "free disk space, then
+  re-run" hint, and the same command resumes from verified and partial
+  bytes. `--min-free SIZE` overrides per run (`0` disables). The plan
+  line and `estimate` price the floor in:
+  `needs 40.0 GiB, free 45.0 GiB (10.0 GiB floor) — INSUFFICIENT`.
+- **Config file** — machine-local settings in TOML:
+  `~/.config/darsay/config.toml` (`$XDG_CONFIG_HOME`, or `$DARSAY_CONFIG`)
+  and `<vault>/config.toml`, which travels with an archive drive. Layers
+  resolve default → user file → vault file → `$DARSAY_MIN_FREE` → flag.
+  Unknown keys warn so a typo cannot silently disarm a guard; unknown
+  tables are ignored so a newer darsay's vault config still loads.
+  `darsay config` prints the effective values and which layer set each
+  (`--json` for scripts). Config is operator preference, never archival
+  fact: it lives outside bundles and is never exported. See
+  [Incremental transfer](docs/INCREMENTAL.md#6-session-budgets).
+
 ## [0.9.0] - 2026-08-27
 
 ### Added
