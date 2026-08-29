@@ -393,7 +393,7 @@ A 2040 reader without darsay uses the stdlib script shipped in every
 export: `python3 darsay-verify.py <bundle-or-tar>`. That check is
 read-only — it does not write `verification.json`.
 
-```cron
+```txt
 # nightly, mail on failure
 0 3 * * * darsay --vault /srv/vault verify /srv/vault/qwen--qwen3-0.6b/<rev>
 ```
