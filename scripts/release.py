@@ -5,6 +5,15 @@ Releasing is pushing the tag. This script does everything before that, and
 refuses to leave a half-finished release behind: every check runs before the
 first file is written, and the tag is only cut once the full gate passes.
 
+Two kinds of pre-release edit exist, and the script treats them
+differently. Anything derivable from a source literal — the version, the
+docs landing table's version rows, the changelog date — it writes, because
+a hand-typed copy can only drift. Anything authored — release notes, docs
+that describe a flag — it confirms and refuses on, because it cannot write
+prose: the changelog section must exist, the user docs must not describe a
+flag the CLI does not ship, and every ``archive`` flag must be mentioned
+somewhere a user reads.
+
     python scripts/release.py 0.8.1
     python scripts/release.py 0.8.1 --dry-run     # report only, write nothing
     python scripts/release.py 0.8.1 --push        # also push the branch
@@ -25,6 +34,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 INIT = ROOT / "src" / "darsay" / "__init__.py"
+CATALOG = ROOT / "src" / "darsay" / "catalog.py"
+EXPORT = ROOT / "src" / "darsay" / "export.py"
 CHANGELOG = ROOT / "CHANGELOG.md"
 DOCS_INDEX = ROOT / "docs" / "README.md"
 
@@ -34,8 +45,30 @@ SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 
 # The one literal the build, the tag, and `darsay --version` all read.
 VERSION_LINE = re.compile(r'(?m)^__version__ = "([^"]+)"$')
-# The docs landing table's "Current" row for the tool.
-DOCS_TOOL_ROW = re.compile(r"(?m)^(\| Tool \| \*\*)([^*]+)(\*\* \|)$")
+
+# The docs landing table's "Current" rows: each is a claim about one source
+# literal, so each is written from it, never typed.
+DOCS_ROWS = (
+    ("Tool", "__version__", INIT),
+    ("Manifest schema", "SCHEMA_VERSION", INIT),
+    ("Catalog schema", "CATALOG_SCHEMA_VERSION", CATALOG),
+    ("MVB format", "MVB_FORMAT_VERSION", EXPORT),
+)
+
+# User-facing docs that describe the CLI. CLAUDE.md asks that they never
+# document an unshipped flag as live; the archive flags — the operator
+# surface — must each be findable in at least one of them.
+CLI_DOCS = (
+    "README.md",
+    "docs/GETTING-STARTED.md",
+    "docs/CONCEPTS.md",
+    "docs/INCREMENTAL.md",
+    "examples/README.md",
+)
+FLAG_TOKEN = re.compile(r"(?<![\w-])--[a-z][a-z0-9-]*")
+# A flag belongs to the last program named before it on its line; only
+# darsay's are checked, so `rsync's --link-dest` in prose stays rsync's.
+PROGRAM = re.compile(r"\b(darsay|rsync|pytest|pipx|uvx?|git|wget|curl|tar|hf)\b")
 
 
 class Abort(SystemExit):
@@ -58,11 +91,21 @@ def git(*args: str) -> str:
     return proc.stdout.strip()
 
 
-def read_current_version() -> str:
-    match = VERSION_LINE.search(INIT.read_text(encoding="utf-8"))
+def read_literal(path: Path, name: str) -> str:
+    """The quoted value of ``NAME = "..."`` at the top level of a source file."""
+    pattern = re.compile(rf'(?m)^{re.escape(name)} = "([^"]+)"$')
+    match = pattern.search(path.read_text(encoding="utf-8"))
     if match is None:
-        raise Abort(f"no __version__ literal in {INIT.relative_to(ROOT)}")
+        raise Abort(f"no {name} literal in {path.relative_to(ROOT)}")
     return match.group(1)
+
+
+def read_current_version() -> str:
+    return read_literal(INIT, "__version__")
+
+
+def docs_row(label: str) -> re.Pattern:
+    return re.compile(rf"(?m)^(\| {re.escape(label)} \| \*\*)([^*]+)(\*\* \|)$")
 
 
 def parse(version: str) -> tuple[int, int, int]:
@@ -130,6 +173,54 @@ def check_changelog(version: str) -> str:
     return match.group(0)
 
 
+def check_docs_table() -> None:
+    """Every derived row must have a source literal and a table row to land in."""
+    text = DOCS_INDEX.read_text(encoding="utf-8")
+    for label, name, path in DOCS_ROWS:
+        read_literal(path, name)
+        if docs_row(label).search(text) is None:
+            raise Abort(
+                f"{DOCS_INDEX.relative_to(ROOT)} has no '| {label} | **…** |' row"
+            )
+
+
+def check_docs_flags() -> None:
+    """The user docs and the CLI must agree on which flags exist.
+
+    Confirm, never write: a flag the docs describe but the CLI lacks needs a
+    decision, and an archive flag no doc mentions needs a sentence.
+    """
+    sys.path.insert(0, str(ROOT / "src"))
+    from darsay.cli import flags_by_command  # stdlib-only module
+
+    by_command = flags_by_command()
+    shipped = set().union(*by_command.values())
+    mentioned: set[str] = set()
+    unshipped: list[str] = []
+    for rel in CLI_DOCS:
+        lines = (ROOT / rel).read_text(encoding="utf-8").splitlines()
+        for number, line in enumerate(lines, 1):
+            for match in FLAG_TOKEN.finditer(line):
+                owners = PROGRAM.findall(line[: match.start()])
+                if owners and owners[-1] != "darsay":
+                    continue
+                flag = match.group(0)
+                mentioned.add(flag)
+                if flag not in shipped:
+                    unshipped.append(f"{flag}  {rel}:{number}")
+    if unshipped:
+        raise Abort(
+            "docs describe flags the CLI does not ship:\n        "
+            + "\n        ".join(unshipped)
+        )
+    undocumented = sorted(by_command["archive"] - mentioned - {"--help"})
+    if undocumented:
+        raise Abort(
+            f"archive flags no user doc mentions: {' '.join(undocumented)}\n"
+            f"        (looked in {', '.join(CLI_DOCS)})"
+        )
+
+
 def check_tooling(skip_build: bool) -> None:
     missing = [m for m in ("ruff", "pytest") if not have_module(m)]
     if not skip_build:
@@ -155,13 +246,23 @@ def write_version(version: str) -> None:
     )
 
 
-def write_docs_version(version: str) -> bool:
-    """Keep the docs landing table honest. Cosmetic, but it is a claim."""
+def write_docs_versions() -> list[str]:
+    """Rewrite the docs landing table from the source literals it claims.
+
+    Runs after ``write_version`` so the Tool row reads the new version.
+    Returns the rows that changed, for the log.
+    """
     text = DOCS_INDEX.read_text(encoding="utf-8")
-    updated, count = DOCS_TOOL_ROW.subn(rf"\g<1>{version}\g<3>", text, count=1)
-    if count:
-        DOCS_INDEX.write_text(updated, encoding="utf-8")
-    return bool(count)
+    changed = []
+    for label, name, path in DOCS_ROWS:
+        value = read_literal(path, name)
+        updated = docs_row(label).sub(rf"\g<1>{value}\g<3>", text, count=1)
+        if updated != text:
+            changed.append(f"{label} {value}")
+            text = updated
+    if changed:
+        DOCS_INDEX.write_text(text, encoding="utf-8")
+    return changed
 
 
 def write_changelog_date(version: str, today: str) -> None:
@@ -274,6 +375,9 @@ def main(argv: list[str] | None = None) -> int:
     check_repo_state(tag, allow_branch=args.allow_branch)
     heading = check_changelog(version)
     print(f"  - changelog: {heading.strip()}")
+    check_docs_table()
+    check_docs_flags()
+    print("  - docs: version table rows present, flags match the CLI")
     print("  - repo clean, tag free\n")
 
     today = dt.date.today().isoformat()
@@ -287,8 +391,8 @@ def main(argv: list[str] | None = None) -> int:
     print("writing:")
     write_version(version)
     print(f"  - {INIT.relative_to(ROOT)}")
-    if write_docs_version(version):
-        print(f"  - {DOCS_INDEX.relative_to(ROOT)}")
+    if rows := write_docs_versions():
+        print(f"  - {DOCS_INDEX.relative_to(ROOT)} ({', '.join(rows)})")
     write_changelog_date(version, today)
     print(f"  - {CHANGELOG.relative_to(ROOT)} (dated {today})\n")
 

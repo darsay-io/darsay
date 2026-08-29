@@ -350,6 +350,7 @@ with zero payload network bytes.
 | `--min-free SIZE` | pause cleanly once destination free space drops below SIZE (default 2 GiB via config; `0` disables) |
 | `--max-rate SIZE` | cap network transfer at SIZE per second across every worker (`5M`, `500K`; default unlimited via config; `0` lifts a configured cap) |
 | `--max-offline DURATION` | keep waiting for a lost network up to DURATION before pausing cleanly (`30m`, `2h`; default 1 h via config; `0` pauses at the first failure) |
+| `--revision REF` | pin a branch, tag, or commit instead of `main`; the resolved commit is frozen for every later run |
 | `--dry-run` | pin (if new) + reconcile + plan report; move no payload bytes |
 | `--rehash` | re-verify every present file by digest instead of trusting the ledger (periodic paranoia for months-long archives) |
 | `--jobs N` | small-file worker pool width (default 4; large files always sequential) |

@@ -152,6 +152,16 @@ def test_archive_next_parse_orders(tmp_path):
         _main([*vault, "archive", "--next", "summer", "huggingface:Qwen/Qwen3-0.6B"])
 
 
+def test_flags_by_command_walks_every_subparser():
+    from darsay.cli import flags_by_command
+
+    flags = flags_by_command()
+    assert {"--version", "--vault"} <= flags[""]
+    assert {"--max-rate", "--max-offline", "--min-free", "--shard"} <= flags["archive"]
+    assert "--desire" in flags["catalog add"]
+    assert "--prune" in flags["envs"]
+
+
 def test_rate_and_duration_flags():
     from darsay.cli import _duration, _rate
 

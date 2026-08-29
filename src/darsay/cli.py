@@ -1104,7 +1104,12 @@ def cmd_regen(args) -> int:
     return 0
 
 
-def main(argv=None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """The whole CLI — every subcommand and flag — without parsing anything.
+
+    ``main`` parses with it; the release gate walks it so the docs can be
+    held to the flags that actually ship.
+    """
     vault_help = "vault root (default: $DARSAY_HOME or ~/darsay)"
     # After the subcommand, SUPPRESS so a missing flag does not overwrite
     # `darsay --vault DIR list` with None.
@@ -1516,6 +1521,36 @@ def main(argv=None) -> int:
     )
     p.set_defaults(func=cmd_assemble)
 
+    return parser
+
+
+def flags_by_command(parser: argparse.ArgumentParser | None = None) -> dict:
+    """Every ``--flag`` the CLI ships, keyed by command path (``""`` is the root).
+
+    Walks argparse's action list, subparsers included, so ``catalog add``
+    is its own key.
+    """
+    parser = build_parser() if parser is None else parser
+    found: dict[str, set[str]] = {}
+
+    def walk(node: argparse.ArgumentParser, name: str) -> None:
+        found[name] = {
+            option
+            for action in node._actions
+            for option in action.option_strings
+            if option.startswith("--")
+        }
+        for action in node._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for sub_name, sub in action.choices.items():
+                    walk(sub, f"{name} {sub_name}".strip())
+
+    walk(parser, "")
+    return found
+
+
+def main(argv=None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
     if not getattr(args, "command", None):
         parser.print_help()
