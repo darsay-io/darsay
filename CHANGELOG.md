@@ -7,6 +7,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Tool version (`darsay.__version__`) is independent of
 `schema_version` in manifests and of `MVB_FORMAT_VERSION` in exports.
 
+## [0.11.0]
+
+### Added
+
+- **Network loss is a panel state, not a stack trace** — when the
+  connection drops mid-transfer (laptop leaves Wi-Fi, router reboots,
+  DNS goes away, the Hub answers 5xx), `archive` banks what arrived,
+  keeps the partial, and waits for the link: the panel's time-remaining
+  slot reads `offline` in amber with `retry in 8s · 2 min 10s offline`
+  in the tail, then `reconnecting` while an attempt is in flight, and
+  the in-flight file keeps its banked bytes on screen. Retries follow a
+  2 → 4 → 8 → 15 → 30 s schedule; the first byte that arrives flips the
+  panel back and records one scrollback line — `Reconnected after
+  4 min 12s (7 attempts).` — with a matching `Network unreachable (DNS
+  lookup failed) — waiting to reconnect …` line when it went. Ctrl-C,
+  budgets, and the free-space floor keep their meaning while waiting.
+  After `transfer.max_offline` (default 1 h; `--max-offline 30m`;
+  `0` pauses at the first failure) the session pauses cleanly with
+  `end_reason: "offline"`, exit 10, and an "once the network is back,
+  re-run" hint. Sessions record `reconnects`; the ledger logs
+  `network_lost` / `network_restored` events. Providers classify their
+  transport's failures via `SourceProvider.transient_network_error`;
+  the Hub plugin covers httpx connect/read/timeout errors, transient Hub
+  statuses, and a stream cut short. A host that cannot be reached at
+  pin time now ends in one line — `error: cannot reach Hugging Face to
+  resolve … — DNS lookup failed` — for `estimate` and `archive` alike.
+- **Bandwidth cap** — `transfer.max_rate` in config (`"5M"` = 5 MiB/s),
+  `$DARSAY_MAX_RATE`, or `--max-rate 5M` per run (`0` lifts a configured
+  cap) paces the whole transfer with a token bucket across every worker,
+  so an archive can run all day without owning the connection. The plan
+  block prices it — `rate: capped at 5.0 MiB/s — about 40h for the
+  remaining 703.8 GiB` — the panel shows `· cap 5.0 MiB/s` in its tail,
+  and the Hub client reads in quarter-second chunks under a cap so the
+  rate stays smooth rather than bursty.
+
+### Changed
+
+- **Panel defenses** — library loggers that bound a `StreamHandler` to
+  the terminal before the panel started (the Hub client does, at
+  import) are routed above the panel too, so a warning can no longer
+  push panel rows into scrollback and leave a "double panel" behind.
+  The Hub client's own retry commentary is filtered during a transfer;
+  darsay tells that story itself. When bytes stop, the ETA holds its
+  last good estimate instead of ballooning or flipping to `starting`
+  until `stalled` is declared; `stalled` is amber. Log mode
+  (`DARSAY_PROGRESS=line`) polls every second so outage notices land
+  promptly while status lines keep their 10 s cadence.
+- **No more tracebacks for users** — an unexpected error ends every
+  subcommand as one line (`darsay: unexpected ConnectError: …`) with a
+  `DARSAY_DEBUG=1` hint for the full traceback; provider errors
+  (`SourceError`) print their message and exit 1.
+
 ## [0.10.0] - 2026-08-28
 
 ### Added
