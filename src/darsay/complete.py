@@ -24,6 +24,7 @@ COMMANDS = (
     "assemble",
     "rm",
     "du",
+    "config",
     "complete",
 )
 CATALOG_COMMANDS = ("new", "add", "drop", "adopt", "regen")

@@ -5,7 +5,14 @@ import argparse
 import pytest
 
 from darsay import __version__
-from darsay.cli import _byte_size, _positive_float, _positive_int, _shard_key, main
+from darsay.cli import (
+    _byte_size,
+    _min_free,
+    _positive_float,
+    _positive_int,
+    _shard_key,
+    main,
+)
 
 
 def test_version_flag(capsys):
@@ -38,6 +45,7 @@ def test_help_lists_subcommands(capsys):
         "run",
         "rm",
         "du",
+        "config",
         "complete",
         "catalog",
         "list",
@@ -52,6 +60,14 @@ def test_byte_size_suffixes():
     assert _byte_size("20G") == 20 * 1024**3
     assert _byte_size("1.5K") == int(1.5 * 1024)
     assert _byte_size("2GiB") == 2 * 1024**3
+
+
+def test_min_free_allows_zero_to_disable():
+    assert _min_free("0") == 0
+    assert _min_free("2G") == 2 * 1024**3
+    assert _min_free("500M") == 500 * 1024**2
+    with pytest.raises(argparse.ArgumentTypeError):
+        _min_free("lots")
 
 
 def test_byte_size_rejects_zero_and_junk():

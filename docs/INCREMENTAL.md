@@ -85,8 +85,9 @@ around that one line.
    they match. Partial files resume with Range requests from the byte where
    they stopped. Identical blobs already verified in sibling bundles are
    copied locally instead of fetched (§5).
-5. **Every stop is clean, every run converges.** Budgets, Ctrl-C, network
-   loss, power loss — all leave a state a later run continues from. The
+5. **Every stop is clean, every run converges.** Budgets, Ctrl-C, a
+   filling disk, network loss, power loss — all leave a state a later run
+   continues from. The
    state file is written atomically (temp + rename) after every file
    completion, so the worst possible loss is one in-flight file's progress
    record, which reconciliation recovers anyway.
@@ -126,7 +127,8 @@ converge to the correct classification from evidence.
 **Plan** — report the arithmetic before moving anything: files and bytes
 verified / partial / missing, bytes already banked inside partials,
 estimated remaining network transfer, and a disk preflight of remaining
-bytes against free space (reusing `estimate`'s headroom check). `--dry-run`
+bytes against free space above the free-space floor (§6; the same
+headroom check `estimate` uses). `--dry-run`
 stops here — this is the rsync `-n` of the system, and the answer to "what
 have we got, what remains" at any moment. `darsay estimate` performs the
 same read-only classification (without hashing, so adoptable bytes report
@@ -180,8 +182,9 @@ pin whose reconciliation adopts every verified byte, i.e. a re-verification
 plus manifest rebuild, not a re-download.
 
 Session accounting: every run appends a session record (started, ended, end
-reason — `complete` / `budget` / `interrupt` / `assemble` / `error` — bytes
-from network, bytes adopted, files completed, host). Ctrl-C escalates: the
+reason — `complete` / `budget` / `disk` / `interrupt` / `assemble` /
+`error` — bytes from network, bytes adopted, files completed, host).
+Ctrl-C escalates: the
 first press requests a clean stop (the panel shows "stopping", the current
 chunk is banked, the state write finishes, and the CLI exits 10 with the
 resume hint), a second press aborts immediately — even a stalled connection
@@ -191,13 +194,18 @@ archive sessions also record their advisory `shard: "N/T"`; assembly records
 the number of merged inputs.
 
 **Exit codes:** `0` — bundle completed and registered by this invocation;
-`10` — clean partial stop, more remains (budgets and interrupts), so
-wrappers can loop; `1` — error.
+`10` — clean partial stop, more remains (budgets, the free-space floor,
+and interrupts), so wrappers can loop; `1` — error.
 
 ```bash
 # unattended completion over nightly cron: rerun until exit 0
 darsay archive Qwen/Qwen3.8-27B --max-minutes 240 || [ $? -eq 10 ]
 ```
+
+A loop like that is safe on a filling disk: a floor stop also exits 10,
+each rerun re-checks the floor before moving bytes, and the reason is in
+the session record and on the terminal — so the loop idles at the floor
+until an operator clears space, rather than driving the partition to zero.
 
 ## 4. `transfer.json` — the transfer ledger
 
@@ -328,6 +336,7 @@ with zero payload network bytes.
 |---|---|
 | `--max-gb N` / `--max-bytes SIZE` (`500M`, `20G`) | stop cleanly once network bytes this session exceed the cap |
 | `--max-minutes N` | stop cleanly at the deadline |
+| `--min-free SIZE` | pause cleanly once destination free space drops below SIZE (default 2 GiB via config; `0` disables) |
 | `--dry-run` | pin (if new) + reconcile + plan report; move no payload bytes |
 | `--rehash` | re-verify every present file by digest instead of trusting the ledger (periodic paranoia for months-long archives) |
 | `--jobs N` | small-file worker pool width (default 4; large files always sequential) |
@@ -340,6 +349,71 @@ resumable partial, counted toward the next session. `darsay list` grows
 an in-progress row for bundles with a ledger but no manifest —
 `archiving: 61% (34.1/55.6 GB, 9/15 files verified)` — so the vault's
 overall state is visible without running anything.
+
+### The free-space floor
+
+Budgets bound what one session *takes*; the floor bounds what it *leaves*.
+An archive left running unattended must never fill the destination
+partition — a full disk breaks everything else on the machine, and a
+download that ends in `ENOSPC` is an error, not a pause. So `archive`
+holds a **free-space floor**, 2 GiB unless configured, and pauses cleanly
+the moment the destination's free space drops below it:
+
+- The floor is checked wherever budgets are checked — every transfer
+  callback and hash chunk — but the filesystem is probed at most every
+  2 s, so the guard never touches the hot path. It is measured at the
+  bundle directory, so it follows a `--vault` on a different disk.
+- The first probe under the floor trips a **sticky** stop: every worker
+  and the main thread stop at their next check, in-flight chunks are
+  banked exactly as for a budget stop, and the session ends with
+  `end_reason: "disk"`. The CLI exits 10 with the reason
+  (`disk: destination free space fell below the floor (1.9 GiB free <
+  2.0 GiB floor)`) and a "free disk space, then re-run" hint.
+- The floor is priced into headroom: plan and `estimate` verdicts compare
+  free space *above the floor* to remaining bytes, and print it —
+  `needs 40.0 GiB, free 45.0 GiB (10.0 GiB floor) — INSUFFICIENT` — so a
+  run that would only reach the floor says so before the first byte. A
+  run that starts below the floor pauses at its first check.
+- Resume is the ordinary command: nothing about the pin, ledger, or
+  partials is floor-specific. `--min-free 0` disables the floor for one
+  run when an operator is watching.
+
+Any disk-space check is a race against other writers; the floor is a
+margin, not a reservation. Two gigabytes covers the ledger rewrite, the
+Hub client's cache bookkeeping, and the rest of the machine's daily churn.
+A shared partition or a fast link wants more — set it once (below) and
+forget it.
+
+### Configuration
+
+The floor is the first setting that belongs to a machine rather than to
+one run, so darsay reads a small TOML config. Configuration is **operator preference,
+never archival fact**: nothing in it changes what a bundle records, only
+how this machine behaves while producing one. Config files therefore live
+outside bundles and are never exported. Layers resolve in order, later
+wins:
+
+| Layer | Where |
+|---|---|
+| defaults | `min_free = 2 GiB` |
+| user file | `$DARSAY_CONFIG`, else `$XDG_CONFIG_HOME/darsay/config.toml` (`~/.config/darsay/config.toml`) |
+| vault file | `<vault>/config.toml` — travels with an archive drive, so the drive carries limits suited to its own disk |
+| environment | `$DARSAY_MIN_FREE` |
+| flag | `--min-free SIZE` |
+
+```toml
+[transfer]
+min_free = "10G"   # bytes, or a binary K/M/G/T suffix; 0 disables the floor
+```
+
+Unknown keys in a known table warn on stderr — a typo (`min_fre`) must not
+silently disarm a guard the operator believes is set. Unknown tables are
+ignored so a vault config written by a newer darsay still loads here. A
+malformed file or value is an error, not a fallback to the default.
+`darsay config` prints the effective value of every setting and the layer
+that set it (`--json` for scripts); it is the first thing to run when a
+floor is not what you expected. `<vault>/config.toml` is a vault-root
+file, not a bundle, so `list`, `du`, and exports never see it.
 
 ## 7. Manifest impact
 
@@ -361,7 +435,7 @@ final mega-pass.
 | `transfer.json` deleted or corrupt | Rebuilt by reconciliation: hash present files, adopt matches. Slow, never lossy. |
 | Upstream repo gated or deleted between sessions | CDN fetches fail with the clean gated/not-found messages; the partial bundle stays resumable if access returns. Logged in `events`. |
 | Persistent digest mismatch | Retried once, then recorded; registration proceeds with `checksum_verification: fail` and the warning — same contract as the one-shot flow. |
-| Disk fills mid-session | Plan-phase preflight warns before starting; a mid-session `ENOSPC` ends the session as `error` with state intact. |
+| Disk filling mid-session | Plan-phase preflight prices the free-space floor (§6) and warns; the transfer pauses cleanly (`end_reason: disk`, exit 10) once free space drops below the floor, leaving the margin for the rest of the machine. Clear space and rerun. With the floor disabled, a mid-session `ENOSPC` ends the session as `error` with state intact. |
 | Two concurrent runs | Second exits on the live lock. |
 | Partial bundle copied or moved | Relative ledger/cache state resumes at the new vault; an inherited lock is reclaimed only when the physical directory identity changed. |
 | Cooperative inputs disagree | `assemble` rejects them before creating a destination; repo, type, full pin, and expected inventory must all match. |

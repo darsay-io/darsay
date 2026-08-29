@@ -104,6 +104,13 @@ The existing `release.yml` workflow is unchanged: it publishes artifacts on
 - Anything that needs a bundle uses `TestProvider.add_repo(...)` and
   `archive_quiet` from `tests/integration/conftest.py`. Synthetic payloads
   live in `tests/payloads.py`.
+- Config files and the free-space floor: an autouse fixture in
+  `tests/conftest.py` points `$XDG_CONFIG_HOME` at a nonexistent directory
+  and sets `$DARSAY_MIN_FREE=0`, so this machine's
+  `~/.config/darsay/config.toml` and its real free disk never reach a test.
+  Floor tests opt back in — `min_free=` on `archive`, a vault
+  `config.toml`, or a `no_env_floor`-style `delenv` — and fake
+  `darsay.transfer.shutil.disk_usage` rather than filling a disk.
 - `run` / `hydrate` (non-dry-run) must not install torch. Stub
   `darsay.hydrate._invoke_runner` and write a fake `hydration.json` whose
   `python_executable` exists (`sys.executable`).

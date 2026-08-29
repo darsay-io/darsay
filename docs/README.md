@@ -62,7 +62,7 @@ required to open a bundle. Everything else is how we got there.
 | [**Concepts**](CONCEPTS.md) | You want the objects named before the flags |
 | [**Examples**](../examples/README.md) | You want a copy-paste recipe |
 | [**Hydration**](HYDRATION.md) | `hydrate` / `run` / `envs` — isolated engines, offline inference |
-| [**Incremental transfer**](INCREMENTAL.md) | Budgets, Ctrl-C, Range partials, `--shard N/T`, `assemble` |
+| [**Incremental transfer**](INCREMENTAL.md) | Budgets, Ctrl-C, Range partials, the free-space floor and `config.toml`, `--shard N/T`, `assemble` |
 | [**Datasets**](DATASETS.md) | The source is `datasets/owner/name`; payload under `data/` |
 | [**Sources**](SOURCES.md) | Provider-qualified refs; Hugging Face is a plugin |
 | [**Quantization**](QUANTIZATION.md) | Canonical bundle vs satellite quants vs derived precision |

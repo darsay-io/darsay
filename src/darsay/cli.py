@@ -19,6 +19,7 @@ immutable payload, recorded facts, still loadable as-is.
     darsay archive --next CATALOG     fetch the next unfinished catalog entry
     darsay rm      <bundle> […]       delete bundles (confirmation unless --yes)
     darsay du                         disk usage of bundles and .runtime
+    darsay config                     effective settings and the files that set them
     darsay complete bash|zsh|fish     print a completion script to eval
     darsay info    <bundle>           quick manifest summary
     darsay regen   <bundle>           rebuild README.md after editing curation.md
@@ -90,19 +91,27 @@ def _positive_float(value: str) -> float:
 
 def _byte_size(value: str) -> int:
     """Parse bytes with optional binary K/M/G/T suffixes (and optional B)."""
-    match = re.fullmatch(r"\s*(\d+(?:\.\d+)?)\s*([KMGT]?)\s*(?:I?B)?\s*", value.upper())
-    if not match:
-        raise argparse.ArgumentTypeError(
-            f"invalid byte size {value!r}; use bytes or a suffix such as 500M or 20G"
-        )
-    number = float(match.group(1))
-    multiplier = 1024 ** ("KMGT".index(match.group(2)) + 1) if match.group(2) else 1
-    parsed = int(number * multiplier)
+    from .config import parse_byte_size
+
+    try:
+        parsed = parse_byte_size(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
     if parsed <= 0:
         raise argparse.ArgumentTypeError(
             f"expected a positive byte size, got {value!r}"
         )
     return parsed
+
+
+def _min_free(value: str) -> int:
+    """Byte size for the free-space floor; 0 disables it."""
+    from .config import parse_byte_size
+
+    try:
+        return parse_byte_size(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
 def _positive_int(value: str) -> int:
@@ -294,6 +303,7 @@ def cmd_archive(args) -> int:
             dry_run=args.dry_run,
             max_bytes=max_bytes,
             max_minutes=args.max_minutes,
+            min_free=args.min_free,
             rehash=args.rehash,
             jobs=args.jobs,
             shard=args.shard,
@@ -302,8 +312,9 @@ def cmd_archive(args) -> int:
     except PartialTransfer as stop:
         print(f"\nArchive paused cleanly ({stop.reason}: {stop.detail}).")
         print(f"Partial bundle: {stop.bundle_dir}")
+        action = "Free disk space, then re-run" if stop.reason == "disk" else "Re-run"
         print(
-            "Re-run the same archive command to continue from verified and partial bytes."
+            f"{action} the same archive command to continue from verified and partial bytes."
         )
         return 10
     except KeyboardInterrupt:
@@ -824,6 +835,56 @@ def cmd_du(args) -> int:
     return 0
 
 
+def cmd_config(args) -> int:
+    from .config import (
+        SETTINGS,
+        resolved_settings,
+        user_config_path,
+        vault_config_path,
+    )
+
+    vault = _vault_path(args, announce=not args.json)
+    files = {
+        "user": user_config_path(),
+        "vault": vault_config_path(vault),
+    }
+    resolved = resolved_settings(vault)
+    if args.json:
+        payload = {
+            "files": {
+                label: {"path": str(path), "present": path.is_file()}
+                for label, path in files.items()
+            },
+            "settings": {
+                item.name: {
+                    **resolved[(item.table, item.key)],
+                    "default": item.default,
+                    "env": item.env,
+                    "flag": item.flag,
+                    "help": item.help,
+                }
+                for item in SETTINGS
+            },
+        }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        return 0
+    for label, path in files.items():
+        note = "" if path.is_file() else "  (not present)"
+        print(f"{label + ' config:':<14} {path}{note}")
+    print("Effective settings:")
+    for item in SETTINGS:
+        info = resolved[(item.table, item.key)]
+        print(f"  {item.name} = {item.render(info['value'])}  [{info['origin']}]")
+        print(f"    {item.help}")
+        overrides = [f"file: [{item.table}] {item.key} = {item.example}"]
+        if item.env:
+            overrides.append(f"env: ${item.env}")
+        if item.flag:
+            overrides.append(f"flag: {item.flag}")
+        print("    " + "   ".join(overrides))
+    return 0
+
+
 def cmd_complete(args) -> int:
     from .complete import script_for
 
@@ -1111,6 +1172,13 @@ def main(argv=None) -> int:
         help="stop cleanly when the transfer session reaches N minutes",
     )
     p.add_argument(
+        "--min-free",
+        type=_min_free,
+        metavar="SIZE",
+        help="pause cleanly when destination free space drops below SIZE "
+        "(default: 2G, or config transfer.min_free; 0 disables)",
+    )
+    p.add_argument(
         "--rehash",
         action="store_true",
         help="re-hash every present payload file instead of trusting verified ledger entries",
@@ -1264,6 +1332,10 @@ def main(argv=None) -> int:
     p = add_cmd("du", help="disk usage of bundles and the shared runtime")
     p.add_argument("--json", action="store_true", help="machine-readable totals")
     p.set_defaults(func=cmd_du)
+
+    p = add_cmd("config", help="show effective settings and which config file set them")
+    p.add_argument("--json", action="store_true", help="machine-readable settings")
+    p.set_defaults(func=cmd_config)
 
     p = add_cmd("complete", help="print a bash/zsh/fish completion script")
     p.add_argument("shell", choices=("bash", "zsh", "fish"))

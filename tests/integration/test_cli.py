@@ -529,3 +529,32 @@ def test_cli_run_records_via_stubbed_runner(vault, test_provider, monkeypatch, c
     hyd = json.loads((bundle / "hydration.json").read_text())
     assert hyd["runs"][-1]["status"] == "pass"
     assert hyd["runs"][-1]["prompt"] == "Hello"
+
+
+def test_cli_config_shows_effective_floor(vault, capsys, monkeypatch):
+    monkeypatch.delenv("DARSAY_MIN_FREE", raising=False)
+    (vault / "config.toml").write_text(
+        '[transfer]\nmin_free = "10G"\n', encoding="utf-8"
+    )
+    assert main(["--vault", str(vault), "config"]) == 0
+    out = capsys.readouterr().out
+    assert "transfer.min_free = 10.0 GiB" in out
+    assert str(vault / "config.toml") in out
+
+    assert main(["--vault", str(vault), "config", "--json"]) == 0
+    out = capsys.readouterr().out
+    data = json.loads(out[out.index("{") :])
+    setting = data["settings"]["transfer.min_free"]
+    assert setting["value"] == 10 * 1024**3
+    assert setting["origin"] == str(vault / "config.toml")
+
+
+def test_cli_archive_min_free_pauses_with_exit_10(vault, test_provider, capsys):
+    test_provider.add_repo("acme/toy", model_files())
+    code = main(
+        ["--vault", str(vault), "archive", "test:acme/toy", "--min-free", "1024T"]
+    )
+    assert code == 10
+    out = capsys.readouterr().out
+    assert "paused cleanly (disk:" in out
+    assert "Free disk space, then re-run" in out

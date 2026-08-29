@@ -53,6 +53,18 @@ def pytest_collection_modifyitems(config, items):
             item.add_marker(skip_e2e)
 
 
+@pytest.fixture(autouse=True)
+def _hermetic_config(monkeypatch):
+    """Ignore this machine's darsay config files and free-disk state.
+
+    The default free-space floor would pause test archives on a nearly
+    full machine; floor-specific tests opt back in explicitly.
+    """
+    monkeypatch.delenv("DARSAY_CONFIG", raising=False)
+    monkeypatch.setenv("XDG_CONFIG_HOME", "/nonexistent/darsay-tests")
+    monkeypatch.setenv("DARSAY_MIN_FREE", "0")
+
+
 @pytest.fixture
 def vault(tmp_path: Path) -> Path:
     path = tmp_path / "vault"

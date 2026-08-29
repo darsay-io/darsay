@@ -79,6 +79,47 @@ def test_budget_stop_is_resumable(vault, test_provider):
     assert not set(first_verified) & set(resumed_downloads)
 
 
+def test_disk_floor_pauses_cleanly_and_resumes(vault, test_provider, monkeypatch):
+    from types import SimpleNamespace
+
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    disk = SimpleNamespace(free=1 * 1024**3)
+    monkeypatch.setattr("darsay.transfer.shutil.disk_usage", lambda path: disk)
+    with pytest.raises(PartialTransfer) as stopped:
+        archive_quiet("test:acme/toy", vault=vault, min_free=2 * 1024**3)
+    assert stopped.value.reason == "disk"
+    bundle = stopped.value.bundle_dir
+    assert not (bundle / "manifest.json").is_file()
+    ledger = load_ledger(bundle)
+    assert ledger["sessions"][-1]["end_reason"] == "disk"
+
+    # Space cleared: the same command converges.
+    disk.free = 100 * 1024**3
+    bundle = archive_quiet("test:acme/toy", vault=vault, min_free=2 * 1024**3)
+    manifest = load_manifest(bundle)
+    assert manifest["inventory"]["file_count"] == len(files)
+
+
+def test_vault_config_floor_applies_and_zero_disables(
+    vault, test_provider, monkeypatch
+):
+    monkeypatch.delenv("DARSAY_MIN_FREE", raising=False)
+    test_provider.add_repo("acme/toy", model_files())
+    # A 1 PiB floor is unsatisfiable on any real machine, so the configured
+    # vault pauses deterministically without faking disk state.
+    (vault / "config.toml").write_text(
+        '[transfer]\nmin_free = "1024T"\n', encoding="utf-8"
+    )
+    with pytest.raises(PartialTransfer) as stopped:
+        archive_quiet("test:acme/toy", vault=vault)
+    assert stopped.value.reason == "disk"
+
+    # An explicit 0 (the CLI's --min-free 0) disables the floor for one run.
+    bundle = archive_quiet("test:acme/toy", vault=vault, min_free=0)
+    assert (bundle / "manifest.json").is_file()
+
+
 def test_reconcile_adopts_existing_bytes(vault, test_provider):
     files = model_files()
     test_provider.add_repo("acme/toy", files)

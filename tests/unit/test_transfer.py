@@ -4,6 +4,7 @@ import pytest
 
 from darsay.providers.base import FileSpec, Snapshot, SourceRef
 from darsay.transfer import (
+    DISK_PROBE_INTERVAL_S,
     TRANSFER_VERSION,
     CleanStop,
     LedgerError,
@@ -13,6 +14,8 @@ from darsay.transfer import (
     _lock_was_copied,
     _payload_path,
     _same_transfer_set,
+    add_disk_preflight,
+    disk_verdict,
     load_ledger,
     new_ledger,
     save_ledger,
@@ -63,6 +66,87 @@ def test_stop_controller_interrupt():
     with pytest.raises(CleanStop) as exc:
         ctrl.check({"bytes_network": 0})
     assert exc.value.reason == "interrupt"
+
+
+def test_stop_controller_disk_floor_throttles_and_sticks(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    clock = {"t": 0.0}
+    monkeypatch.setattr("darsay.transfer.time.monotonic", lambda: clock["t"])
+    disk = {"free": 10 * 1024**3}
+    probes: list = []
+
+    def fake_usage(path):
+        probes.append(path)
+        return SimpleNamespace(free=disk["free"])
+
+    monkeypatch.setattr("darsay.transfer.shutil.disk_usage", fake_usage)
+    ctrl = StopController(min_free_bytes=2 * 1024**3, disk_path=tmp_path)
+    ctrl.start()
+    ctrl.check({"bytes_network": 0})
+    # A chunk-rate storm of checks probes the disk once per interval.
+    ctrl.check({"bytes_network": 0})
+    assert probes == [tmp_path]
+    clock["t"] = DISK_PROBE_INTERVAL_S + 0.1
+    ctrl.check({"bytes_network": 0})
+    assert len(probes) == 2
+
+    disk["free"] = 1 * 1024**3
+    clock["t"] += DISK_PROBE_INTERVAL_S + 0.1
+    with pytest.raises(CleanStop) as stop:
+        ctrl.check({"bytes_network": 0})
+    assert stop.value.reason == "disk"
+    assert "floor" in stop.value.detail
+    # Sticky: every later check stops too, without re-probing.
+    clock["t"] += 100.0
+    with pytest.raises(CleanStop) as again:
+        ctrl.check({"bytes_network": 0})
+    assert again.value.reason == "disk"
+    assert len(probes) == 3
+
+
+def test_stop_controller_without_floor_never_probes(monkeypatch, tmp_path):
+    def forbidden(_path):
+        raise AssertionError("disk probed without a floor")
+
+    monkeypatch.setattr("darsay.transfer.shutil.disk_usage", forbidden)
+    StopController(disk_path=tmp_path).check({"bytes_network": 0})
+    StopController(min_free_bytes=1024).check({"bytes_network": 0})
+
+
+def test_stop_controller_disk_probe_errors_are_ignored(monkeypatch, tmp_path):
+    def broken(_path):
+        raise OSError("statvfs failed")
+
+    monkeypatch.setattr("darsay.transfer.shutil.disk_usage", broken)
+    ctrl = StopController(min_free_bytes=1024, disk_path=tmp_path)
+    ctrl.check({"bytes_network": 0})
+
+
+def test_disk_verdict_honors_floor():
+    assert disk_verdict(100, 50) == "ok"
+    assert disk_verdict(100, 95) == "tight"
+    assert disk_verdict(100, 101) == "insufficient"
+    assert disk_verdict(100, 50, min_free=48) == "tight"
+    assert disk_verdict(100, 50, min_free=60) == "insufficient"
+    assert disk_verdict(100, 50, min_free=None) == "ok"
+
+
+def test_add_disk_preflight_records_floor(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(
+        "darsay.transfer.shutil.disk_usage",
+        lambda path: SimpleNamespace(free=100),
+    )
+    plan = {"bytes": {"remaining_network": 50}}
+    add_disk_preflight(tmp_path, plan, min_free=60)
+    assert plan["disk"]["min_free_bytes"] == 60
+    assert plan["disk"]["verdict"] == "insufficient"
+    plan = {"bytes": {"remaining_network": 50}}
+    add_disk_preflight(tmp_path, plan)
+    assert plan["disk"]["min_free_bytes"] is None
+    assert plan["disk"]["verdict"] == "ok"
 
 
 def test_network_counter_defers_first_overage():

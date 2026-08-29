@@ -190,6 +190,7 @@ def archive(
     dry_run: bool = False,
     max_bytes: int | None = None,
     max_minutes: float | None = None,
+    min_free: int | None = None,
     rehash: bool = False,
     jobs: int = 4,
     shard: tuple[int, int] | None = None,
@@ -197,6 +198,7 @@ def archive(
     progress=print,
 ) -> Path | None:
     """Archive a source through pin → reconcile → transfer → register."""
+    from .config import free_space_floor
     from .transfer import (
         CleanStop,
         LedgerError,
@@ -220,6 +222,7 @@ def archive(
 
     ref = source if isinstance(source, SourceRef) else parse_source(source)
     provider = get_provider(ref.provider)
+    floor = free_space_floor(vault, min_free)
     root = payload_root_for(ref.artifact_type)
     resume = find_resume(vault, ref, revision, root)
     pinned = resume[1] if resume else None
@@ -308,13 +311,18 @@ def archive(
                 apply=False,
                 rehash=rehash,
             )
-            add_disk_preflight(bundle_dir, plan)
+            add_disk_preflight(bundle_dir, plan, min_free=floor)
             print_plan(plan, progress=progress)
             if shard is not None:
                 print_shard_plan(ledger, shard, progress=progress)
             return None
 
-        stop_controller = StopController(max_bytes=max_bytes, max_minutes=max_minutes)
+        stop_controller = StopController(
+            max_bytes=max_bytes,
+            max_minutes=max_minutes,
+            min_free_bytes=floor,
+            disk_path=bundle_dir,
+        )
         stop_controller.start()
         with stop_controller.sigint_handler():
             session = begin_session(bundle_dir, ledger, shard=shard)
@@ -329,14 +337,17 @@ def archive(
                     rehash=rehash,
                     stop=stop_controller,
                 )
-                add_disk_preflight(bundle_dir, plan)
+                add_disk_preflight(bundle_dir, plan, min_free=floor)
                 print_plan(plan, progress=progress)
                 if shard is not None:
                     print_shard_plan(ledger, shard, progress=progress)
                 if plan["disk"]["verdict"] == "insufficient":
-                    progress(
-                        "WARNING: disk preflight is insufficient; transfer may end with ENOSPC"
+                    outcome = (
+                        "the transfer will pause at the free-space floor"
+                        if floor
+                        else "the transfer may end with ENOSPC"
                     )
+                    progress(f"WARNING: disk preflight is insufficient; {outcome}")
                 stop_controller.check(session)
                 plan = transfer_all(
                     bundle_dir,
@@ -364,7 +375,7 @@ def archive(
                 reason = "interrupt" if aborted else stop.reason
                 detail = "aborted by user" if aborted else stop.detail
                 plan = add_disk_preflight(
-                    bundle_dir, transfer_plan(payload_dir, ledger)
+                    bundle_dir, transfer_plan(payload_dir, ledger), min_free=floor
                 )
                 if plan["complete"] and not aborted:
                     finish_session(bundle_dir, ledger, session, "complete")

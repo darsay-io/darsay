@@ -19,11 +19,13 @@ import sys
 from pathlib import Path
 
 from .archiver import bundle_dir_for, utc_now
+from .config import free_space_floor
 from .hydrate import detect_engines
 from .progress import color_enabled, dimmed, emphasized, format_percent, styled_bar
 from .readme_gen import human_params, human_size
 from .schema import check_completeness, payload_root_for
 from .sources import SourceError, SourceRef, get_provider, parse_source
+from .transfer import disk_verdict
 
 WEIGHT_SUFFIXES = (".safetensors", ".bin", ".gguf", ".pt", ".pth")
 DATA_SUFFIXES = (".parquet", ".jsonl", ".json", ".csv", ".arrow", ".txt", ".tsv")
@@ -217,12 +219,8 @@ def estimate(
         scratch = (largest["size"] or 0) if largest else 0
     needed = remaining + scratch
     checked_path, free = _disk_probe(vault)
-    if free >= needed * 1.1:
-        verdict = "ok"
-    elif free >= needed:
-        verdict = "tight"
-    else:
-        verdict = "insufficient"
+    floor = free_space_floor(vault)
+    verdict = disk_verdict(free, needed, floor)
 
     ram_gb = (
         round(primary_bytes * RAM_FACTOR / 1024**3, 1)
@@ -290,6 +288,7 @@ def estimate(
             "checked_path": str(checked_path),
             "free_bytes": free,
             "needed_bytes": needed,
+            "min_free_bytes": floor,
             "verdict": verdict,
         },
         "variants": None,
@@ -506,9 +505,11 @@ def print_estimate(est: dict, progress=print) -> None:
         if transfer and transfer["bytes"]["banked"] and d["needed_bytes"]
         else ""
     )
+    floor = d.get("min_free_bytes")
+    floor_note = f" ({human_size(floor)} floor)" if floor else ""
     p(
         f"  disk:         needs ~{human_size(d['needed_bytes'])}{more}, "
-        f"free {human_size(d['free_bytes'])} at {d['checked_path']} — {verdict_note}"
+        f"free {human_size(d['free_bytes'])}{floor_note} at {d['checked_path']} — {verdict_note}"
     )
 
     if est["variants"]:

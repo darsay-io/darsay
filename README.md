@@ -249,6 +249,7 @@ archiving**; the bundle hash covers it alone.
 | See what you have | `darsay list` (STATUS / SOURCE / HAVE; path in `--json` / `info`) |
 | Share a want-list | `darsay catalog new summer` then `list summer` / `archive --next summer` |
 | Disk use | `darsay du` |
+| Stop before the disk fills | on by default (2 GiB floor, exit 10); `darsay config` shows it, `--min-free 10G` raises it |
 | Delete a bundle | `darsay rm qwen--qwen3-0.6b --yes` |
 | Re-hash and compare | `darsay verify qwen--qwen3-0.6b` |
 | Pack one file for a USB drive | `darsay export qwen--qwen3-0.6b -o /backups` |
@@ -268,6 +269,8 @@ darsay archive  unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
 darsay estimate datasets/saidutta69/fable-5-premium
 darsay archive  datasets/saidutta69/fable-5-premium
 darsay archive  Qwen/Qwen3.8-27B --max-gb 10          # pause; rerun to resume
+darsay archive  Qwen/Qwen3.8-27B --min-free 10G       # pause below 10 GiB free
+darsay config                                         # effective settings + config files
 darsay archive  Qwen/Qwen3.8-27B --dry-run            # verified / partial / missing
 darsay archive  Qwen/Qwen3.8-27B --shard 1/3 --max-gb 20
 darsay --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle>

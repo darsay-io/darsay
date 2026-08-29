@@ -24,6 +24,9 @@ point `darsay` (argparse, subcommands in `cli.py`).
   transfer, cooperative lanes/assembly, sibling-blob reuse),
   `progress.py` (archive-level live transfer panel: percent, bytes, rate, ETA),
   `estimate.py` (read-only preflight: sizes/params/disk from source metadata),
+  `config.py` (machine-local TOML settings — user file + `<vault>/config.toml`
+  + env + flag layers; the transfer free-space floor lives here; config is
+  operator preference, never bundle content),
   `verify.py`, `standalone_verify.py` (stdlib-only; frozen into `.mvb.tar`
   as `darsay-verify.py` — changing it is an MVB minor bump), `smoke.py`,
   `export.py` (.mvb.tar), `readme_gen.py`,

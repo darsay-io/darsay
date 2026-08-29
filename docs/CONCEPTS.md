@@ -29,6 +29,7 @@ vault/
 ├── qwen--qwen3-0.6b/<rev>/          # a model bundle
 ├── datasets--rotten_tomatoes/<rev>/ # a dataset bundle
 ├── catalogs/summer/                 # a catalog (want-list; no payload)
+├── config.toml                      # optional: this vault's operator settings
 └── .runtime/                        # disposable inference envs (not archival)
 ```
 
@@ -39,6 +40,12 @@ licenses). `info` / `run` / `verify` accept a path, a bundle id, or a
 unique prefix. `darsay du` is disk use of bundles and `.runtime` only
 (catalog JSON is curator data, not payload). `darsay rm` deletes a bundle.
 The vault is yours to rsync, restic, or put on a shelf.
+
+`config.toml` is operator preference, not archival fact — for example the
+free-space floor an archive pauses at. A vault-level file travels with an
+archive drive; `~/.config/darsay/config.toml` applies to every vault on a
+machine. `darsay config` shows what applies and why.
+[Incremental transfer](INCREMENTAL.md#6-session-budgets).
 
 ## Catalog
 

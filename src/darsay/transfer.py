@@ -28,6 +28,9 @@ TRANSFER_VERSION = 1
 TRANSFER_FILE = "transfer.json"
 LOCK_FILE = "transfer.lock"
 SMALL_FILE_LIMIT = 8 * 1024**2
+# check() runs at every transfer chunk and hash chunk; probe the disk at
+# most this often so the floor guard stays off the hot path.
+DISK_PROBE_INTERVAL_S = 2.0
 
 
 class LedgerError(ValueError):
@@ -55,7 +58,8 @@ class PartialTransfer(Exception):
 
 
 class StopController:
-    """Coordinate byte/time budgets and a non-destructive SIGINT.
+    """Coordinate byte/time budgets, the free-space floor, and a
+    non-destructive SIGINT.
 
     Ctrl-C escalates: the first press requests a clean stop (checked at every
     transfer callback and hash chunk, so it lands fast), the second raises
@@ -63,12 +67,22 @@ class StopController:
     and a third hard-exits the process.
     """
 
-    def __init__(self, max_bytes: int | None = None, max_minutes: float | None = None):
+    def __init__(
+        self,
+        max_bytes: int | None = None,
+        max_minutes: float | None = None,
+        min_free_bytes: int | None = None,
+        disk_path: Path | None = None,
+    ):
         self.max_bytes = max_bytes
         self.max_seconds = max_minutes * 60 if max_minutes is not None else None
+        self.min_free_bytes = min_free_bytes
+        self.disk_path = disk_path
         self.deadline: float | None = None
         self.interrupted = False
         self.sigints = 0
+        self._disk_stop: CleanStop | None = None
+        self._next_disk_probe = 0.0
 
     def start(self) -> None:
         if self.max_seconds is not None:
@@ -84,6 +98,34 @@ class StopController:
             )
         if self.deadline is not None and time.monotonic() >= self.deadline:
             raise CleanStop("budget", "time budget reached")
+        if self.min_free_bytes and self.disk_path is not None:
+            self._check_free_space()
+
+    def _check_free_space(self) -> None:
+        """Sticky floor guard so every worker stops once one probe trips.
+
+        Races on the throttle timestamp are benign — at worst two threads
+        probe in the same interval.
+        """
+        if self._disk_stop is not None:
+            raise self._disk_stop
+        now = time.monotonic()
+        if now < self._next_disk_probe:
+            return
+        self._next_disk_probe = now + DISK_PROBE_INTERVAL_S
+        try:
+            free = shutil.disk_usage(self.disk_path).free
+        except OSError:
+            return
+        if free < self.min_free_bytes:
+            from .readme_gen import human_size
+
+            self._disk_stop = CleanStop(
+                "disk",
+                "destination free space fell below the floor "
+                f"({human_size(free)} free < {human_size(self.min_free_bytes)} floor)",
+            )
+            raise self._disk_stop
 
     @contextmanager
     def sigint_handler(self):
@@ -621,26 +663,31 @@ def transfer_plan(payload_dir: Path, ledger: dict) -> dict:
     }
 
 
-def add_disk_preflight(bundle_dir: Path, plan: dict) -> dict:
-    """Attach estimate-style free-space headroom to a transfer plan."""
-    import shutil
+def disk_verdict(free: int, needed: int, min_free: int | None = None) -> str:
+    """Headroom verdict for ``needed`` more bytes, keeping the floor free."""
+    usable = free - (min_free or 0)
+    if usable >= needed * 1.1:
+        return "ok"
+    if usable >= needed:
+        return "tight"
+    return "insufficient"
 
+
+def add_disk_preflight(
+    bundle_dir: Path, plan: dict, min_free: int | None = None
+) -> dict:
+    """Attach estimate-style free-space headroom to a transfer plan."""
     probe = bundle_dir.resolve()
     while not probe.exists():
         probe = probe.parent
     free = shutil.disk_usage(probe).free
     needed = plan["bytes"]["remaining_network"]
-    if free >= needed * 1.1:
-        verdict = "ok"
-    elif free >= needed:
-        verdict = "tight"
-    else:
-        verdict = "insufficient"
     plan["disk"] = {
         "checked_path": str(probe),
         "free_bytes": free,
         "needed_bytes": needed,
-        "verdict": verdict,
+        "min_free_bytes": min_free,
+        "verdict": disk_verdict(free, needed, min_free),
     }
     return plan
 
@@ -663,9 +710,11 @@ def print_plan(plan: dict, progress=print) -> None:
         f"{human_size(sizes['remaining_network'])}"
     )
     disk = plan["disk"]
+    floor = disk.get("min_free_bytes")
+    floor_note = f" ({human_size(floor)} floor)" if floor else ""
     progress(
         f"  disk:     needs {human_size(disk['needed_bytes'])}, "
-        f"free {human_size(disk['free_bytes'])} at {disk['checked_path']} — "
+        f"free {human_size(disk['free_bytes'])}{floor_note} at {disk['checked_path']} — "
         f"{disk['verdict'].upper()}"
     )
 
@@ -1221,6 +1270,7 @@ def assemble_partials(
     import copy
 
     from .archiver import bundle_dir_for
+    from .config import free_space_floor
     from .schema import payload_root_for
     from .sources import source_from_ledger
 
@@ -1334,7 +1384,9 @@ def assemble_partials(
             raise
 
         plan = add_disk_preflight(
-            destination, transfer_plan(destination_payload, ledger)
+            destination,
+            transfer_plan(destination_payload, ledger),
+            min_free=free_space_floor(vault),
         )
         progress(
             f"Assembled {copied_payload_files} payload files and {copied_cache_files} cache files "

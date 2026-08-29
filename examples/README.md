@@ -19,6 +19,7 @@ This page is the cookbook you return to.
 | Keep a model and talk to it | [First bundle](#first-bundle) |
 | Know the size before I commit | [Estimate first](#estimate-first) |
 | Stop at 10 GB and continue tomorrow | [Pause and resume](#pause-and-resume-a-large-archive) |
+| Keep an unattended box from filling its disk | [Leave room on the disk](#leave-room-on-the-disk) |
 | Price one quant in a huge GGUF pack | [Price one quant](#price-one-quant-from-a-pack-repo) |
 | Archive a dataset | [Dataset](#archive-a-dataset) |
 | Load the payload myself | [Use the files directly](#use-the-files-directly) |
@@ -122,6 +123,36 @@ Also valid: `--max-bytes 20G`, `--max-minutes 45`.
 
 The pin is frozen on the first run. Later runs do not chase a new
 `main`. Design: [Incremental transfer](../docs/INCREMENTAL.md).
+
+---
+
+## Leave room on the disk
+
+An unattended archive should never wedge a partition full. `archive`
+pauses cleanly — exit 10, bytes kept — when the destination's free
+space drops below a floor. The default floor is 2 GiB.
+
+```bash
+darsay archive Qwen/Qwen3.8-27B --min-free 10G   # this run: pause below 10 GiB free
+# exit code 10 — disk: … 9.9 GiB free < 10.0 GiB floor; free space, rerun
+
+darsay config                                    # which floor applies here, and why
+```
+
+Set it once per vault so an archive drive carries its own limit, or once
+per machine for every vault:
+
+```toml
+# <vault>/config.toml   (or ~/.config/darsay/config.toml)
+[transfer]
+min_free = "10G"
+```
+
+`--min-free 0` disables the floor for one run; `$DARSAY_MIN_FREE` overrides
+per shell. The plan line and `estimate` price the floor in —
+`needs 40.0 GiB, free 45.0 GiB (10.0 GiB floor) — INSUFFICIENT` — so a
+run that cannot finish says so before the first byte. Design:
+[Incremental transfer](../docs/INCREMENTAL.md#6-session-budgets).
 
 ---
 
