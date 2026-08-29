@@ -3,6 +3,25 @@ api_version: rivet/v1alpha1
 compatibility:
   minimum_rivet_version: v0.4.172
 
+upstreams:
+  ruff-stable:
+    uses: pypi.release.latest
+    project: ruff
+    ordering: pep440
+    channel: stable
+
+updates:
+  python-tools:
+    description: Advance Darsay's explicitly supported Python development-tool floors.
+    pins:
+      - id: ruff-minimum
+        upstream: ruff-stable
+        targets:
+          - uses: python.requirement
+            path: pyproject.toml
+            pointer: /project/optional-dependencies/dev
+            name: ruff
+
 land:
   description: Normalize and land the attached local commit chain.
   normalize:
