@@ -1,5 +1,8 @@
 api_version: rivet/v1alpha1
 
+compatibility:
+  minimum_rivet_version: v0.4.170
+
 land:
   description: Normalize and land the attached local commit chain.
   normalize:
