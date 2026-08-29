@@ -34,3 +34,19 @@ def test_summarize_shards(tmp_path):
     summary = summarize_safetensors([a, b])
     assert summary["parameter_count"] == 5
     assert summary["shard_count"] == 2
+
+
+def test_unreadable_header_is_a_value_error(tmp_path):
+    """Garbage named .safetensors must not escape as OverflowError or struct.error."""
+    import pytest
+
+    garbage = tmp_path / "model.safetensors"
+    garbage.write_bytes(b"\xff" * 8 + b"not json")
+    with pytest.raises(ValueError, match="exceeds the file"):
+        read_header(garbage)
+    garbage.write_bytes(b"\x01\x02")
+    with pytest.raises(ValueError, match="too short"):
+        read_header(garbage)
+    garbage.write_bytes(b"\x02" + b"\x00" * 7 + b"[]")
+    with pytest.raises(ValueError, match="not an object"):
+        read_header(garbage)

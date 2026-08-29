@@ -27,6 +27,18 @@ def test_extract_model_metadata_from_payload(tmp_path):
     assert meta["generation_defaults"]["temperature"] == 0.7
 
 
+def test_extract_model_metadata_leaves_weights_unknown_for_a_bad_shard(tmp_path):
+    payload = tmp_path / "model"
+    payload.mkdir()
+    for name, data in model_files().items():
+        (payload / name).write_bytes(data)
+    (payload / "model-00002.safetensors").write_bytes(b"\xff" * 64)
+    meta = extract_model_metadata(payload)
+    # Unknown, not a partial count over the readable shard.
+    assert meta["parameter_count"] is None
+    assert meta["weight_shards"] is None
+
+
 def test_extract_model_metadata_quantization_and_missing_config(tmp_path):
     payload = tmp_path / "model"
     payload.mkdir()

@@ -100,7 +100,7 @@ torch required).
 
 | Field | Meaning |
 |---|---|
-| `parameter_count`, `parameters_by_dtype`, `weight_shards` | Counted from safetensors headers. Null for `.bin`/`.gguf`-only payloads. |
+| `parameter_count`, `parameters_by_dtype`, `weight_shards` | Counted from safetensors headers. Null for `.bin`/`.gguf`-only payloads, and when any shard's header cannot be read (never a partial count). |
 | `architecture`, `model_type` | From `config.json` (`Qwen3ForCausalLM`, `qwen3`). |
 | `context_length` | `max_position_embeddings`. |
 | `precision` | `torch_dtype`, falling back to the dominant tensor dtype. |

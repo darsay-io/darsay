@@ -28,9 +28,21 @@ DTYPE_NAMES = {
 
 
 def read_header(path: Path) -> dict:
+    """The JSON header of one safetensors file; ``ValueError`` if it is not one."""
+    size = path.stat().st_size
     with open(path, "rb") as f:
-        (header_len,) = struct.unpack("<Q", f.read(8))
-        return json.loads(f.read(header_len))
+        prefix = f.read(8)
+        if len(prefix) < 8:
+            raise ValueError(f"{path.name}: too short to be a safetensors file")
+        (header_len,) = struct.unpack("<Q", prefix)
+        if header_len > size - 8:
+            raise ValueError(
+                f"{path.name}: safetensors header length {header_len} exceeds the file"
+            )
+        header = json.loads(f.read(header_len))
+    if not isinstance(header, dict):
+        raise ValueError(f"{path.name}: safetensors header is not an object")
+    return header
 
 
 def summarize_safetensors(paths: list[Path]) -> dict | None:

@@ -31,7 +31,12 @@ def extract_model_metadata(payload_root: Path, card_data: dict | None = None) ->
     tokenizer_config = _load_json(payload_root / "tokenizer_config.json") or {}
 
     safetensors_files = sorted(payload_root.glob("*.safetensors"))
-    weights = summarize_safetensors(safetensors_files)
+    try:
+        weights = summarize_safetensors(safetensors_files)
+    except (OSError, ValueError):
+        # A shard whose header cannot be read leaves the count unknown —
+        # never a partial count over the readable shards.
+        weights = None
 
     special_tokens = {
         key: tokenizer_config.get(key)
