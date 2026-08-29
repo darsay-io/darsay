@@ -69,8 +69,12 @@ still work:
     darsay archive  https://huggingface.co/datasets/saidutta69/fable-5-premium
 
 `parse_source` dispatches on the provider; the Hugging Face plugin maps
-`owner/name` → model and `datasets/owner/name` → dataset. Bundle-path
-commands (`verify`, `info`, `export`, …) need nothing: they dispatch on the
+`owner/name` → model and `datasets/owner/name` → dataset. An unprefixed
+`owner/name` that exists only as a dataset is resolved at pin/estimate
+time to `huggingface:datasets/owner/name` (and archived under `data/`).
+If both a model and a dataset exist, the unprefixed form stays a model.
+Explicit `datasets/` is never rewritten as a model. Bundle-path commands
+(`verify`, `info`, `export`, …) need nothing: they dispatch on the
 manifest's `artifact_type`. See [SOURCES.md](SOURCES.md).
 
 ## 5. Naming and layout

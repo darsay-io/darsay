@@ -45,6 +45,7 @@ class PinnedRepo:
     gated: bool = False
     missing: bool = False
     access_denied: bool = False
+    artifact_type: str | None = None
 
 
 class TestProvider(SourceProvider):
@@ -147,6 +148,10 @@ class TestProvider(SourceProvider):
             raise SourceNotFoundError(
                 f"error: {source.artifact_type} {source.locator!r} not found on {self.label}."
             )
+        if repo.artifact_type and repo.artifact_type != source.artifact_type:
+            raise SourceNotFoundError(
+                f"error: {source.artifact_type} {source.locator!r} not found on {self.label}."
+            )
         return repo
 
     def pin(
@@ -156,7 +161,17 @@ class TestProvider(SourceProvider):
         *,
         require_access: bool = False,
     ) -> Snapshot:
-        repo = self._lookup(source, revision)
+        try:
+            repo = self._lookup(source, revision)
+        except SourceNotFoundError as missing:
+            if source.artifact_type != "model":
+                raise
+            alt = self.parse(f"datasets/{source.locator}")
+            try:
+                repo = self._lookup(alt, revision)
+                source = alt
+            except SourceNotFoundError:
+                raise missing from None
         if repo.access_denied or (repo.gated and require_access):
             raise SourceGatedError(self.access_denied_message(source))
         files = [

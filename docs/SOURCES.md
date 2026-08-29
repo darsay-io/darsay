@@ -46,7 +46,10 @@ https://huggingface.co/datasets/owner/name
 Unprefixed `owner/name` and `datasets/owner/name` stay as Hugging Face
 shorthand so existing commands keep working. They are convenience, not the
 canonical form. Canonical addresses are always `huggingface:<locator>`
-(with the `datasets/` prefix when the artifact is a dataset).
+(with the `datasets/` prefix when the artifact is a dataset). Pin and
+estimate expand an unprefixed `owner/name` that exists only as a dataset
+to that canonical; if both namespaces have a repo, unprefixed stays a
+model.
 
 A source string whose scheme is not a registered provider is an error, not
 a silent Hugging Face parse. Adding ModelScope later is

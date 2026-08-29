@@ -40,6 +40,30 @@ def test_archive_model_writes_immutable_payload_and_manifest(vault, test_provide
     assert manifest["security"]["integrity_status"] == "verified-against-upstream"
 
 
+def test_archive_unprefixed_dataset_only_id_resolves_as_dataset(vault, test_provider):
+    test_provider.add_repo(
+        "acme/reviews",
+        dataset_files(),
+        artifact_type="dataset",
+        pipeline_tag=None,
+        license_id="mit",
+        metadata={
+            "card_data": {"license": "mit", "language": "en"},
+            "tags": [],
+            "gated": False,
+        },
+    )
+    notes = []
+    bundle = archive_quiet("test:acme/reviews", vault=vault, progress=notes.append)
+    manifest = load_manifest(bundle)
+    assert manifest["artifact_type"] == "dataset"
+    assert manifest["source"]["address"] == "test:datasets/acme/reviews"
+    assert manifest["inventory"]["layout"]["payload_root"] == "data/"
+    assert (bundle / "data" / "train.jsonl").is_file()
+    assert bundle.parent.name == "test--datasets--acme--reviews"
+    assert any("as dataset test:datasets/acme/reviews" in line for line in notes)
+
+
 def test_archive_dataset_uses_data_payload_root(vault, test_provider):
     test_provider.add_repo(
         "acme/reviews",
@@ -89,6 +113,25 @@ def test_estimate_is_read_only(vault, test_provider, tmp_path):
     assert est["source"]["address"] == "test:acme/toy"
     assert "transformers" in est["engines"]
     assert est["completeness"]["status"] == "complete"
+
+
+def test_estimate_unprefixed_dataset_only_id(vault, test_provider):
+    test_provider.add_repo(
+        "acme/reviews",
+        dataset_files(),
+        artifact_type="dataset",
+        pipeline_tag=None,
+        license_id="mit",
+        metadata={
+            "card_data": {"license": "mit"},
+            "tags": [],
+            "gated": False,
+        },
+    )
+    est = estimate("test:acme/reviews", vault=vault, progress=silent)
+    assert est["artifact_type"] == "dataset"
+    assert est["source"]["address"] == "test:datasets/acme/reviews"
+    assert est["formats"] is not None
 
 
 def test_estimate_include_subset(vault, test_provider):

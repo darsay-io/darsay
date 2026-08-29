@@ -7,7 +7,7 @@ import pytest
 
 from darsay.cli import main
 from tests.integration.conftest import archive_quiet
-from tests.payloads import model_files
+from tests.payloads import dataset_files, model_files
 
 
 def test_two_vault_overlay_sharing(tmp_path, test_provider, capsys):
@@ -149,6 +149,41 @@ def test_estimate_catalog_and_path_readonly(vault, tmp_path, test_provider, caps
     friend.write_text((vault / "catalogs" / "summer" / "catalog.json").read_text())
     with pytest.raises(SystemExit, match="read-only"):
         main(["--vault", str(vault), "estimate", str(friend)])
+
+
+def test_estimate_catalog_rewrites_unprefixed_dataset_source(
+    vault, test_provider, capsys
+):
+    test_provider.add_repo(
+        "acme/reviews",
+        dataset_files(),
+        artifact_type="dataset",
+        pipeline_tag=None,
+        license_id="mit",
+        metadata={"card_data": {"license": "mit"}, "tags": [], "gated": False},
+    )
+    assert main(["--vault", str(vault), "catalog", "new", "summer"]) == 0
+    capsys.readouterr()
+    assert (
+        main(
+            [
+                "--vault",
+                str(vault),
+                "catalog",
+                "add",
+                "summer",
+                "test:acme/reviews",
+            ]
+        )
+        == 0
+    )
+    catalog = json.loads((vault / "catalogs" / "summer" / "catalog.json").read_text())
+    assert catalog["entries"][0]["source"] == "test:acme/reviews"
+    capsys.readouterr()
+    assert main(["--vault", str(vault), "estimate", "summer"]) == 0
+    catalog = json.loads((vault / "catalogs" / "summer" / "catalog.json").read_text())
+    assert catalog["entries"][0]["source"] == "test:datasets/acme/reviews"
+    assert catalog["entries"][0]["estimate"]["artifact_type"] == "dataset"
 
 
 def test_archive_next_resumes_non_main_partial(vault, test_provider, capsys):

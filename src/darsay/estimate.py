@@ -177,7 +177,6 @@ def estimate(
 ) -> dict:
     ref = source if isinstance(source, SourceRef) else parse_source(source)
     provider = get_provider(ref.provider)
-    repo_type = ref.artifact_type
     progress(
         f"Resolving {ref.canonical} @ {revision or provider.default_revision} "
         "(metadata only, no download) ..."
@@ -186,6 +185,13 @@ def estimate(
         snapshot = provider.pin(ref, revision, require_access=False)
     except SourceError as exc:
         raise SystemExit(str(exc)) from None
+    if snapshot.source.canonical != ref.canonical:
+        progress(
+            f"Resolved {ref.canonical} as {snapshot.source.artifact_type} "
+            f"{snapshot.source.canonical}"
+        )
+        ref = snapshot.source
+    repo_type = ref.artifact_type
 
     files = [
         {"path": f.path, "size": f.size, "sha256": f.sha256, "git_sha1": f.git_sha1}

@@ -10,6 +10,7 @@ from darsay.catalog import (
     CATALOG_SCHEMA_VERSION,
     DIGEST_KEYS,
     adopt_entries,
+    adopt_resolved_source,
     drop_entry,
     entry_key,
     estimate_digest,
@@ -554,9 +555,11 @@ def test_print_catalog_table_hides_empty_desire_note(capsys):
     out = capsys.readouterr().out
     assert "STATUS" in out
     assert "SOURCE" in out
+    assert "TYPE" in out
     assert "HAVE" in out
     assert "DESIRE" not in out
     assert "NOTE" not in out
+    assert "model" in out
     capsys.readouterr()
     print_catalog_table(
         [
@@ -577,6 +580,48 @@ def test_print_catalog_table_hides_empty_desire_note(capsys):
     out = capsys.readouterr().out
     assert "DESIRE" in out
     assert "NOTE" in out
+
+
+def test_print_catalog_table_type_from_source_and_estimate(capsys):
+    print_catalog_table(
+        [
+            {
+                "status": "want",
+                "desire": None,
+                "source": "huggingface:datasets/acme/reviews",
+                "revision": None,
+                "include": None,
+                "note": None,
+                "bundle_id": None,
+                "payload_bytes": None,
+                "estimate_stale": False,
+                "gated": False,
+                "estimate": {"artifact_type": "dataset"},
+            }
+        ]
+    )
+    out = capsys.readouterr().out
+    assert "TYPE" in out
+    assert "dataset" in out
+
+
+def test_adopt_resolved_source_rewrites_unless_collision():
+    cat = _catalog(
+        [
+            _entry("huggingface:acme/reviews", desire=3),
+            _entry("huggingface:datasets/acme/reviews", desire=9),
+        ]
+    )
+    first, second = cat["entries"]
+    assert (
+        adopt_resolved_source(cat, first, "huggingface:datasets/acme/reviews") is False
+    )
+    assert first["source"] == "huggingface:acme/reviews"
+    lonely = _catalog([_entry("huggingface:acme/reviews")])
+    assert adopt_resolved_source(
+        lonely, lonely["entries"][0], "huggingface:datasets/acme/reviews"
+    )
+    assert lonely["entries"][0]["source"] == "huggingface:datasets/acme/reviews"
 
 
 def test_vault_header_omits_remaining_when_complete(tmp_path):

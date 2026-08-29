@@ -202,6 +202,7 @@ def cmd_estimate(args) -> int:
 def _estimate_catalog(args, vault, cat_path) -> int:
     from .archiver import utc_now
     from .catalog import (
+        adopt_resolved_source,
         estimate_digest,
         load_catalog,
         overlay,
@@ -270,6 +271,7 @@ def _estimate_catalog(args, vault, cat_path) -> int:
             failed += 1
             continue
         digest = estimate_digest(est)
+        adopt_resolved_source(catalog, entry, est["source"]["address"])
         entry["estimate"] = digest
         digests.append(
             {"source": entry["source"], "include": entry.get("include"), **digest}
@@ -649,26 +651,31 @@ def cmd_catalog_add(args) -> int:
     path = resolve_catalog(vault, args.catalog)
     require_writable(vault, path, bool(args.write))
     catalog = load_catalog(path)
+    source = args.source
+    digest = None
+    extra = ""
+    if getattr(args, "estimate", False):
+        est = estimate(
+            source,
+            revision=args.revision,
+            vault=vault,
+            include=args.include,
+            progress=print,
+        )
+        source = est["source"]["address"]
+        digest = estimate_digest(est)
+        gated = "  GATED" if digest.get("gated") else ""
+        extra = f"  {human_size(digest['payload_bytes'])}{gated}  (as of {digest['as_of'][:10]})"
     entry, action = upsert_entry(
         catalog,
-        args.source,
+        source,
         desire=args.desire,
         note=args.note,
         revision=args.revision,
         include=args.include,
     )
-    extra = ""
-    if getattr(args, "estimate", False):
-        est = estimate(
-            entry["source"],
-            revision=entry.get("revision"),
-            vault=vault,
-            include=entry.get("include"),
-            progress=print,
-        )
-        entry["estimate"] = estimate_digest(est)
-        gated = "  GATED" if entry["estimate"].get("gated") else ""
-        extra = f"  {human_size(entry['estimate']['payload_bytes'])}{gated}  (as of {entry['estimate']['as_of'][:10]})"
+    if digest is not None:
+        entry["estimate"] = digest
         action = "updated" if action == "unchanged" else action
     elif action == "unchanged":
         inc = f"  include={','.join(entry['include'])}" if entry.get("include") else ""

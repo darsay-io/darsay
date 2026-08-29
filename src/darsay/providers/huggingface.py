@@ -209,11 +209,34 @@ class HuggingFaceProvider(SourceProvider):
         require_access: bool = False,
     ) -> Snapshot:
         from huggingface_hub import HfApi
-        from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
-        from huggingface_hub.utils import HfHubHTTPError
 
         api = HfApi()
         pin_revision = revision or self.default_revision
+        try:
+            return self._pin_typed(api, source, pin_revision, require_access)
+        except SourceNotFoundError as missing:
+            # Unprefixed owner/name is model shorthand. Hub model and dataset
+            # namespaces can collide, so an explicit datasets/ prefix is never
+            # rewritten — but a model-shaped ref that exists only as a dataset
+            # is the common paste and resolves to the dataset canonical.
+            if source.artifact_type != "model":
+                raise
+            alt = self.parse(f"datasets/{source.locator}")
+            try:
+                return self._pin_typed(api, alt, pin_revision, require_access)
+            except SourceNotFoundError:
+                raise missing from None
+
+    def _pin_typed(
+        self,
+        api,
+        source: SourceRef,
+        pin_revision: str,
+        require_access: bool,
+    ) -> Snapshot:
+        from huggingface_hub.errors import GatedRepoError, RepositoryNotFoundError
+        from huggingface_hub.utils import HfHubHTTPError
+
         try:
             if source.artifact_type == "dataset":
                 info = api.dataset_info(

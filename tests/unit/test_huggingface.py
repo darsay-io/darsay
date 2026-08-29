@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
+import pytest
+
+from darsay.providers.base import SourceNotFoundError
 from darsay.providers.huggingface import (
     HuggingFaceProvider,
     _json_value,
@@ -9,6 +13,103 @@ from darsay.providers.huggingface import (
     _variant_formats,
     parse_base_model_tags,
 )
+
+
+def _hub_not_found():
+    import httpx
+    from huggingface_hub.errors import RepositoryNotFoundError
+
+    request = httpx.Request("GET", "https://huggingface.co/api/models/x")
+    return RepositoryNotFoundError(
+        "not found", response=httpx.Response(401, request=request)
+    )
+
+
+def _hub_info(*, sha="b" * 40, filename="train.jsonl"):
+    sibling = SimpleNamespace(rfilename=filename, size=12, lfs=None, blob_id="abc123")
+    return SimpleNamespace(
+        sha=sha,
+        siblings=[sibling],
+        card_data=SimpleNamespace(to_dict=lambda: {"license": "mit"}),
+        last_modified=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+        tags=["license:mit"],
+        gated=False,
+        downloads=1,
+        likes=0,
+        pipeline_tag=None,
+        safetensors=None,
+    )
+
+
+def test_pin_retargets_model_shaped_dataset_only_id(monkeypatch):
+    provider = HuggingFaceProvider()
+    calls: list[tuple[str, str]] = []
+
+    class FakeApi:
+        def model_info(self, repo_id, revision=None, files_metadata=False):
+            calls.append(("model", repo_id))
+            raise _hub_not_found()
+
+        def dataset_info(self, repo_id, revision=None, files_metadata=False):
+            calls.append(("dataset", repo_id))
+            return _hub_info()
+
+    monkeypatch.setattr("huggingface_hub.HfApi", FakeApi)
+    snap = provider.pin(provider.parse("saidutta69/fable-5-premium"), "main")
+    assert snap.source.artifact_type == "dataset"
+    assert snap.source.canonical == "huggingface:datasets/saidutta69/fable-5-premium"
+    assert snap.source.bundle_name == "datasets--saidutta69--fable-5-premium"
+    assert calls == [
+        ("model", "saidutta69/fable-5-premium"),
+        ("dataset", "saidutta69/fable-5-premium"),
+    ]
+
+
+def test_pin_does_not_probe_dataset_when_model_exists(monkeypatch):
+    provider = HuggingFaceProvider()
+
+    class FakeApi:
+        def model_info(self, repo_id, revision=None, files_metadata=False):
+            return _hub_info(filename="model.safetensors")
+
+        def dataset_info(self, repo_id, revision=None, files_metadata=False):
+            raise AssertionError("dataset_info should not run")
+
+    monkeypatch.setattr("huggingface_hub.HfApi", FakeApi)
+    snap = provider.pin(provider.parse("Qwen/Qwen3-0.6B"), "main")
+    assert snap.source.artifact_type == "model"
+    assert snap.source.canonical == "huggingface:Qwen/Qwen3-0.6B"
+
+
+def test_pin_explicit_dataset_does_not_probe_model(monkeypatch):
+    provider = HuggingFaceProvider()
+
+    class FakeApi:
+        def model_info(self, repo_id, revision=None, files_metadata=False):
+            raise AssertionError("model_info should not run")
+
+        def dataset_info(self, repo_id, revision=None, files_metadata=False):
+            raise _hub_not_found()
+
+    monkeypatch.setattr("huggingface_hub.HfApi", FakeApi)
+    with pytest.raises(SourceNotFoundError, match="dataset"):
+        provider.pin(provider.parse("datasets/missing/repo"), "main")
+
+
+def test_pin_missing_both_keeps_the_model_error(monkeypatch):
+    provider = HuggingFaceProvider()
+
+    class FakeApi:
+        def model_info(self, repo_id, revision=None, files_metadata=False):
+            raise _hub_not_found()
+
+        def dataset_info(self, repo_id, revision=None, files_metadata=False):
+            raise _hub_not_found()
+
+    monkeypatch.setattr("huggingface_hub.HfApi", FakeApi)
+    with pytest.raises(SourceNotFoundError, match="model 'missing/repo'"):
+        provider.pin(provider.parse("missing/repo"), "main")
 
 
 def test_parse_rejects_malformed_locator():

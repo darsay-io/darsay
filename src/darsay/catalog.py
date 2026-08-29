@@ -507,6 +507,29 @@ def upsert_entry(
     return entry, "added"
 
 
+def adopt_resolved_source(catalog: dict, entry: dict, address: str) -> bool:
+    """Rewrite ``entry.source`` to the pin-resolved canonical if it does not collide.
+
+    Estimate/archive may expand a model-shaped Hub shorthand to
+    ``huggingface:datasets/owner/name`` when only a dataset exists.
+    Catalog identity is that canonical; rewrite here so overlay matches
+    the bundle that pin will write. Returns True when the source changed.
+    """
+    if not address or address == entry.get("source"):
+        return False
+    new_key = entry_key(address, entry.get("revision"), entry.get("include"))
+    for other in catalog.get("entries") or []:
+        if other is entry:
+            continue
+        if (
+            entry_key(other.get("source"), other.get("revision"), other.get("include"))
+            == new_key
+        ):
+            return False
+    entry["source"] = address
+    return True
+
+
 def drop_entry(
     catalog: dict,
     source: str,
@@ -754,6 +777,7 @@ def vault_as_rows(records: list[dict]) -> list[dict]:
                 "matched_include": rec.get("include"),
                 "estimate_stale": False,
                 "estimate": None,
+                "artifact_type": rec.get("artifact_type"),
             }
         )
     return rows
@@ -957,6 +981,19 @@ def vault_header_line(vault: Path, stats: dict) -> str:
     )
 
 
+def format_type_cell(row: dict) -> str:
+    est = row.get("estimate") if isinstance(row.get("estimate"), dict) else None
+    if est and est.get("artifact_type"):
+        return str(est["artifact_type"])
+    rec_type = row.get("artifact_type")
+    if rec_type:
+        return str(rec_type)
+    parsed = try_parse_source(row.get("source") or "")
+    if parsed is not None:
+        return parsed.artifact_type
+    return "—"
+
+
 def format_source_cell(row: dict) -> str:
     src = row.get("source") or "—"
     extras = []
@@ -1019,6 +1056,7 @@ def print_catalog_table(rows: list[dict], *, header_line: str | None = None) -> 
         ("STATUS", lambda r: r.get("status") or "—"),
         ("DESIRE", format_desire_cell),
         ("SOURCE", format_source_cell),
+        ("TYPE", format_type_cell),
         ("HAVE", format_have_cell),
         ("SIZE", format_size_cell),
         ("NOTE", format_note_cell),

@@ -260,6 +260,8 @@ archiving**; the bundle hash covers it alone.
 Source refs are provider-qualified — `huggingface:Qwen/Qwen3-0.6B`,
 `huggingface:datasets/owner/name`. Unprefixed `owner/name` /
 `datasets/owner/name` and huggingface.co URLs are Hugging Face shorthand.
+An unprefixed `owner/name` that exists only as a dataset is resolved at
+pin time to `huggingface:datasets/owner/name`.
 
 <details>
 <summary><strong>The rest of the CLI</strong></summary>

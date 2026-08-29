@@ -251,6 +251,9 @@ Paste-from-browser URLs work too:
 darsay archive https://huggingface.co/datasets/cornell-movie-review-data/rotten_tomatoes
 ```
 
+Unprefixed `owner/name` that exists only as a dataset is resolved at pin
+time to `huggingface:datasets/owner/name`.
+
 `hydrate` / `run` do not apply — a dataset has no engine. Open `data/`
 with whatever already reads the format. Design: [Datasets](../docs/DATASETS.md).
 

@@ -256,6 +256,13 @@ def archive(
             if isinstance(exc, SourceGatedError) and orphan_dir is not None:
                 shutil.rmtree(orphan_dir, ignore_errors=True)
             raise SystemExit(str(exc)) from None
+        if snapshot.source.canonical != ref.canonical:
+            progress(
+                f"Resolved {ref.canonical} as {snapshot.source.artifact_type} "
+                f"{snapshot.source.canonical}"
+            )
+            ref = snapshot.source
+            root = payload_root_for(ref.artifact_type)
         bundle_dir = bundle_dir_for(vault, ref, snapshot.revision)
 
     payload_dir = bundle_dir / root

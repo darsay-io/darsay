@@ -11,6 +11,16 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Added
 
+- **Unprefixed dataset ids resolve at pin time** — `darsay archive
+  saidutta69/fable-5-premium` (or `huggingface:saidutta69/fable-5-premium`)
+  looks up the Hub as a model first; if that repo is missing and a dataset
+  of the same id exists, pin rewrites the canonical to
+  `huggingface:datasets/saidutta69/fable-5-premium` and archives under
+  `data/`. Explicit `datasets/` is never rewritten as a model, and when
+  both namespaces exist the unprefixed form stays a model. `estimate`
+  and `catalog add --estimate` store the resolved address so overlay
+  matches the bundle. `darsay list` prints a TYPE column (`model` /
+  `dataset`).
 - **Network loss is a panel state, not a stack trace** — when the
   connection drops mid-transfer (laptop leaves Wi-Fi, router reboots,
   DNS goes away, the Hub answers 5xx), `archive` banks what arrived,
