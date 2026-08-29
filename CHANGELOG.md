@@ -7,7 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Tool version (`darsay.__version__`) is independent of
 `schema_version` in manifests and of `MVB_FORMAT_VERSION` in exports.
 
-## [0.11.0]
+## [Unreleased]
+
+## [0.11.0] - 2026-08-29
 
 ### Added
 
