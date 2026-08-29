@@ -1,0 +1,28 @@
+api_version: rivet/v1alpha1
+
+land:
+  description: Normalize and land the attached local commit chain.
+  normalize:
+    messages:
+      - uses: commit.message.decode_escaped_newlines
+      - uses: commit.message.remove_trailer
+        with:
+          key: Co-Authored-By
+          value_match: '(?i).*claude.*'
+      - uses: commit.message.remove_trailer
+        with:
+          key: Claude-Session
+          value_match: '.*'
+  worktree:
+    dirty_tracked: prompt_stash
+    evidence:
+      exclude_ignored:
+        - .pytest_cache
+        - .venv
+        - build
+        - dist
+  push:
+    strategy: one_by_one
+    hooks: final
+    after_each:
+      ci: registered
