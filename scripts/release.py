@@ -18,6 +18,8 @@ somewhere a user reads.
     python scripts/release.py 0.8.1
     python scripts/release.py 0.8.1 --dry-run     # report only, write nothing
     python scripts/release.py 0.8.1 --push        # also push the branch
+    python scripts/release.py 0.8.1 --prepare-only  # caller owns commit + tag
+    python scripts/release.py 0.8.1 --check       # verify prepared source
 
 Stdlib only, like the bundle verifier: a release must not depend on the
 optional extras it is packaging.
@@ -234,6 +236,23 @@ def check_docs_table() -> None:
             )
 
 
+def check_docs_versions_current() -> None:
+    """Every derived docs row must equal the source literal it describes."""
+    text = DOCS_INDEX.read_text(encoding="utf-8")
+    for label, name, path in DOCS_ROWS:
+        expected = read_literal(path, name)
+        match = docs_row(label).search(text)
+        if match is None:
+            raise Abort(
+                f"{DOCS_INDEX.relative_to(ROOT)} has no '| {label} | **…** |' row"
+            )
+        if match.group(2) != expected:
+            raise Abort(
+                f"{DOCS_INDEX.relative_to(ROOT)} says {label} is {match.group(2)}, "
+                f"expected {expected}"
+            )
+
+
 def check_docs_flags() -> None:
     """The user docs and the CLI must agree on which flags exist.
 
@@ -376,6 +395,22 @@ def run_gate(version: str, skip_build: bool) -> None:
     )
 
 
+def check_prepared_release(version: str, today: str, skip_build: bool) -> None:
+    """Verify one already-prepared source tree without changing Git or files."""
+    current = read_current_version()
+    if current != version:
+        raise Abort(f"source version is {current}, expected prepared {version}")
+
+    text = CHANGELOG.read_text(encoding="utf-8")
+    updated, _ = prepare_changelog(text, version, today)
+    if updated != text:
+        raise Abort(f"CHANGELOG.md is not prepared for {version}")
+
+    check_docs_versions_current()
+    check_docs_flags()
+    run_gate(version, skip_build)
+
+
 # --- main -----------------------------------------------------------------
 
 
@@ -385,8 +420,19 @@ def main(argv: list[str] | None = None) -> int:
         description="Prepare a release: bump, verify, commit, tag. Push to release.",
     )
     parser.add_argument("version", help="version to release, e.g. 0.8.1")
-    parser.add_argument(
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument(
         "--dry-run", action="store_true", help="run every check, write nothing"
+    )
+    modes.add_argument(
+        "--prepare-only",
+        action="store_true",
+        help="write and verify release files; leave commit and tag to the caller",
+    )
+    modes.add_argument(
+        "--check",
+        action="store_true",
+        help="verify an already-prepared release without changing files or Git",
     )
     parser.add_argument(
         "--skip-build",
@@ -415,16 +461,23 @@ def main(argv: list[str] | None = None) -> int:
     tag = f"v{version}"
 
     current = read_current_version()
+    today = dt.date.today().isoformat()
+    if args.check:
+        print(f"checking prepared darsay {version}:")
+        check_tooling(args.skip_build)
+        check_prepared_release(version, today, args.skip_build)
+        print("prepared release verified")
+        return 0
+
     if parse(version) <= parse(current):
         raise Abort(f"{version} does not come after the current {current}")
 
     print(f"darsay {current} -> {version}\n")
 
-    today = dt.date.today().isoformat()
-
     print("checking:")
     check_tooling(args.skip_build)
-    check_repo_state(tag, allow_branch=args.allow_branch)
+    if not args.prepare_only:
+        check_repo_state(tag, allow_branch=args.allow_branch)
     heading = check_changelog(version, today)
     print(f"  - changelog: {heading}")
     check_docs_table()
@@ -455,6 +508,10 @@ def main(argv: list[str] | None = None) -> int:
         print("\n  reverted the version bump; nothing was committed")
         raise
     print()
+
+    if args.prepare_only:
+        print(f"prepared {tag}; caller owns the commit and tag")
+        return 0
 
     git("add", str(INIT), str(CHANGELOG), str(DOCS_INDEX))
     git("commit", "-m", f"release: {version}")

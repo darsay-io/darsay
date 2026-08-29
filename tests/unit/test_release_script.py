@@ -34,7 +34,7 @@ def test_docs_version_table_tracks_source_literals(release):
     from darsay.catalog import CATALOG_SCHEMA_VERSION
     from darsay.export import MVB_FORMAT_VERSION
 
-    release.check_docs_table()
+    release.check_docs_versions_current()
     text = (ROOT / "docs" / "README.md").read_text(encoding="utf-8")
     expected = {
         "Tool": __version__,
@@ -44,6 +44,71 @@ def test_docs_version_table_tracks_source_literals(release):
     }
     for label, value in expected.items():
         assert release.docs_row(label).search(text).group(2) == value
+
+
+def test_prepared_release_check_is_read_only(release, monkeypatch, tmp_path):
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text("prepared\n", encoding="utf-8")
+    calls = []
+    monkeypatch.setattr(release, "CHANGELOG", changelog)
+    monkeypatch.setattr(release, "read_current_version", lambda: "1.2.3")
+    monkeypatch.setattr(
+        release,
+        "prepare_changelog",
+        lambda text, version, today: (text, f"{version} {today}"),
+    )
+    monkeypatch.setattr(
+        release, "check_docs_versions_current", lambda: calls.append("docs")
+    )
+    monkeypatch.setattr(release, "check_docs_flags", lambda: calls.append("flags"))
+    monkeypatch.setattr(
+        release,
+        "run_gate",
+        lambda version, skip_build: calls.append((version, skip_build)),
+    )
+
+    release.check_prepared_release("1.2.3", "2026-08-29", True)
+
+    assert changelog.read_text(encoding="utf-8") == "prepared\n"
+    assert calls == ["docs", "flags", ("1.2.3", True)]
+
+
+def test_prepared_release_check_refuses_wrong_version(release, monkeypatch):
+    monkeypatch.setattr(release, "read_current_version", lambda: "1.2.2")
+    with pytest.raises(SystemExit, match="source version is 1.2.2"):
+        release.check_prepared_release("1.2.3", "2026-08-29", True)
+
+
+def test_prepare_only_reuses_writers_without_owning_git(release, monkeypatch):
+    calls = []
+    monkeypatch.setattr(release, "read_current_version", lambda: "1.2.2")
+    monkeypatch.setattr(
+        release, "check_tooling", lambda skip_build: calls.append("tooling")
+    )
+    monkeypatch.setattr(
+        release,
+        "check_repo_state",
+        lambda *args, **kwargs: pytest.fail("prepare-only must not inspect Git"),
+    )
+    monkeypatch.setattr(release, "check_changelog", lambda *args: "heading")
+    monkeypatch.setattr(release, "check_docs_table", lambda: calls.append("docs"))
+    monkeypatch.setattr(release, "check_docs_flags", lambda: calls.append("flags"))
+    monkeypatch.setattr(release, "write_version", lambda value: calls.append(value))
+    monkeypatch.setattr(release, "write_docs_versions", lambda: [])
+    monkeypatch.setattr(release, "write_changelog", lambda *args: "heading")
+    monkeypatch.setattr(
+        release,
+        "run_gate",
+        lambda version, skip_build: calls.append((version, skip_build)),
+    )
+    monkeypatch.setattr(
+        release,
+        "git",
+        lambda *args: pytest.fail("prepare-only must not commit or tag"),
+    )
+
+    assert release.main(["1.2.3", "--prepare-only", "--skip-build"]) == 0
+    assert calls == ["tooling", "docs", "flags", "1.2.3", ("1.2.3", True)]
 
 
 def test_flag_token_scoping(release):

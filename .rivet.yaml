@@ -22,6 +22,45 @@ updates:
             pointer: /project/optional-dependencies/dev
             name: ruff
 
+ci:
+  github:
+    source_workflow: {}
+    release_jobs:
+      jobs: [release]
+
+releases:
+  darsay:
+    description: Prepare and publish the Darsay Python package.
+    source:
+      unpublished_branch: require_land
+    version:
+      uses: semver
+      initial: v0.1.0
+    tags:
+      - id: release
+        primary: true
+    prepare:
+      actions:
+        - id: release-files
+          run:
+            - python
+            - scripts/release.py
+            - "${release.version.bare}"
+            - --prepare-only
+          writes:
+            - CHANGELOG.md
+            - docs/README.md
+            - src/darsay/__init__.py
+      commit:
+        message: |
+          release: ${release.version.bare}
+      verify:
+        run:
+          - python
+          - scripts/release.py
+          - "${release.version.bare}"
+          - --check
+
 land:
   description: Normalize and land the attached local commit chain.
   normalize:
