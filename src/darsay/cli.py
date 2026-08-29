@@ -114,6 +114,26 @@ def _min_free(value: str) -> int:
         raise argparse.ArgumentTypeError(str(exc)) from exc
 
 
+def _rate(value: str) -> int:
+    """Bytes per second for the transfer cap (``5M``, ``5M/s``); 0 lifts it."""
+    from .config import parse_rate
+
+    try:
+        return parse_rate(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
+def _duration(value: str) -> float:
+    """Seconds from ``30s`` / ``15m`` / ``1h`` / ``2d`` or a bare number; 0 allowed."""
+    from .config import parse_duration
+
+    try:
+        return parse_duration(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(str(exc)) from exc
+
+
 def _positive_int(value: str) -> int:
     try:
         parsed = int(value)
@@ -304,6 +324,8 @@ def cmd_archive(args) -> int:
             max_bytes=max_bytes,
             max_minutes=args.max_minutes,
             min_free=args.min_free,
+            max_rate=args.max_rate,
+            max_offline=args.max_offline,
             rehash=args.rehash,
             jobs=args.jobs,
             shard=args.shard,
@@ -312,7 +334,10 @@ def cmd_archive(args) -> int:
     except PartialTransfer as stop:
         print(f"\nArchive paused cleanly ({stop.reason}: {stop.detail}).")
         print(f"Partial bundle: {stop.bundle_dir}")
-        action = "Free disk space, then re-run" if stop.reason == "disk" else "Re-run"
+        action = {
+            "disk": "Free disk space, then re-run",
+            "offline": "Once the network is back, re-run",
+        }.get(stop.reason, "Re-run")
         print(
             f"{action} the same archive command to continue from verified and partial bytes."
         )
@@ -1179,6 +1204,21 @@ def main(argv=None) -> int:
         "(default: 2G, or config transfer.min_free; 0 disables)",
     )
     p.add_argument(
+        "--max-rate",
+        type=_rate,
+        metavar="SIZE",
+        help="cap network transfer at SIZE per second, e.g. 5M "
+        "(default: unlimited, or config transfer.max_rate; 0 lifts a configured cap)",
+    )
+    p.add_argument(
+        "--max-offline",
+        type=_duration,
+        metavar="DURATION",
+        help="keep waiting for a lost network up to DURATION before pausing "
+        "cleanly, e.g. 30m (default: 1h, or config transfer.max_offline; "
+        "0 pauses at the first failure)",
+    )
+    p.add_argument(
         "--rehash",
         action="store_true",
         help="re-hash every present payload file instead of trusting verified ledger entries",
@@ -1480,7 +1520,34 @@ def main(argv=None) -> int:
     if not getattr(args, "command", None):
         parser.print_help()
         return 0
-    return args.func(args)
+    return _run(args.func, args)
+
+
+def _run(func, args) -> int:
+    """Run a subcommand; a failure ends as one line, never a stack trace.
+
+    Bundle state on disk is authoritative, so nothing here needs a
+    traceback to recover — ``DARSAY_DEBUG=1`` shows one for bug reports.
+    """
+    from .sources import SourceError
+
+    try:
+        return func(args)
+    except SourceError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        print("\nInterrupted.", file=sys.stderr)
+        return 130
+    except Exception as exc:
+        if os.environ.get("DARSAY_DEBUG"):
+            raise
+        print(
+            f"darsay: unexpected {type(exc).__name__}: {exc}\n"
+            "  Set DARSAY_DEBUG=1 to see the full traceback.",
+            file=sys.stderr,
+        )
+        return 1
 
 
 if __name__ == "__main__":

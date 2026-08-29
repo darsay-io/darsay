@@ -156,6 +156,59 @@ run that cannot finish says so before the first byte. Design:
 
 ---
 
+## Cap the bandwidth
+
+An archive that runs all day should not own the connection. The cap is
+one token bucket shared by every worker, in bytes per second.
+
+```bash
+darsay archive Qwen/Qwen3.8-27B --max-rate 5M    # this run: 5 MiB/s
+#   rate:     capped at 5.0 MiB/s — about 3h for the remaining 52.1 GiB
+```
+
+Make it the default for a machine or an archive drive:
+
+```toml
+# <vault>/config.toml   (or ~/.config/darsay/config.toml)
+[transfer]
+max_rate = "5M"        # "5M" and "5M/s" both mean 5 MiB/s
+```
+
+`--max-rate 0` lifts a configured cap for one run; `$DARSAY_MAX_RATE`
+overrides per shell. The panel shows the cap in its tail
+(`… 12 min elapsed · cap 5.0 MiB/s`) and the rate settles just under it.
+
+---
+
+## Walk away from the Wi-Fi
+
+Nothing to type. When the network goes, `archive` keeps what arrived,
+the panel reads `offline` with the next attempt counting down, and the
+transfer resumes from the banked bytes when the network is back:
+
+```text
+     0 B/s  ██▇▅▂▁··   offline           retry in 8s · 2 min 10s offline
+  12/153 files · model-00141-of-00141.safetensors   27.3%   1.2 GiB / 4.4 GiB
+Reconnected after 4 min 12s (7 attempts).
+```
+
+It waits up to an hour by default. Longer, and it pauses cleanly — exit
+10, the reason on the terminal — so a loop can rerun it later:
+
+```bash
+darsay archive Qwen/Qwen3.8-27B --max-offline 4h   # overnight ISP outage
+darsay archive Qwen/Qwen3.8-27B --max-offline 0    # pause at the first failure instead
+```
+
+```toml
+[transfer]
+max_offline = "4h"     # seconds, or s/m/h/d
+```
+
+Design: [Incremental transfer](../docs/INCREMENTAL.md#network-loss).
+
+---
+
 ## Price one quant from a pack repo
 
 Some GGUF repos are hundreds of gigabytes of named quants. `--include`

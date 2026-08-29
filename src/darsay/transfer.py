@@ -31,6 +31,13 @@ SMALL_FILE_LIMIT = 8 * 1024**2
 # check() runs at every transfer chunk and hash chunk; probe the disk at
 # most this often so the floor guard stays off the hot path.
 DISK_PROBE_INTERVAL_S = 2.0
+# Reconnect schedule once the network goes away: quick first retries (a
+# laptop re-associating with Wi-Fi is back in seconds), then one attempt
+# every 30 s until the patience window closes.
+RECONNECT_WAITS_S = (2.0, 4.0, 8.0, 15.0, 30.0)
+# Pacing and reconnect sleeps run in slices this long so Ctrl-C, budgets,
+# and the floor land promptly even mid-wait.
+PACE_SLICE_S = 0.2
 
 
 class LedgerError(ValueError):
@@ -87,6 +94,14 @@ class StopController:
     def start(self) -> None:
         if self.max_seconds is not None:
             self.deadline = time.monotonic() + self.max_seconds
+
+    def wants_stop(self) -> bool:
+        """Cheap, non-raising: has a stop already been requested or tripped?"""
+        return (
+            self.interrupted
+            or self._disk_stop is not None
+            or (self.deadline is not None and time.monotonic() >= self.deadline)
+        )
 
     def check(self, session: dict) -> None:
         if self.interrupted:
@@ -153,6 +168,148 @@ class StopController:
             yield
         finally:
             signal.signal(signal.SIGINT, previous)
+
+
+def pace(seconds: float, stop_controller: StopController | None = None) -> None:
+    """Sleep ``seconds`` in short slices, returning early once a stop is wanted."""
+    deadline = time.monotonic() + seconds
+    while True:
+        if stop_controller is not None and stop_controller.wants_stop():
+            return
+        left = deadline - time.monotonic()
+        if left <= 0:
+            return
+        time.sleep(min(PACE_SLICE_S, left))
+
+
+class Throttle:
+    """Token bucket over network bytes for an operator's rate cap.
+
+    Every chunk the transport hands over is accepted — it is already in
+    memory — and the caller sleeps off the debt, so the running average
+    settles at the cap while TCP flow control does the rest upstream. One
+    second of credit means a cold start or a pause never builds a backlog
+    that later bursts through the cap.
+    """
+
+    def __init__(self, bytes_per_second: int, clock=time.monotonic):
+        self.rate = float(bytes_per_second)
+        self.burst = max(self.rate, 1.0)
+        self._credit = self.burst
+        self._clock = clock
+        self._at = clock()
+        self._lock = threading.Lock()
+
+    def debit(self, amount: int) -> float:
+        """Charge ``amount`` bytes; return how long the caller should sleep."""
+        with self._lock:
+            now = self._clock()
+            self._credit = min(self.burst, self._credit + (now - self._at) * self.rate)
+            self._at = now
+            self._credit -= max(0, int(amount))
+            return max(0.0, -self._credit / self.rate)
+
+
+class Link:
+    """What every worker knows about the network: down since when, who is
+    waiting, when the next attempt is due, how many attempts so far.
+
+    Workers report ``lost`` and ``retrying``; the first network byte that
+    arrives afterwards reports ``online``. The meter renders ``snapshot``;
+    the display announces each transition once via ``transitions``.
+    """
+
+    def __init__(self, patience_s: float, session: dict, clock=time.monotonic):
+        self.patience = max(0.0, float(patience_s))
+        self.session = session
+        self._clock = clock
+        self._lock = threading.Lock()
+        self.offline_since: float | None = None
+        self.reason: str | None = None
+        self.attempts = 0
+        self._waiting: dict[str, float] = {}
+        self._retrying: set[str] = set()
+        self.serial = 0
+        self.transitions: list[tuple[int, str, dict]] = []
+
+    @property
+    def offline(self) -> bool:
+        return self.offline_since is not None
+
+    def offline_for(self) -> float:
+        since = self.offline_since
+        return 0.0 if since is None else max(0.0, self._clock() - since)
+
+    def lost(self, path: str, reason: str, attempt: int) -> float:
+        """Record a failed attempt for ``path``; return when to try again."""
+        with self._lock:
+            now = self._clock()
+            if self.offline_since is None:
+                self.offline_since = now
+                self.attempts = 0
+                self.serial += 1
+                self.transitions.append((self.serial, "lost", {"reason": reason}))
+            self.reason = reason
+            self.attempts += 1
+            wait = RECONNECT_WAITS_S[min(attempt, len(RECONNECT_WAITS_S) - 1)]
+            retry_at = now + wait
+            self._waiting[path] = retry_at
+            self._retrying.discard(path)
+            return retry_at
+
+    def retrying(self, path: str) -> None:
+        with self._lock:
+            self._waiting.pop(path, None)
+            self._retrying.add(path)
+
+    def online(self) -> None:
+        """Bytes arrived: the network is back."""
+        if self.offline_since is None:
+            return
+        with self._lock:
+            since = self.offline_since
+            if since is None:
+                return
+            # Bytes still draining from a stream that was open before the
+            # drop do not prove anything; a retry that receives bytes does.
+            if self._waiting and not self._retrying:
+                return
+            seconds = max(0.0, self._clock() - since)
+            self.serial += 1
+            self.transitions.append(
+                (
+                    self.serial,
+                    "restored",
+                    {"seconds": seconds, "attempts": self.attempts},
+                )
+            )
+            self.session["reconnects"] = int(self.session.get("reconnects") or 0) + 1
+            self.offline_since = None
+            self.reason = None
+            self.attempts = 0
+            self._waiting.clear()
+            self._retrying.clear()
+
+    def snapshot(self) -> dict | None:
+        with self._lock:
+            since = self.offline_since
+            if since is None:
+                return None
+            now = self._clock()
+            retry_in = None
+            if self._waiting and not self._retrying:
+                retry_in = max(0.0, min(self._waiting.values()) - now)
+            return {
+                "state": "reconnecting" if self._retrying else "offline",
+                "since": max(0.0, now - since),
+                "retry_in": retry_in,
+                "attempts": self.attempts,
+                "reason": self.reason,
+            }
+
+    def transitions_after(self, serial: int) -> list[tuple[int, str, dict]]:
+        with self._lock:
+            return [item for item in self.transitions if item[0] > serial]
 
 
 def _utc_now() -> str:
@@ -428,6 +585,7 @@ def begin_session(
         "bytes_local_sources": 0,
         "files_completed": 0,
         "retries": 0,
+        "reconnects": 0,
         "host": socket.gethostname(),
     }
     if shard is not None:
@@ -692,7 +850,8 @@ def add_disk_preflight(
     return plan
 
 
-def print_plan(plan: dict, progress=print) -> None:
+def print_plan(plan: dict, progress=print, max_rate: int | None = None) -> None:
+    from .progress import human_duration, human_rate
     from .readme_gen import human_size
 
     files = plan["files"]
@@ -717,6 +876,15 @@ def print_plan(plan: dict, progress=print) -> None:
         f"free {human_size(disk['free_bytes'])}{floor_note} at {disk['checked_path']} — "
         f"{disk['verdict'].upper()}"
     )
+    if max_rate:
+        remaining = sizes["remaining_network"]
+        at_cap = (
+            f" — about {human_duration(remaining / max_rate)} for the remaining "
+            f"{human_size(remaining)}"
+            if remaining
+            else ""
+        )
+        progress(f"  rate:     capped at {human_rate(max_rate)}{at_cap}")
 
 
 def transfer_groups(
@@ -791,17 +959,35 @@ def print_shard_plan(ledger: dict, shard: tuple[int, int], progress=print) -> No
 
 
 class NetworkCounter:
-    """Receive actual network-byte callbacks from a provider's progress wrapper."""
+    """Receive actual network-byte callbacks from a provider's progress wrapper.
 
-    def __init__(self, session: dict, stop_controller: StopController | None = None):
+    This is the one place every received chunk passes through, so it also
+    carries the rate cap (``throttle``) and tells the ``link`` when bytes
+    prove the network is back.
+    """
+
+    def __init__(
+        self,
+        session: dict,
+        stop_controller: StopController | None = None,
+        *,
+        link: Link | None = None,
+        throttle: Throttle | None = None,
+    ):
         self.session = session
         self.stop_controller = stop_controller
+        self.link = link
+        self.throttle = throttle
         self.lock = threading.Lock()
         self.pending_stop: CleanStop | None = None
 
     def add(self, amount: int, defer_only: bool = False) -> None:
+        amount = max(0, int(amount))
+        wait = 0.0
         with self.lock:
-            self.session["bytes_network"] += max(0, int(amount))
+            self.session["bytes_network"] += amount
+            if self.throttle is not None and amount:
+                wait = self.throttle.debit(amount)
             if self.stop_controller is not None:
                 # Providers typically report a chunk immediately before writing
                 # it. Defer the first stop until the following callback so the
@@ -814,12 +1000,116 @@ class NetworkCounter:
                     self.stop_controller.check(self.session)
                 except CleanStop as stop:
                     self.pending_stop = stop
+                    return
+        if self.link is not None and amount:
+            self.link.online()
+        if wait > 0:
+            pace(wait, self.stop_controller)
 
     def poll(self) -> None:
         """Raise a stop banked by an earlier callback (its bytes are durable)."""
         stop = self.pending_stop
         if stop is not None:
             raise stop
+
+
+def _event(path: str | None, event: str, detail: str) -> dict:
+    return {"at": _utc_now(), "path": path, "event": event, "detail": detail}
+
+
+def _wait_for_link(
+    link: Link,
+    path: str,
+    reason: str,
+    attempt: int,
+    stop_controller: StopController | None,
+    session: dict,
+) -> None:
+    """Sleep out one reconnect interval, or raise the clean ``offline`` stop.
+
+    Budgets, the floor, and Ctrl-C keep their meaning while waiting: the
+    stop controller is checked every slice, so a wait never outlives them.
+    """
+    from .progress import human_duration
+
+    if link.patience <= 0:
+        raise CleanStop("offline", f"network unreachable ({reason})")
+    retry_at = link.lost(path, reason, attempt)
+    while True:
+        if stop_controller is not None:
+            stop_controller.check(session)
+        offline_for = link.offline_for()
+        if offline_for >= link.patience:
+            raise CleanStop(
+                "offline",
+                f"network unreachable for {human_duration(offline_for)} ({reason})",
+            )
+        left = retry_at - time.monotonic()
+        if left <= 0:
+            break
+        time.sleep(min(PACE_SLICE_S, left))
+    link.retrying(path)
+
+
+def _fetch_with_reconnect(
+    provider,
+    source,
+    ledger: dict,
+    relative: str,
+    payload_dir: Path,
+    *,
+    force: bool,
+    tqdm_class,
+    counter: NetworkCounter,
+    stop_controller: StopController | None,
+    link: Link | None,
+    events: list[dict],
+) -> None:
+    """One ``download_file`` that outlives a network outage.
+
+    A transient failure banks whatever arrived (the provider's partial is
+    durable), waits for the link, and calls again — each retry resumes the
+    partial rather than discarding it. Anything that is not the network
+    propagates unchanged.
+    """
+    attempt = 0
+    while True:
+        try:
+            provider.download_file(
+                source,
+                ledger["revision"],
+                relative,
+                payload_dir,
+                force=force,
+                tqdm_class=tqdm_class,
+            )
+        except BaseException as exc:
+            if counter.pending_stop is not None:
+                raise counter.pending_stop from None
+            reason = provider.transient_network_error(exc) if link is not None else None
+            if reason is None:
+                raise
+            if attempt == 0:
+                events.append(
+                    _event(relative, "network_lost", f"{reason}; waiting to reconnect")
+                )
+            _wait_for_link(
+                link, relative, reason, attempt, stop_controller, counter.session
+            )
+            attempt += 1
+            force = False
+            continue
+        if link is not None:
+            link.online()
+        if attempt:
+            events.append(
+                _event(
+                    relative,
+                    "network_restored",
+                    f"resumed after {attempt} reconnect attempt{'s' if attempt != 1 else ''}",
+                )
+            )
+        return
 
 
 def _download_one(
@@ -830,6 +1120,7 @@ def _download_one(
     stop_controller: StopController | None,
     local_sources: dict[str, list[dict]],
     meter=None,
+    link: Link | None = None,
 ) -> dict:
     """Worker-safe download/hash result; it never writes the ledger."""
     if stop_controller is not None:
@@ -904,19 +1195,19 @@ def _download_one(
             attempts += 1
             if meter is not None:
                 meter.set_current(relative, expected.get("size"), phase="download")
-            try:
-                provider.download_file(
-                    source,
-                    ledger["revision"],
-                    relative,
-                    payload_dir,
-                    force=retry > 0,
-                    tqdm_class=tqdm_class,
-                )
-            except BaseException:
-                if counter.pending_stop is not None:
-                    raise counter.pending_stop from None
-                raise
+            _fetch_with_reconnect(
+                provider,
+                source,
+                ledger,
+                relative,
+                payload_dir,
+                force=retry > 0,
+                tqdm_class=tqdm_class,
+                counter=counter,
+                stop_controller=stop_controller,
+                link=link,
+                events=events,
+            )
             if meter is not None:
                 meter.set_current(relative, expected.get("size"), phase="hashing")
             record = _verified_record(
@@ -1046,6 +1337,7 @@ def _transfer_small_files(
     progress,
     meter=None,
     live: bool = False,
+    link: Link | None = None,
 ) -> None:
     if not small:
         return
@@ -1068,6 +1360,7 @@ def _transfer_small_files(
                 stop_controller,
                 local_sources,
                 meter,
+                link,
             ): expected
             for expected in small
         }
@@ -1125,20 +1418,34 @@ def transfer_all(
     stop_controller: StopController | None = None,
     jobs: int = 4,
     shard: tuple[int, int] | None = None,
+    max_rate: int | None = None,
+    max_offline: float | None = None,
 ) -> dict:
-    """Fetch and immediately verify every remaining file at the pinned commit."""
+    """Fetch and immediately verify every remaining file at the pinned commit.
+
+    ``max_rate`` caps network bytes per second; ``max_offline`` is how long
+    a lost network is waited out before the session pauses cleanly.
+    """
+    from .config import DEFAULT_MAX_OFFLINE
     from .progress import TransferDisplay, meter_from_plan
     from .sources import get_provider
 
-    counter = NetworkCounter(session, stop_controller)
+    throttle = Throttle(max_rate) if max_rate else None
+    link = Link(DEFAULT_MAX_OFFLINE if max_offline is None else max_offline, session)
+    counter = NetworkCounter(session, stop_controller, link=link, throttle=throttle)
     local_sources = local_source_index(bundle_dir, ledger)
     groups = transfer_groups(ledger["expected"], shard)
     provider = get_provider(ledger.get("provider") or "huggingface")
     plan = transfer_plan(payload_dir, ledger)
-    meter = meter_from_plan(plan, session, stop_controller)
+    meter = meter_from_plan(
+        plan, session, stop_controller, link=link, max_rate=max_rate
+    )
     display = TransferDisplay(meter, progress=progress)
 
-    with provider.transfer_session(payload_dir), _live_transfer(display) as emit:
+    with (
+        provider.transfer_session(payload_dir, max_rate=max_rate),
+        _live_transfer(display) as emit,
+    ):
         for lane, assigned in groups:
             remaining = [
                 expected
@@ -1171,6 +1478,7 @@ def transfer_all(
                 emit,
                 meter=meter,
                 live=display.live,
+                link=link,
             )
 
             for index, expected in enumerate(large, 1):
@@ -1187,6 +1495,7 @@ def transfer_all(
                     stop_controller,
                     local_sources,
                     meter,
+                    link,
                 )
                 _record_download_result(bundle_dir, ledger, session, result)
                 meter.note()

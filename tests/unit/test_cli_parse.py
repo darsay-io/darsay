@@ -150,3 +150,45 @@ def test_archive_next_parse_orders(tmp_path):
         _main([*vault, "archive", "summer", "--next"])
     with pytest.raises(SystemExit, match="already chose the catalog"):
         _main([*vault, "archive", "--next", "summer", "huggingface:Qwen/Qwen3-0.6B"])
+
+
+def test_rate_and_duration_flags():
+    from darsay.cli import _duration, _rate
+
+    assert _rate("5M") == 5 * 1024**2
+    assert _rate("5M/s") == 5 * 1024**2
+    assert _rate("0") == 0
+    with pytest.raises(argparse.ArgumentTypeError):
+        _rate("fast")
+    assert _duration("30m") == 1800.0
+    assert _duration("0") == 0.0
+    with pytest.raises(argparse.ArgumentTypeError):
+        _duration("soon")
+
+
+def test_unexpected_error_is_one_line_unless_debug(monkeypatch, capsys):
+    from darsay.cli import _run
+
+    def boom(_args):
+        raise RuntimeError("kaboom")
+
+    monkeypatch.delenv("DARSAY_DEBUG", raising=False)
+    assert _run(boom, None) == 1
+    err = capsys.readouterr().err
+    assert "unexpected RuntimeError: kaboom" in err
+    assert "DARSAY_DEBUG=1" in err
+    assert "Traceback" not in err
+    monkeypatch.setenv("DARSAY_DEBUG", "1")
+    with pytest.raises(RuntimeError):
+        _run(boom, None)
+
+
+def test_source_error_is_a_clean_message(capsys):
+    from darsay.cli import _run
+    from darsay.sources import SourceError
+
+    def unreachable(_args):
+        raise SourceError("error: cannot reach Hugging Face — DNS lookup failed")
+
+    assert _run(unreachable, None) == 1
+    assert "cannot reach Hugging Face" in capsys.readouterr().err

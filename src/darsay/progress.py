@@ -17,6 +17,13 @@ Panel discipline (the terminal is shared, so the panel defends itself):
   suppressed.
 - The rate history sparkline advances one cell per ``_SPARK_INTERVAL_S``,
   so it shows minutes of trend, not the last few chunks.
+- Library loggers that bound a ``StreamHandler`` to the terminal before the
+  panel started are pointed at the same capture, so a Hub client warning
+  cannot push panel rows into scrollback.
+- A lost network is a panel state, not a stack trace: the time-remaining
+  slot reads ``offline`` / ``reconnecting`` in amber, the tail counts down
+  to the next attempt, and one scrollback line records each outage and
+  each reconnect.
 
 The Hub client still owns HTTP Range and retries; we only consume its
 tqdm callbacks and render.
@@ -41,6 +48,10 @@ from .readme_gen import human_size
 # Brand cyan from the README/PyPI badge (#22d3ee).
 _CYAN = "\033[38;2;34;211;238m"
 _CYAN16 = "\033[96m"
+# Amber for the waiting states — stalled, offline, reconnecting — the one
+# accent besides cyan, so it reads as "attention" without shouting.
+_AMBER = "\033[38;2;251;191;36m"
+_AMBER16 = "\033[33m"
 _DIM = "\033[2m"
 _BOLD = "\033[1m"
 _RESET = "\033[0m"
@@ -64,7 +75,14 @@ _SPARK = "▁▂▃▄▅▆▇█"
 
 _SAMPLE_WINDOW_S = 8.0
 _STALL_AFTER_S = 15.0
+# Once bytes stop, the smoothed rate decays and any ETA computed from it
+# balloons; hold the last estimate made while bytes were flowing instead,
+# until the stall threshold says so plainly.
+_ETA_FRESH_S = 2.0
 _LIVE_HZ = 0.1
+# Log mode prints a status line every _LOG_INTERVAL_S but polls every
+# second so outage / reconnect notices land promptly.
+_LOG_POLL_S = 1.0
 _LOG_INTERVAL_S = 10.0
 _SPARK_POINTS = 8
 # One sparkline cell per interval: 8 cells ≈ 40s of rate history.
@@ -193,6 +211,11 @@ def emphasized(text: str, *, color: bool) -> str:
     return _paint(text, _BOLD, enabled=color)
 
 
+def attention(text: str, *, color: bool) -> str:
+    """Amber and bold when color is on: a state that wants a glance."""
+    return _paint(text, _AMBER if _truecolor() else _AMBER16, _BOLD, enabled=color)
+
+
 def dimmed(text: str, *, color: bool) -> str:
     """Dim when color is on; the text unchanged otherwise."""
     return _paint(text, _DIM, enabled=color)
@@ -245,6 +268,31 @@ def _size_field_width(total: int) -> int:
     return width
 
 
+def status_text(snap: dict) -> str:
+    """The time-remaining slot's word: an ETA, or the state that replaces it."""
+    if snap.get("interrupted"):
+        return "stopping (^C aborts)"
+    link = snap.get("link")
+    if link:
+        return str(link.get("state") or "offline")
+    return human_eta(snap.get("eta_seconds"), stalled=bool(snap.get("stalled")))
+
+
+def _waiting(snap: dict) -> bool:
+    """States drawn in amber: the transfer is alive but no bytes are moving."""
+    return bool(snap.get("link") or snap.get("stalled")) and not snap.get("interrupted")
+
+
+def _link_tail(link: dict) -> str:
+    since = human_duration(link.get("since") or 0)
+    if link.get("state") == "reconnecting":
+        return f"attempt {int(link.get('attempts') or 0)} · {since} offline"
+    retry_in = link.get("retry_in")
+    if retry_in is None:
+        return f"{since} offline"
+    return f"retry in {human_duration(retry_in)} · {since} offline"
+
+
 def snapshot_lines(snap: dict, *, width: int = 80, color: bool = False) -> list[str]:
     """Render the three-line panel. Always returns exactly three lines.
 
@@ -266,18 +314,26 @@ def snapshot_lines(snap: dict, *, width: int = 80, color: bool = False) -> list[
 
     rate = f"{human_rate(snap.get('rate')):>{_RATE_WIDTH}}"
     spark = render_sparkline(list(snap.get("rate_history") or []), _SPARK_POINTS)
-    if snap.get("interrupted"):
-        eta_text = "stopping (^C aborts)"
+    eta_text = f"{status_text(snap):<{_ETA_WIDTH}}"
+    if _waiting(snap):
+        eta = attention(eta_text, color=color)
     else:
-        eta_text = human_eta(snap.get("eta_seconds"), stalled=bool(snap.get("stalled")))
-    eta = _paint(f"{eta_text:<{_ETA_WIDTH}}", _BOLD, enabled=color)
+        eta = _paint(eta_text, _BOLD, enabled=color)
+    link = snap.get("link")
     budget = snap.get("budget_bytes")
-    if budget:
+    if link:
+        tail = _link_tail(link)
+    elif budget:
         used = human_size(snap.get("budget_used") or 0)
         tail = f"budget {used:>{_size_field_width(budget)}} / {human_size(budget)}"
     else:
         tail = f"{human_duration(snap.get('elapsed') or 0)} elapsed"
     line2 = f"  {rate}  {spark}   {eta}   {tail}"
+    cap = snap.get("max_rate")
+    if cap and not link:
+        suffix = f" · cap {human_rate(cap)}"
+        if _visible_len(line2) + len(suffix) <= width:
+            line2 += _paint(suffix, _DIM, enabled=color)
 
     files_done = int(snap.get("files_done") or 0)
     files_total = int(snap.get("files_total") or 0)
@@ -337,18 +393,25 @@ def snapshot_log_line(snap: dict) -> str:
         if total
         else human_size(snap.get("done_bytes") or 0)
     )
-    eta = human_eta(snap.get("eta_seconds"), stalled=bool(snap.get("stalled")))
+    status = status_text(snap)
+    link = snap.get("link")
+    if link:
+        status = f"{status} {human_duration(link.get('since') or 0)}"
+        if link.get("retry_in") is not None:
+            status += f", retry in {human_duration(link['retry_in'])}"
     files_done = int(snap.get("files_done") or 0)
     files_total = int(snap.get("files_total") or 0)
     current = snap.get("current") or []
     name = current[0]["path"] if len(current) == 1 else ""
     if len(current) > 1:
         name = f"{len(current)} files"
+    cap = snap.get("max_rate")
     bits = [
         percent,
         bytes_part,
         human_rate(snap.get("rate")),
-        eta,
+        f"cap {human_rate(cap)}" if cap else "",
+        status,
         f"{files_done}/{files_total} files" if files_total else "",
         name,
     ]
@@ -370,6 +433,8 @@ class TransferMeter:
         files_completed_base: int = 0,
         budget_bytes: int | None = None,
         stop_controller=None,
+        link=None,
+        max_rate: int | None = None,
         clock=time.monotonic,
     ):
         self.total_bytes = max(0, int(total_bytes or 0))
@@ -381,8 +446,11 @@ class TransferMeter:
         self.files_completed_base = int(files_completed_base or 0)
         self.budget_bytes = budget_bytes
         self.stop_controller = stop_controller
+        self.link = link
+        self.max_rate = max_rate
         self._clock = clock
         self.started = clock()
+        self._held_eta: float | None = None
         self.lock = threading.Lock()
         self._tls = threading.local()
         self._inflight: dict[str, dict] = {}
@@ -419,9 +487,11 @@ class TransferMeter:
             self._inflight[path] = current
 
     def detach_bar(self, bar) -> None:
+        """Forget the bar but keep its count: a reconnect resumes from here."""
         with self.lock:
             for info in self._inflight.values():
                 if info.get("bar") is bar:
+                    info["n"] = int(getattr(bar, "n", 0) or 0)
                     info.pop("bar", None)
                     break
 
@@ -485,12 +555,18 @@ class TransferMeter:
             done = self._done_bytes()
             remaining = max(0, self.total_bytes - done) if self.total_bytes else 0
             rate = self._ema
-            stalled = (now - self._last_byte_at) >= _STALL_AFTER_S and remaining > 0
+            quiet_for = now - self._last_byte_at
+            stalled = quiet_for >= _STALL_AFTER_S and remaining > 0
             eta = None
-            if rate and rate > 1 and remaining and not stalled:
-                eta = remaining / rate
-            elif remaining == 0 and self.total_bytes:
+            if remaining == 0 and self.total_bytes:
                 eta = 0.0
+            elif stalled:
+                self._held_eta = None
+            elif rate and rate > 1 and remaining and quiet_for < _ETA_FRESH_S:
+                eta = remaining / rate
+                self._held_eta = eta
+            else:
+                eta = self._held_eta
             files_done = self.verified_files + max(
                 0,
                 int(self.session.get("files_completed") or 0)
@@ -502,7 +578,10 @@ class TransferMeter:
                 total = (
                     getattr(bar, "total", None) if bar is not None else info.get("size")
                 )
-                n = int(getattr(bar, "n", 0) or 0) if bar is not None else 0
+                if bar is not None:
+                    n = int(getattr(bar, "n", 0) or 0)
+                else:
+                    n = int(info.get("n") or 0)
                 if info.get("phase") == "hashing" and total:
                     n = int(total)
                 current.append(
@@ -533,6 +612,8 @@ class TransferMeter:
                 "interrupted": bool(
                     getattr(self.stop_controller, "interrupted", False)
                 ),
+                "link": self.link.snapshot() if self.link is not None else None,
+                "max_rate": self.max_rate,
                 "current": current,
             }
 
@@ -628,7 +709,9 @@ class TransferDisplay:
         self._cursor_hidden = False
         self._painted = False
         self._interrupt_announced = False
+        self._link_serial = 0
         self._captured: list[tuple[str, TextIO, _LineProxy]] = []
+        self._rebound: list[tuple[object, TextIO, _LineProxy]] = []
         self._saved_termios = None
 
     def start(self) -> None:
@@ -708,7 +791,12 @@ class TransferDisplay:
         snap = self.meter.snapshot()
         if snap.get("interrupted") and not self._interrupt_announced:
             self._interrupt_announced = True
-            self._announce_interrupt()
+            self._announce(
+                "Interrupt received — stopping cleanly; verified and partial bytes "
+                "are banked. Press Ctrl-C again to abort now, a third time to "
+                "force-quit."
+            )
+        self._announce_link()
         with self._io:
             if self._suspended or self._stop.is_set():
                 return
@@ -720,19 +808,34 @@ class TransferDisplay:
                     self._last_log = now
                     self.progress(snapshot_log_line(snap))
 
-    def _announce_interrupt(self) -> None:
-        note = (
-            "Interrupt received — stopping cleanly; verified and partial bytes "
-            "are banked. Press Ctrl-C again to abort now, a third time to "
-            "force-quit."
-        )
+    def _announce(self, note: str) -> None:
+        """One scrollback line for an event, above the panel or in the log."""
         if self.live:
             self.emit_above(note)
         elif self._log:
             self.progress(note)
 
+    def _announce_link(self) -> None:
+        """Say once, in scrollback, when the network goes and when it returns."""
+        link = getattr(self.meter, "link", None)
+        if link is None:
+            return
+        for serial, kind, info in link.transitions_after(self._link_serial):
+            self._link_serial = serial
+            if kind == "lost":
+                self._announce(
+                    f"Network unreachable ({info.get('reason')}) — waiting to "
+                    "reconnect; verified and partial bytes are banked."
+                )
+            elif kind == "restored":
+                attempts = int(info.get("attempts") or 0)
+                self._announce(
+                    f"Reconnected after {human_duration(info.get('seconds'))} "
+                    f"({attempts} attempt{'s' if attempts != 1 else ''})."
+                )
+
     def _loop(self) -> None:
-        interval = _LIVE_HZ if self.live else _LOG_INTERVAL_S
+        interval = _LIVE_HZ if self.live else _LOG_POLL_S
         while not self._stop.wait(interval):
             self.refresh()
 
@@ -798,7 +901,12 @@ class TransferDisplay:
         return _paint("  " + " · ".join(bits), _DIM, enabled=self.color)
 
     def _capture_std_streams(self) -> None:
-        """Route other writers' TTY output above the panel while it is live."""
+        """Route other writers' TTY output above the panel while it is live.
+
+        ``sys.stdout`` / ``sys.stderr`` are swapped for line proxies, and any
+        ``logging.StreamHandler`` already holding the real stream (library
+        loggers bind theirs at import time) is pointed at the proxy too.
+        """
         self._captured = []
         for name in ("stdout", "stderr"):
             stream = getattr(sys, name)
@@ -811,8 +919,21 @@ class TransferDisplay:
             proxy = _LineProxy(self, stream)
             setattr(sys, name, proxy)
             self._captured.append((name, stream, proxy))
+        proxies = {id(real): proxy for _name, real, proxy in self._captured}
+        self._rebound = []
+        for handler in _stream_handlers():
+            stream = getattr(handler, "stream", None)
+            proxy = proxies.get(id(stream))
+            if proxy is None or not hasattr(handler, "setStream"):
+                continue
+            handler.setStream(proxy)
+            self._rebound.append((handler, stream, proxy))
 
     def _release_std_streams(self) -> None:
+        rebound, self._rebound = self._rebound, []
+        for handler, real, proxy in rebound:
+            if getattr(handler, "stream", None) is proxy:
+                handler.setStream(real)
         captured, self._captured = self._captured, []
         for name, real, proxy in captured:
             if getattr(sys, name) is proxy:
@@ -847,10 +968,33 @@ class TransferDisplay:
             pass
 
 
+def _stream_handlers() -> list:
+    """Every ``logging.StreamHandler`` attached to any configured logger."""
+    import logging
+
+    loggers = [logging.getLogger()]
+    loggers.extend(
+        item
+        for item in logging.Logger.manager.loggerDict.values()
+        if isinstance(item, logging.Logger)
+    )
+    seen: set[int] = set()
+    handlers = []
+    for logger in loggers:
+        for handler in logger.handlers:
+            if isinstance(handler, logging.StreamHandler) and id(handler) not in seen:
+                seen.add(id(handler))
+                handlers.append(handler)
+    return handlers
+
+
 def meter_from_plan(
     plan: dict,
     session: dict,
     stop_controller=None,
+    *,
+    link=None,
+    max_rate: int | None = None,
 ) -> TransferMeter:
     sizes = plan.get("bytes") or {}
     files = plan.get("files") or {}
@@ -865,4 +1009,6 @@ def meter_from_plan(
         files_completed_base=int(session.get("files_completed") or 0),
         budget_bytes=budget,
         stop_controller=stop_controller,
+        link=link,
+        max_rate=max_rate,
     )

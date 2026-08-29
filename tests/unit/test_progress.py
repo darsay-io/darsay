@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import io
+import sys
 import types
+
+import pytest
 
 from darsay.progress import (
     TransferDisplay,
@@ -577,3 +580,276 @@ def test_progress_off_emits_nothing(monkeypatch):
     display.stop()
     assert logs == []
     assert buf.getvalue() == ""
+
+
+def test_describe_network_error_walks_the_cause_chain():
+    import errno
+    import socket
+
+    from darsay.providers.base import describe_network_error
+
+    assert describe_network_error(socket.gaierror(8, "no")) == "DNS lookup failed"
+    assert describe_network_error(ConnectionRefusedError()) == "connection refused"
+    assert describe_network_error(TimeoutError()) == "timed out"
+    assert describe_network_error(OSError(errno.ENETUNREACH, "x")) == (
+        "network unreachable"
+    )
+    assert describe_network_error(OSError(errno.ENOSPC, "full")) is None
+    assert describe_network_error(ValueError("nope")) is None
+    try:
+        try:
+            raise BrokenPipeError()
+        except BrokenPipeError as inner:
+            raise RuntimeError("wrapped") from inner
+    except RuntimeError as exc:
+        assert describe_network_error(exc) == "connection closed"
+    # httpcore translates socket errors with ``raise ... from None``; the
+    # hidden context is still the truth.
+    try:
+        try:
+            raise socket.gaierror(8, "nodename nor servname provided")
+        except socket.gaierror:
+            raise RuntimeError("translated") from None
+    except RuntimeError as exc:
+        assert describe_network_error(exc) == "DNS lookup failed"
+
+
+def _offline_snap(**overrides) -> dict:
+    snap = {
+        "fraction": 0.002,
+        "done_bytes": int(1.3 * 1024**3),
+        "total_bytes": int(703.8 * 1024**3),
+        "rate": 0.0,
+        "rate_history": [14e6, 14e6, 8e6, 2e6, 0.0],
+        "eta_seconds": None,
+        "stalled": True,
+        "files_done": 12,
+        "files_total": 153,
+        "elapsed": 190,
+        "link": {
+            "state": "offline",
+            "since": 130.0,
+            "retry_in": 8.0,
+            "attempts": 5,
+            "reason": "DNS lookup failed",
+        },
+        "current": [
+            {
+                "path": "model-00141-of-00141.safetensors",
+                "n": int(1.2 * 1024**3),
+                "total": int(4.4 * 1024**3),
+                "phase": "download",
+            }
+        ],
+    }
+    snap.update(overrides)
+    return snap
+
+
+def test_offline_state_owns_the_eta_slot_and_tail():
+    from darsay.progress import status_text
+
+    lines = snapshot_lines(_offline_snap(), width=90, color=False)
+    assert "offline" in lines[1]
+    assert "retry in 8s · 2 min 10s offline" in lines[1]
+    assert "stalled" not in lines[1]
+    # The in-flight file keeps its banked bytes on screen while waiting.
+    assert "1.2 GiB / 4.4 GiB" in lines[2]
+    reconnecting = snapshot_lines(
+        _offline_snap(
+            link={
+                "state": "reconnecting",
+                "since": 132.0,
+                "retry_in": None,
+                "attempts": 6,
+                "reason": "DNS lookup failed",
+            }
+        ),
+        width=90,
+        color=False,
+    )
+    assert "reconnecting" in reconnecting[1]
+    assert "attempt 6 · 2 min 12s offline" in reconnecting[1]
+    assert status_text(_offline_snap()) == "offline"
+    # Interrupt wins over everything.
+    assert "stopping" in status_text(_offline_snap(interrupted=True))
+
+
+def test_waiting_states_are_amber_when_colored():
+    colored = snapshot_lines(_offline_snap(), width=90, color=True)[1]
+    assert "\033[33m" in colored or "\033[38;2;251;191;36m" in colored
+    stalled = snapshot_lines(
+        _offline_snap(link=None, stalled=True), width=90, color=True
+    )[1]
+    assert "stalled" in stalled
+    assert "\033[33m" in stalled or "\033[38;2;251;191;36m" in stalled
+    flowing = snapshot_lines(
+        _offline_snap(link=None, stalled=False, rate=1e7, eta_seconds=600),
+        width=90,
+        color=True,
+    )[1]
+    assert "\033[33m" not in flowing and "\033[38;2;251;191;36m" not in flowing
+
+
+def test_rate_cap_shows_in_the_tail_when_it_fits():
+    snap = _offline_snap(link=None, stalled=False, rate=5e6, eta_seconds=600)
+    snap["max_rate"] = 5 * 1024**2
+    wide = snapshot_lines(snap, width=100, color=False)[1]
+    assert wide.endswith("· cap 5.0 MiB/s")
+    narrow = snapshot_lines(snap, width=60, color=False)[1]
+    assert "cap" not in narrow
+    assert len(narrow) <= 60
+    # Never crowds the outage tail.
+    offline = snapshot_lines({**_offline_snap(), "max_rate": 5 * 1024**2}, width=120)[1]
+    assert "cap" not in offline
+
+
+def test_log_line_reports_outage_and_cap():
+    line = snapshot_log_line({**_offline_snap(), "max_rate": 5 * 1024**2})
+    assert "offline 2 min 10s, retry in 8s" in line
+    assert "cap 5.0 MiB/s" in line
+    assert "\n" not in line
+
+
+def test_meter_holds_last_eta_until_stalled():
+    session = {"bytes_network": 0, "bytes_local_sources": 0, "files_completed": 0}
+    clock = Clock(0.0)
+    meter = _meter(session=session, clock=clock, total_bytes=10_000)
+    for step in range(1, 6):
+        clock.t = float(step)
+        session["bytes_network"] = step * 100
+        meter.note()
+    flowing = meter.snapshot()
+    assert flowing["eta_seconds"] is not None
+    held = flowing["eta_seconds"]
+    # Bytes stop: the smoothed rate decays, the ETA does not balloon.
+    for tick in range(1, 12):
+        clock.t = 5.0 + tick
+        meter.note()
+    quiet = meter.snapshot()
+    assert quiet["stalled"] is False
+    assert quiet["eta_seconds"] == pytest.approx(held)
+    assert human_eta(quiet["eta_seconds"]) != "starting"
+    clock.t = 25.0
+    stalled = meter.snapshot()
+    assert stalled["stalled"] is True
+    assert stalled["eta_seconds"] is None
+
+
+def test_meter_keeps_file_progress_across_a_reconnect():
+    meter = _meter()
+    meter.set_current("shard.bin", 200)
+
+    class Bar:
+        n = 80
+        total = 200
+
+    bar = Bar()
+    meter.attach_bar(bar, "shard.bin")
+    meter.detach_bar(bar)  # the Hub client closed its bar on the drop
+    assert meter.snapshot()["current"][0]["n"] == 80
+    meter.set_current("shard.bin", 200, phase="download")  # retry
+    assert meter.snapshot()["current"][0]["n"] == 80
+
+
+def test_meter_exposes_link_and_cap():
+    class FakeLink:
+        def snapshot(self):
+            return {
+                "state": "offline",
+                "since": 3.0,
+                "retry_in": 2.0,
+                "attempts": 1,
+                "reason": "timed out",
+            }
+
+    meter = TransferMeter(
+        total_bytes=100,
+        total_files=1,
+        verified_bytes=0,
+        verified_files=0,
+        partial_bytes=0,
+        session={"bytes_network": 0, "bytes_local_sources": 0, "files_completed": 0},
+        link=FakeLink(),
+        max_rate=4096,
+    )
+    snap = meter.snapshot()
+    assert snap["link"]["state"] == "offline"
+    assert snap["max_rate"] == 4096
+
+
+def test_display_announces_each_link_transition_once():
+    from darsay.transfer import Link
+
+    session = {
+        "bytes_network": 10,
+        "bytes_local_sources": 0,
+        "files_completed": 0,
+        "reconnects": 0,
+    }
+    clock = Clock(0.0)
+    link = Link(3600, session, clock=clock)
+    meter = TransferMeter(
+        total_bytes=100,
+        total_files=1,
+        verified_bytes=0,
+        verified_files=0,
+        partial_bytes=0,
+        session=session,
+        link=link,
+        clock=clock,
+    )
+    logs: list[str] = []
+    display = TransferDisplay(
+        meter, progress=logs.append, stream=io.StringIO(), live=False, color=False
+    )
+    display.refresh()
+    link.lost("a.bin", "DNS lookup failed", 0)
+    display.refresh()
+    display.refresh()
+    lost = [line for line in logs if "Network unreachable" in line]
+    assert len(lost) == 1
+    assert "DNS lookup failed" in lost[0]
+    assert "banked" in lost[0]
+    clock.t = 75.0
+    link.retrying("a.bin")
+    link.online()
+    display.refresh()
+    display.refresh()
+    back = [line for line in logs if line.startswith("Reconnected")]
+    assert back == ["Reconnected after 1 min 15s (1 attempt)."]
+
+
+def test_live_panel_reroutes_library_loggers(monkeypatch):
+    """A StreamHandler bound to the real stderr before the panel started must
+    print above the panel, not through it."""
+    import logging
+
+    real = _TTY()
+    monkeypatch.setattr(sys, "stderr", real)
+    monkeypatch.setattr(sys, "stdout", _TTY())
+    logger = logging.getLogger("darsay.test.library")
+    handler = logging.StreamHandler(real)
+    logger.addHandler(handler)
+    logger.propagate = False
+    try:
+        session = {"bytes_network": 250, "bytes_local_sources": 0, "files_completed": 1}
+        meter = _meter(total_bytes=1000, session=session, clock=Clock(5.0))
+        display = TransferDisplay(
+            meter, progress=lambda *a, **k: None, stream=real, live=True, color=False
+        )
+        display.start()
+        assert handler.stream is not real
+        display.refresh()
+        logger.warning("Xet Storage is enabled for this repo, but ...")
+        text = real.getvalue()
+        # The warning was emitted, the panel was cleared before it and
+        # repainted after it.
+        marker = "Xet Storage is enabled"
+        assert marker in text
+        after = text.split(marker, 1)[1]
+        assert "25.0%" in after
+        display.stop()
+        assert handler.stream is real
+    finally:
+        logger.removeHandler(handler)

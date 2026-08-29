@@ -62,7 +62,8 @@ Each backend implements:
 | `parse` / `parse_url` | Locator → `SourceRef` (canonical address, URL, vault directory name, artifact type) |
 | `pin` | Moving ref → immutable revision + file inventory + JSON-safe metadata |
 | `download_file` | One payload file into the bundle, including the provider's auth/Range/retry |
-| `transfer_session` | Optional wrap around a transfer run (resume semantics, caches) |
+| `transient_network_error` | Classify a `download_file` failure worth waiting out (`"DNS lookup failed"`, `"connection reset"`) versus a real error; the base class reads the OS-level cause chain, a plugin adds its transport library's types |
+| `transfer_session` | Optional wrap around a transfer run (resume semantics, caches); receives the operator's `max_rate` so the transport can pace smoothly |
 | `variants` | `estimate --variants` (or `None`) |
 | `relationships` | Best-effort ecosystem snapshot at register time |
 | `access_record` | Gate / authorization notes for the manifest |
@@ -74,9 +75,12 @@ Hydration, verify, export, and the payload layout never see the provider.
 ## Hugging Face specifics that stay in the plugin
 
 Hub address grammar, `huggingface_hub`, LFS vs git-blob digests, gated-repo
-auth, `base_model:*` / `dataset:` listings, Xet-disable + Range resume, and
-the payload `.cache/huggingface/` partials all live in
-`src/darsay/providers/huggingface.py`.
+auth, `base_model:*` / `dataset:` listings, Xet-disable + Range resume,
+httpx error classification, chunk sizing under a rate cap, and the payload
+`.cache/huggingface/` partials all live in
+`src/darsay/providers/huggingface.py`. Reconnect scheduling, the token
+bucket, and the panel's outage states are provider-neutral and live in
+`transfer.py` / `progress.py`.
 
 Hugging Face bundle directory names are **unchanged**
 (`owner--name`, `datasets--owner--name`) so existing vaults resume. A later

@@ -21,6 +21,8 @@ from .base import (
     SourceNotFoundError,
     SourceProvider,
     SourceRef,
+    describe_network_error,
+    iter_causes,
 )
 
 # Hub lineage tags: `base_model:<repo_id>` declares a parent, and
@@ -31,6 +33,15 @@ BASE_MODEL_RELATIONS = ("adapter", "finetune", "merge", "quantized")
 VARIANT_QUERY_LIMIT = 100
 VARIANT_DETAIL_LIMIT = 10
 RELATED_QUERY_LIMIT = 100
+
+# Hub responses that mean "try again shortly", not "this request is wrong".
+_TRANSIENT_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
+# The Hub client's own retry commentary. darsay reports outages itself, so
+# these would only duplicate the panel's account.
+_HUB_RETRY_CHATTER = ("Error while downloading from",)
+# Under a rate cap, read in chunks worth about a quarter second so pacing
+# sleeps are short and the running rate stays smooth; never below this.
+_MIN_THROTTLED_CHUNK = 64 * 1024
 
 _FORMAT_TAGS = (
     "gguf",
@@ -109,6 +120,22 @@ def _variant_formats(model_id: str, tags: list[str] | None) -> list[str] | None:
         if hint in lowered and hint not in found:
             found.append(hint)
     return found or None
+
+
+def throttled_chunk_size(max_rate: int, default: int) -> int:
+    """Read chunk for a capped transfer: about a quarter second of bytes."""
+    return max(_MIN_THROTTLED_CHUNK, min(default, max_rate // 4))
+
+
+class _RetryChatterFilter:
+    """Drop the Hub client's retry notices while darsay's transfer runs.
+
+    A ``logging.Filter`` stand-in (any object with ``filter`` works) so the
+    provider does not import ``logging`` at module load.
+    """
+
+    def filter(self, record) -> bool:
+        return not record.getMessage().startswith(_HUB_RETRY_CHATTER)
 
 
 def parse_base_model_tags(tags: list[str]) -> tuple[list[str], dict[str, str]]:
@@ -212,11 +239,53 @@ class HuggingFaceProvider(SourceProvider):
                 f"{self.label} — it may be private (authenticate with "
                 f"`hf auth login`), renamed, or removed. Nothing was archived."
             ) from None
-        except (HfHubHTTPError, OSError) as exc:
-            raise SourceError(
-                f"error: cannot resolve {source.canonical} @ {pin_revision}: {exc}"
-            ) from exc
+        except Exception as exc:
+            reason = self.transient_network_error(exc)
+            if reason is not None:
+                raise SourceError(
+                    f"error: cannot reach {self.label} to resolve {source.canonical} "
+                    f"@ {pin_revision} — {reason}. Check the connection and re-run."
+                ) from exc
+            if isinstance(exc, (HfHubHTTPError, OSError)):
+                raise SourceError(
+                    f"error: cannot resolve {source.canonical} @ {pin_revision}: {exc}"
+                ) from exc
+            raise
         return self._snapshot(source, pin_revision, info)
+
+    def transient_network_error(self, exc: BaseException) -> str | None:
+        reason = describe_network_error(exc)
+        if reason is not None:
+            return reason
+        try:
+            import httpx
+            from huggingface_hub.utils import HfHubHTTPError
+        except ImportError:  # pragma: no cover - core dependency
+            return None
+        for node in iter_causes(exc):
+            if isinstance(node, httpx.ConnectTimeout):
+                return "connection timed out"
+            if isinstance(node, httpx.TimeoutException):
+                return "timed out"
+            if isinstance(node, httpx.ConnectError):
+                return "connection failed"
+            if isinstance(node, httpx.RemoteProtocolError):
+                return "connection closed by the server"
+            if isinstance(node, httpx.ProxyError):
+                return "proxy unreachable"
+            if isinstance(node, httpx.NetworkError):
+                return "connection reset"
+            if isinstance(node, HfHubHTTPError):
+                status = getattr(getattr(node, "response", None), "status_code", None)
+                if status in _TRANSIENT_STATUSES:
+                    return f"{self.label} responded {status}"
+            if isinstance(node, OSError) and str(node).startswith(
+                "Consistency check failed"
+            ):
+                # The stream ended early without a transport error; the
+                # banked partial resumes with a Range request.
+                return "transfer cut short"
+        return None
 
     def download_file(
         self,
@@ -247,7 +316,9 @@ class HuggingFaceProvider(SourceProvider):
             ) from None
 
     @contextmanager
-    def transfer_session(self, payload_dir: Path) -> Iterator[None]:
+    def transfer_session(
+        self, payload_dir: Path, *, max_rate: int | None = None
+    ) -> Iterator[None]:
         """Restore safe same-bundle partial resume around ``hf_hub_download``.
 
         huggingface_hub 1.18 switched to process-unique temporary files and
@@ -256,7 +327,12 @@ class HuggingFaceProvider(SourceProvider):
         here. The Hub client still owns metadata, HTTP Range requests, retries,
         Xet, and the final move; this wrapper only restores its former temp-file
         lifetime while the darsay lock is held.
+
+        Under a rate cap the client's 10 MiB read chunk is shrunk so pacing
+        sleeps stay short, and the client's own retry log lines are filtered:
+        darsay owns the outage story on the terminal.
         """
+        import logging
         import os
 
         import huggingface_hub.constants as hub_constants
@@ -270,6 +346,9 @@ class HuggingFaceProvider(SourceProvider):
                 return None
 
         original = file_download._download_to_tmp_and_move
+        original_chunk = hub_constants.DOWNLOAD_CHUNK_SIZE
+        chatter = _RetryChatterFilter()
+        hub_handlers = list(logging.getLogger("huggingface_hub").handlers)
         original_xet_cache = hub_constants.HF_XET_CACHE
         old_xet_cache_env = os.environ.get("HF_XET_CACHE")
         original_xet_disabled = hub_constants.HF_HUB_DISABLE_XET
@@ -328,9 +407,18 @@ class HuggingFaceProvider(SourceProvider):
             file_download._chmod_and_move(incomplete_path, destination_path)
 
         file_download._download_to_tmp_and_move = resumable_download
+        if max_rate:
+            hub_constants.DOWNLOAD_CHUNK_SIZE = throttled_chunk_size(
+                max_rate, original_chunk
+            )
+        for handler in hub_handlers:
+            handler.addFilter(chatter)
         try:
             yield
         finally:
+            for handler in hub_handlers:
+                handler.removeFilter(chatter)
+            hub_constants.DOWNLOAD_CHUNK_SIZE = original_chunk
             file_download._download_to_tmp_and_move = original
             abort_xet_session()
             hub_constants.HF_XET_CACHE = original_xet_cache
@@ -365,6 +453,10 @@ class HuggingFaceProvider(SourceProvider):
 
             def update(self, n=1):
                 result = super().update(n)
+                if self.disable:
+                    # A disabled tqdm never moves its counter; the panel's
+                    # per-file line and a reconnect's resume point read it.
+                    self.n = max(0, int(self.n or 0) + int(n or 0))
                 if self._meter is not None:
                     self._meter.note()
                 if not self._darsay_xet:

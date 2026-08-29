@@ -43,6 +43,7 @@ from .schema import (
     payload_root_for,
 )
 from .sources import (
+    SourceError,
     SourceGatedError,
     SourceNotFoundError,
     SourceRef,
@@ -191,14 +192,21 @@ def archive(
     max_bytes: int | None = None,
     max_minutes: float | None = None,
     min_free: int | None = None,
+    max_rate: int | None = None,
+    max_offline: float | None = None,
     rehash: bool = False,
     jobs: int = 4,
     shard: tuple[int, int] | None = None,
     include: list[str] | None = None,
     progress=print,
 ) -> Path | None:
-    """Archive a source through pin → reconcile → transfer → register."""
-    from .config import free_space_floor
+    """Archive a source through pin → reconcile → transfer → register.
+
+    ``min_free``, ``max_rate``, and ``max_offline`` are per-run overrides of
+    the operator config (``config.py``); ``None`` means use the configured
+    value.
+    """
+    from .config import free_space_floor, offline_patience, rate_cap
     from .transfer import (
         CleanStop,
         LedgerError,
@@ -223,6 +231,8 @@ def archive(
     ref = source if isinstance(source, SourceRef) else parse_source(source)
     provider = get_provider(ref.provider)
     floor = free_space_floor(vault, min_free)
+    cap = rate_cap(vault, max_rate)
+    patience = offline_patience(vault, max_offline)
     root = payload_root_for(ref.artifact_type)
     resume = find_resume(vault, ref, revision, root)
     pinned = resume[1] if resume else None
@@ -247,6 +257,9 @@ def archive(
                 shutil.rmtree(orphan_dir, ignore_errors=True)
             raise SystemExit(str(exc)) from None
         except SourceNotFoundError as exc:
+            raise SystemExit(str(exc)) from None
+        except SourceError as exc:
+            # Unreachable host, upstream outage: nothing durable has started.
             raise SystemExit(str(exc)) from None
         bundle_dir = bundle_dir_for(vault, ref, snapshot.revision)
 
@@ -312,7 +325,7 @@ def archive(
                 rehash=rehash,
             )
             add_disk_preflight(bundle_dir, plan, min_free=floor)
-            print_plan(plan, progress=progress)
+            print_plan(plan, progress=progress, max_rate=cap)
             if shard is not None:
                 print_shard_plan(ledger, shard, progress=progress)
             return None
@@ -338,7 +351,7 @@ def archive(
                     stop=stop_controller,
                 )
                 add_disk_preflight(bundle_dir, plan, min_free=floor)
-                print_plan(plan, progress=progress)
+                print_plan(plan, progress=progress, max_rate=cap)
                 if shard is not None:
                     print_shard_plan(ledger, shard, progress=progress)
                 if plan["disk"]["verdict"] == "insufficient":
@@ -358,6 +371,8 @@ def archive(
                     stop_controller=stop_controller,
                     jobs=jobs,
                     shard=shard,
+                    max_rate=cap,
+                    max_offline=patience,
                 )
                 if not plan["complete"]:
                     raise RuntimeError(

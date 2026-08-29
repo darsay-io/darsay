@@ -93,7 +93,14 @@ The existing `release.yml` workflow is unchanged: it publishes artifacts on
 - Transfer progress: formatters, the meter, and the TTY panel live in
   `tests/unit/test_progress.py` — including the panel's defenses: fixed-width
   columns across digit rollovers, sparkline cadence, stray-output capture
-  (`_LineProxy`), the interrupt notice, and the final record line. The
+  (`_LineProxy` and rerouted library `StreamHandler`s), the interrupt
+  notice, the offline / reconnecting states, the held ETA, and the final
+  record line. Network loss and the rate cap: `Throttle`, `Link`, and the
+  reconnect wait are unit-tested with injected clocks in
+  `tests/unit/test_transfer.py`; end to end, `TestProvider.fail_next(path,
+  *errors)` injects transport failures so integration tests drive a real
+  outage → wait → resume through `archive` with `RECONNECT_WAITS_S`
+  shortened. The
   Ctrl-C ladder and stop plumbing are in `tests/unit/test_transfer.py`;
   `test_sigint_escalates_across_presses` delivers real SIGINTs and skips
   itself off the main thread. The Hub `tqdm_class` wrapper is in

@@ -558,3 +558,54 @@ def test_cli_archive_min_free_pauses_with_exit_10(vault, test_provider, capsys):
     out = capsys.readouterr().out
     assert "paused cleanly (disk:" in out
     assert "Free disk space, then re-run" in out
+
+
+def test_cli_config_lists_rate_and_offline_settings(vault, capsys, monkeypatch):
+    (vault / "config.toml").write_text(
+        '[transfer]\nmax_rate = "5M"\nmax_offline = "30m"\n', encoding="utf-8"
+    )
+    assert main(["--vault", str(vault), "config"]) == 0
+    out = capsys.readouterr().out
+    assert "transfer.max_rate = 5.0 MiB/s" in out
+    assert "transfer.max_offline = 30 min" in out
+    assert "archive --max-rate" in out
+    assert "$DARSAY_MAX_OFFLINE" in out
+
+
+def test_cli_archive_offline_exit_10_with_reconnect_hint(vault, test_provider, capsys):
+    test_provider.add_repo("acme/toy", model_files())
+    test_provider.fail_next("model.safetensors", ConnectionResetError("reset"))
+    code = main(
+        [
+            "--vault",
+            str(vault),
+            "archive",
+            "test:acme/toy",
+            "--max-offline",
+            "0",
+            "--jobs",
+            "1",
+        ]
+    )
+    assert code == 10
+    out = capsys.readouterr().out
+    assert "paused cleanly (offline: network unreachable (connection reset))" in out
+    assert "Once the network is back, re-run" in out
+
+
+def test_cli_archive_rate_cap_prints_plan_line(vault, test_provider, capsys):
+    test_provider.add_repo("acme/toy", model_files())
+    code = main(
+        [
+            "--vault",
+            str(vault),
+            "archive",
+            "test:acme/toy",
+            "--max-rate",
+            "50M",
+            "--dry-run",
+        ]
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "rate:     capped at 50.0 MiB/s" in out

@@ -167,6 +167,8 @@ If a later source is gated, set `$HF_TOKEN` or run
 |---|---|
 | The download is huge | `darsay archive … --max-gb 10` — exits 10, rerun to resume |
 | The disk is filling up | `archive` pauses at 2 GiB free by default (exit 10). Clear space, rerun. `darsay config` shows the floor; `--min-free 10G` raises it |
+| The Wi-Fi drops | Nothing to do. The panel reads `offline`, keeps what arrived, and resumes when the network is back (up to an hour; `--max-offline 4h` waits longer, `0` pauses at once) |
+| It must not hog the connection | `darsay archive … --max-rate 5M` — 5 MiB/s across every worker; set `max_rate` in `config.toml` to make it the default |
 | You hit Ctrl-C | Once stops cleanly, twice aborts now. Rerun the same `archive` command; completed files are kept |
 | You only want one GGUF from a pack | `darsay archive REPO --include '*Q4_K_M*'` — prices first with `estimate --include` |
 | It is a dataset, not a model | `darsay archive datasets/owner/name` — payload lands in `data/` |
@@ -184,8 +186,9 @@ Copy-paste for each of those: [Examples](../examples/README.md).
   when you archived. The default is `~/darsay`; `list` prints the path it used.
 - **Disk verdict `insufficient`** — `estimate` is doing its job. Free
   space, or pick a smaller source.
-- **Archive paused with exit code 10** — a budget ran out. Rerun the
-  same command; that is success, not failure.
+- **Archive paused with exit code 10** — a budget ran out, the disk hit
+  its floor, or the network stayed away longer than `max_offline`. Rerun
+  the same command; that is success, not failure.
 - **`run` wants to install torch** — expected, once, into the shared
   runtime. The bundle itself stays a few files of metadata plus `model/`.
 - **Windows** — untested best-effort. macOS and Linux are the supported

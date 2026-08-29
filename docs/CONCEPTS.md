@@ -42,7 +42,8 @@ unique prefix. `darsay du` is disk use of bundles and `.runtime` only
 The vault is yours to rsync, restic, or put on a shelf.
 
 `config.toml` is operator preference, not archival fact — for example the
-free-space floor an archive pauses at. A vault-level file travels with an
+free-space floor an archive pauses at, a bandwidth cap, or how long to
+wait for a lost network. A vault-level file travels with an
 archive drive; `~/.config/darsay/config.toml` applies to every vault on a
 machine. `darsay config` shows what applies and why.
 [Incremental transfer](INCREMENTAL.md#6-session-budgets).

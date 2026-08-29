@@ -72,15 +72,22 @@ def test_progress_wrapper_hides_tqdm_and_counts_network_bytes():
         session=session,
     )
     tqdm_class = HuggingFaceProvider().progress_wrapper(counter, meter=meter)
-    bar = tqdm_class(total=80, desc="weights.bin", disable=False)
+    bar = tqdm_class(total=80, desc="weights.bin", disable=False, initial=8)
     assert bar.disable is True
     bar.update(20)
     bar.update_transfer(20)
     assert session["bytes_network"] == 20
+    # A disabled tqdm would leave n at its initial value; the panel's file
+    # line needs the real count, resume offset included.
+    assert bar.n == 28
     meter.set_current("weights.bin", 80)
     meter.attach_bar(bar, "weights.bin")
-    assert meter.snapshot()["done_bytes"] == 20
+    snap = meter.snapshot()
+    assert snap["done_bytes"] == 20
+    assert snap["current"][0]["n"] == 28
     bar.close()
+    # The count survives the bar closing (a dropped connection closes it).
+    assert meter.snapshot()["current"][0]["n"] == 28
 
 
 def test_progress_wrapper_without_meter_still_counts():
@@ -104,3 +111,113 @@ def test_json_value_datetime_and_nested():
     assert converted["n"] == 1
     assert converted["xs"] == [1, 2]
     assert isinstance(converted["other"], str)
+
+
+def test_transient_network_error_classifies_transport_failures():
+    import socket
+
+    import httpx
+    from huggingface_hub.utils import HfHubHTTPError
+
+    from darsay.providers.huggingface import HuggingFaceProvider
+
+    provider = HuggingFaceProvider()
+    # The shape a laptop leaving Wi-Fi produces: httpx wraps httpcore wraps
+    # the resolver's gaierror.
+    try:
+        try:
+            raise socket.gaierror(8, "nodename nor servname provided, or not known")
+        except socket.gaierror as inner:
+            raise httpx.ConnectError("[Errno 8] nodename nor servname") from inner
+    except httpx.ConnectError as exc:
+        dns = exc
+    assert provider.transient_network_error(dns) == "DNS lookup failed"
+    # A metadata call that failed offline surfaces as a Hub "not found" that
+    # was raised *from* the transport error; the chain still tells the truth.
+    try:
+        raise ValueError("cannot locate the file on the Hub") from dns
+    except ValueError as exc:
+        wrapped = exc
+    assert provider.transient_network_error(wrapped) == "DNS lookup failed"
+    assert provider.transient_network_error(httpx.ReadTimeout("slow")) == "timed out"
+    assert (
+        provider.transient_network_error(httpx.ConnectTimeout("slow"))
+        == "connection timed out"
+    )
+    assert (
+        provider.transient_network_error(httpx.RemoteProtocolError("closed"))
+        == "connection closed by the server"
+    )
+    assert provider.transient_network_error(ConnectionResetError()) == (
+        "connection reset"
+    )
+    request = httpx.Request("GET", "https://huggingface.co/x")
+    gateway = HfHubHTTPError(
+        "bad gateway", response=httpx.Response(502, request=request)
+    )
+    assert provider.transient_network_error(gateway) == "Hugging Face responded 502"
+    forbidden = HfHubHTTPError("nope", response=httpx.Response(403, request=request))
+    assert provider.transient_network_error(forbidden) is None
+    assert provider.transient_network_error(ValueError("too large")) is None
+    assert provider.transient_network_error(FileNotFoundError("gone")) is None
+    assert (
+        provider.transient_network_error(
+            OSError(
+                "Consistency check failed: file should be of size 10 but has size 4"
+            )
+        )
+        == "transfer cut short"
+    )
+
+
+def test_throttled_chunk_size_targets_a_quarter_second():
+    from darsay.providers.huggingface import throttled_chunk_size
+
+    default = 10 * 1024**2
+    assert throttled_chunk_size(4 * 1024**2, default) == 1024**2
+    assert throttled_chunk_size(100 * 1024, default) == 64 * 1024  # floor
+    assert (
+        throttled_chunk_size(10**9, default) == default
+    )  # never above the client's own
+
+
+def test_transfer_session_shrinks_chunks_and_filters_retry_chatter(tmp_path):
+    import logging
+
+    import huggingface_hub.constants as hub_constants
+
+    from darsay.providers.huggingface import HuggingFaceProvider
+
+    original = hub_constants.DOWNLOAD_CHUNK_SIZE
+    hub_logger = logging.getLogger("huggingface_hub")
+    handler = logging.Handler()
+    hub_logger.addHandler(handler)
+    try:
+        with HuggingFaceProvider().transfer_session(tmp_path, max_rate=1024**2):
+            assert hub_constants.DOWNLOAD_CHUNK_SIZE == 256 * 1024
+            record = logging.LogRecord(
+                "huggingface_hub.file_download",
+                logging.WARNING,
+                __file__,
+                1,
+                "Error while downloading from %s: %s\nTrying to resume download...",
+                ("https://x", "boom"),
+                None,
+            )
+            assert not handler.filter(record)
+            other = logging.LogRecord(
+                "huggingface_hub.utils._http",
+                logging.WARNING,
+                __file__,
+                1,
+                "Rate limited. Waiting 3s before retry",
+                (),
+                None,
+            )
+            assert handler.filter(other)
+        assert original == hub_constants.DOWNLOAD_CHUNK_SIZE
+        assert handler.filter(record)  # filter removed
+        with HuggingFaceProvider().transfer_session(tmp_path):
+            assert original == hub_constants.DOWNLOAD_CHUNK_SIZE
+    finally:
+        hub_logger.removeHandler(handler)

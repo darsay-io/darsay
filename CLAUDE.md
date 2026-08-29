@@ -21,12 +21,16 @@ point `darsay` (argparse, subcommands in `cli.py`).
 
 - `src/darsay/` — `archiver.py` (download + manifest assembly),
   `transfer.py` (pin ledger, reconciliation, resumable/budgeted per-file
-  transfer, cooperative lanes/assembly, sibling-blob reuse),
-  `progress.py` (archive-level live transfer panel: percent, bytes, rate, ETA),
+  transfer, cooperative lanes/assembly, sibling-blob reuse, the rate-cap
+  token bucket, and reconnect-after-network-loss via the shared `Link`),
+  `progress.py` (archive-level live transfer panel: percent, bytes, rate,
+  ETA, offline/reconnecting states; captures stray stdout/stderr *and*
+  library `StreamHandler`s above the panel),
   `estimate.py` (read-only preflight: sizes/params/disk from source metadata),
   `config.py` (machine-local TOML settings — user file + `<vault>/config.toml`
-  + env + flag layers; the transfer free-space floor lives here; config is
-  operator preference, never bundle content),
+  + env + flag layers; the transfer free-space floor, rate cap, and
+  offline patience live here; config is operator preference, never bundle
+  content),
   `verify.py`, `standalone_verify.py` (stdlib-only; frozen into `.mvb.tar`
   as `darsay-verify.py` — changing it is an MVB minor bump), `smoke.py`,
   `export.py` (.mvb.tar), `readme_gen.py`,
@@ -35,8 +39,11 @@ point `darsay` (argparse, subcommands in `cli.py`).
   management, `hydrate`/`run`), `runners/` (standalone per-engine scripts run
   inside hydrated envs — stdlib + engine only, no darsay imports),
   `sources.py` (source-ref grammar + provider registry), `providers/`
-  (acquisition backends; Hugging Face is the first plugin),
-  `cli.py`.
+  (acquisition backends; Hugging Face is the first plugin; a provider
+  classifies its transport's transient failures via
+  `transient_network_error` — transfer.py never imports httpx),
+  `cli.py` (every subcommand runs under `_run`: no tracebacks reach users
+  unless `DARSAY_DEBUG=1`).
 - `tests/` — pytest pyramid: `unit/`, `integration/` (fake `test:` provider),
   `e2e/` (live Hub, opt-in). See `docs/TESTING.md`.
 - `docs/GETTING-STARTED.md` — first-bundle walkthrough for new users.

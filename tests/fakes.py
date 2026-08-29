@@ -49,6 +49,14 @@ class TestProvider(SourceProvider):
     def __init__(self) -> None:
         self.repos: dict[tuple[str, str], PinnedRepo] = {}
         self.downloads: list[str] = []
+        # Fault injection: exceptions raised by successive ``download_file``
+        # calls for a path, consumed front to back, before any byte moves.
+        self.faults: dict[str, list[BaseException]] = {}
+        self.attempts: dict[str, int] = {}
+
+    def fail_next(self, relative: str, *errors: BaseException) -> None:
+        """Make the next ``download_file`` calls for ``relative`` raise, in order."""
+        self.faults.setdefault(relative, []).extend(errors)
 
     def add_repo(self, locator: str, files: dict[str, bytes], **kwargs) -> PinnedRepo:
         kwargs.setdefault(
@@ -174,6 +182,10 @@ class TestProvider(SourceProvider):
         repo = self._lookup(source, revision)
         if relative not in repo.files:
             raise FileNotFoundError(relative)
+        self.attempts[relative] = self.attempts.get(relative, 0) + 1
+        queued = self.faults.get(relative)
+        if queued:
+            raise queued.pop(0)
         dest = payload_dir.joinpath(*Path(relative).parts)
         if dest.exists() and not force:
             return

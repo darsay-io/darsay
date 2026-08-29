@@ -8,6 +8,8 @@ The public CLI (``darsay archive <source>``) does not change.
 
 from __future__ import annotations
 
+import errno
+import socket
 from abc import ABC, abstractmethod
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -26,6 +28,70 @@ class SourceGatedError(SourceError):
 
 class SourceNotFoundError(SourceError):
     """The locator does not exist, or is private and unauthenticated."""
+
+
+# errno values that mean "the network went away", in the words a person
+# would use. Anything else on an OSError (ENOSPC, EACCES) is a real error.
+_ERRNO_REASONS = {
+    errno.ENETDOWN: "network is down",
+    errno.ENETUNREACH: "network unreachable",
+    errno.EHOSTUNREACH: "host unreachable",
+    errno.EHOSTDOWN: "host is down",
+    errno.ECONNREFUSED: "connection refused",
+    errno.ECONNRESET: "connection reset",
+    errno.ECONNABORTED: "connection aborted",
+    errno.EPIPE: "connection closed",
+    errno.ETIMEDOUT: "timed out",
+}
+
+
+def iter_causes(exc: BaseException) -> Iterator[BaseException]:
+    """``exc`` and then each exception it was raised from, outermost first.
+
+    Follows ``__context__`` even when a ``raise ... from None`` hid it from
+    the traceback: transport libraries translate socket errors that way,
+    and the socket error is the one that says what happened.
+    """
+    seen: set[int] = set()
+    node: BaseException | None = exc
+    while node is not None and id(node) not in seen:
+        seen.add(id(node))
+        yield node
+        node = node.__cause__ or node.__context__
+
+
+def _describe_os_error(exc: BaseException) -> str | None:
+    if isinstance(exc, (socket.gaierror, socket.herror)):
+        return "DNS lookup failed"
+    if isinstance(exc, ConnectionRefusedError):
+        return "connection refused"
+    if isinstance(exc, ConnectionResetError):
+        return "connection reset"
+    if isinstance(exc, BrokenPipeError):
+        return "connection closed"
+    if isinstance(exc, ConnectionAbortedError):
+        return "connection aborted"
+    if isinstance(exc, ConnectionError):
+        return "connection failed"
+    if isinstance(exc, TimeoutError):
+        return "timed out"
+    if isinstance(exc, OSError):
+        return _ERRNO_REASONS.get(exc.errno)
+    return None
+
+
+def describe_network_error(exc: BaseException) -> str | None:
+    """A short reason when ``exc`` or anything it was raised from is the
+    operating system saying the network is unreachable; ``None`` otherwise.
+
+    Provider-neutral: transport libraries wrap socket errors in their own
+    exception types, so the cause chain is what carries the truth.
+    """
+    for node in iter_causes(exc):
+        reason = _describe_os_error(node)
+        if reason:
+            return reason
+    return None
 
 
 @dataclass(frozen=True)
@@ -114,9 +180,25 @@ class SourceProvider(ABC):
         """Fetch one file into ``payload_dir / relative``. Provider owns transport."""
 
     @contextmanager
-    def transfer_session(self, payload_dir: Path) -> Iterator[None]:
-        """Wrap a transfer run (resume semantics, provider caches). Default is a no-op."""
+    def transfer_session(
+        self, payload_dir: Path, *, max_rate: int | None = None
+    ) -> Iterator[None]:
+        """Wrap a transfer run (resume semantics, provider caches). Default is a no-op.
+
+        ``max_rate`` is the operator's bytes-per-second cap when one is set;
+        a provider may tune its transport (chunk sizes) to pace smoothly.
+        """
         yield
+
+    def transient_network_error(self, exc: BaseException) -> str | None:
+        """Classify a ``download_file`` failure worth waiting out.
+
+        Returns a short reason (``"DNS lookup failed"``, ``"connection
+        reset"``) when the network went away and the same call would succeed
+        once it is back; ``None`` for everything else, which propagates.
+        Providers extend this for their transport library's own exceptions.
+        """
+        return describe_network_error(exc)
 
     def progress_wrapper(self, counter, meter=None):
         """Optional tqdm subclass that reports network bytes onto ``counter``.

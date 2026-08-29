@@ -274,3 +274,81 @@ def test_copied_lock_is_reclaimed(tmp_path):
     with transfer_lock(bundle, progress=silent):
         assert lock.is_file()
     assert not lock.exists()
+
+
+def test_network_outage_is_waited_out_and_recorded(vault, test_provider, monkeypatch):
+    import socket
+
+    monkeypatch.setattr("darsay.transfer.RECONNECT_WAITS_S", (0.01, 0.01))
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    weight = "model.safetensors"
+    test_provider.fail_next(
+        weight,
+        ConnectionResetError("reset by peer"),
+        socket.gaierror(8, "nodename nor servname provided, or not known"),
+    )
+    bundle = archive_quiet("test:acme/toy", vault=vault, max_offline=60)
+    manifest = load_manifest(bundle)
+    assert manifest["inventory"]["file_count"] == len(files)
+    assert test_provider.attempts[weight] == 3
+    ledger = load_ledger(bundle)
+    session = ledger["sessions"][-1]
+    assert session["end_reason"] == "complete"
+    assert session["reconnects"] == 1
+    events = {(e["event"], e["path"]) for e in ledger["events"]}
+    assert ("network_lost", weight) in events
+    assert ("network_restored", weight) in events
+    restored = next(e for e in ledger["events"] if e["event"] == "network_restored")
+    assert "2 reconnect attempts" in restored["detail"]
+
+
+def test_zero_offline_patience_pauses_cleanly(vault, test_provider):
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    weight = "model.safetensors"
+    test_provider.fail_next(weight, ConnectionResetError("reset"))
+    with pytest.raises(PartialTransfer) as stopped:
+        archive_quiet("test:acme/toy", vault=vault, max_offline=0)
+    assert stopped.value.reason == "offline"
+    assert "connection reset" in stopped.value.detail
+    bundle = stopped.value.bundle_dir
+    assert not (bundle / "manifest.json").is_file()
+    assert load_ledger(bundle)["sessions"][-1]["end_reason"] == "offline"
+    # Network back: the same command converges.
+    bundle = archive_quiet("test:acme/toy", vault=vault, max_offline=0)
+    assert load_manifest(bundle)["inventory"]["file_count"] == len(files)
+
+
+def test_non_network_errors_still_propagate(vault, test_provider, monkeypatch):
+    monkeypatch.setattr("darsay.transfer.RECONNECT_WAITS_S", (0.01,))
+    test_provider.add_repo("acme/toy", model_files())
+    test_provider.fail_next("model.safetensors", ValueError("file too large"))
+    with pytest.raises(ValueError, match="file too large"):
+        archive_quiet("test:acme/toy", vault=vault, max_offline=60)
+    bundle = next((vault / "test--acme--toy").iterdir())
+    assert load_ledger(bundle)["sessions"][-1]["end_reason"] == "error"
+
+
+def test_rate_cap_paces_the_transfer(vault, test_provider, monkeypatch):
+    slept: list[float] = []
+    clock = {"t": 0.0}
+
+    def sleep(seconds):
+        slept.append(seconds)
+        clock["t"] += seconds
+
+    monkeypatch.setattr("darsay.transfer.time.sleep", sleep)
+    monkeypatch.setattr("darsay.transfer.time.monotonic", lambda: clock["t"])
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    total = sum(len(data) for data in files.values())
+    # A cap far below the payload size forces at least one paced sleep.
+    bundle = archive_quiet("test:acme/toy", vault=vault, max_rate=max(1, total // 10))
+    assert load_manifest(bundle)["inventory"]["file_count"] == len(files)
+    assert slept
+    assert all(0 < s <= 0.2 for s in slept)
+    slept.clear()
+    # Unlimited: no pacing at all.
+    archive_quiet("test:acme/toy", vault=vault, max_rate=0, force=True)
+    assert slept == []
