@@ -79,3 +79,64 @@ def test_docs_flag_checks_complain(release, monkeypatch, tmp_path):
     (tmp_path / "README.md").write_text("darsay archive x --max-gb 1\n")
     with pytest.raises(SystemExit, match=r"no user doc mentions: .*--rehash"):
         release.check_docs_flags()
+
+
+PREAMBLE = (
+    "# Changelog\n\n"
+    "All notable changes to this project are documented in this file.\n\n"
+)
+
+
+def test_prepare_changelog_promotes_unreleased(release):
+    text = (
+        PREAMBLE + "## [Unreleased]\n\n### Added\n\n- a thing\n\n"
+        "## [0.10.0] - 2026-08-28\n\n- old\n"
+    )
+    updated, log = release.prepare_changelog(text, "0.11.0", "2026-08-29")
+    assert log == "## [0.11.0] - 2026-08-29 (from [Unreleased])"
+    assert updated.startswith(
+        PREAMBLE + "## [Unreleased]\n\n## [0.11.0] - 2026-08-29\n"
+    )
+    assert "### Added\n\n- a thing\n" in updated
+    assert updated.count("## [Unreleased]") == 1
+    assert "## [0.10.0] - 2026-08-28" in updated
+
+
+def test_prepare_changelog_dates_version_heading_and_inserts_stub(release):
+    text = (
+        PREAMBLE + "## [0.11.0]\n\n### Added\n\n- a thing\n\n## [0.10.0] - 2026-08-28\n"
+    )
+    updated, log = release.prepare_changelog(text, "0.11.0", "2026-08-29")
+    assert log == "## [0.11.0] - 2026-08-29"
+    assert updated.startswith(
+        PREAMBLE + "## [Unreleased]\n\n## [0.11.0] - 2026-08-29\n"
+    )
+    assert "- a thing" in updated
+
+
+def test_prepare_changelog_keeps_existing_empty_unreleased(release):
+    text = (
+        PREAMBLE + "## [Unreleased]\n\n## [0.11.0]\n\n- a thing\n\n"
+        "## [0.10.0] - 2026-08-28\n"
+    )
+    updated, log = release.prepare_changelog(text, "0.11.0", "2026-08-29")
+    assert log == "## [0.11.0] - 2026-08-29"
+    assert updated.count("## [Unreleased]") == 1
+    assert "## [0.11.0] - 2026-08-29" in updated
+
+
+def test_prepare_changelog_refuses_empty_and_ambiguous(release):
+    with pytest.raises(SystemExit, match="no '## \\[Unreleased\\]'"):
+        release.prepare_changelog(
+            PREAMBLE + "## [0.10.0] - 2026-08-28\n", "0.11.0", "2026-08-29"
+        )
+    with pytest.raises(SystemExit, match="has no notes"):
+        release.prepare_changelog(
+            PREAMBLE + "## [0.11.0]\n\n### Added\n", "0.11.0", "2026-08-29"
+        )
+    with pytest.raises(SystemExit, match="move them to one section"):
+        release.prepare_changelog(
+            PREAMBLE + "## [Unreleased]\n\n- new\n\n## [0.11.0]\n\n- other\n",
+            "0.11.0",
+            "2026-08-29",
+        )

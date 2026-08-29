@@ -7,10 +7,11 @@ first file is written, and the tag is only cut once the full gate passes.
 
 Two kinds of pre-release edit exist, and the script treats them
 differently. Anything derivable from a source literal — the version, the
-docs landing table's version rows, the changelog date — it writes, because
-a hand-typed copy can only drift. Anything authored — release notes, docs
-that describe a flag — it confirms and refuses on, because it cannot write
-prose: the changelog section must exist, the user docs must not describe a
+docs landing table's version rows, the changelog heading and date — it
+writes, because a hand-typed copy can only drift. Anything authored —
+release notes, docs that describe a flag — it confirms and refuses on,
+because it cannot write prose: notes must already live under
+``## [Unreleased]`` or ``## [X.Y.Z]``, the user docs must not describe a
 flag the CLI does not ship, and every ``archive`` flag must be mentioned
 somewhere a user reads.
 
@@ -157,20 +158,69 @@ def check_repo_state(tag: str, *, allow_branch: bool) -> None:
         raise Abort(f"{behind} commit(s) behind {REMOTE}/{RELEASE_BRANCH}; pull first")
 
 
-def check_changelog(version: str) -> str:
-    """The changelog is written by hand. Confirm it, never generate it."""
-    text = CHANGELOG.read_text(encoding="utf-8")
-    heading = re.compile(rf"(?m)^## \[{re.escape(version)}\](?: - (\S+))?\s*$")
-    match = heading.search(text)
-    if match is None:
+_HEADING = re.compile(r"(?m)^## .+")
+_UNRELEASED = re.compile(r"(?m)^## \[Unreleased\][ \t]*$")
+
+
+def _section_body(text: str, heading: re.Match) -> str:
+    rest = text[heading.end() :]
+    nxt = _HEADING.search(rest)
+    return (rest[: nxt.start()] if nxt else rest).strip()
+
+
+def _has_notes(body: str) -> bool:
+    return any(line.lstrip().startswith("- ") for line in body.splitlines())
+
+
+def prepare_changelog(text: str, version: str, today: str) -> tuple[str, str]:
+    """Stamp a date, promote ``[Unreleased]``, leave a fresh Unreleased stub.
+
+    Notes stay authored. This only rewrites headings. Returns
+    ``(new_text, log_line)``.
+    """
+    unreleased = _UNRELEASED.search(text)
+    target = re.compile(rf"(?m)^## \[{re.escape(version)}\](?: - \S+)?[ \t]*$")
+    versioned = target.search(text)
+    u_notes = _has_notes(_section_body(text, unreleased)) if unreleased else False
+
+    if u_notes and versioned:
         raise Abort(
-            f"CHANGELOG.md has no '## [{version}]' section.\n"
-            f"        Write the release notes before cutting the release."
+            f"CHANGELOG.md has notes under [Unreleased] and [{version}]; "
+            "move them to one section"
         )
-    body = text[match.end() :].split("\n## ")[0].strip()
-    if not body:
-        raise Abort(f"CHANGELOG.md section for {version} is empty")
-    return match.group(0)
+
+    dated = f"## [{version}] - {today}"
+    stub = "## [Unreleased]\n\n"
+
+    if u_notes:
+        assert unreleased is not None
+        updated = (
+            text[: unreleased.start()] + stub + dated + "\n" + text[unreleased.end() :]
+        )
+        return updated, f"{dated} (from [Unreleased])"
+
+    if versioned:
+        if not _has_notes(_section_body(text, versioned)):
+            raise Abort(f"CHANGELOG.md section for {version} has no notes")
+        updated = target.sub(dated, text, count=1)
+        if _UNRELEASED.search(updated) is None:
+            stamped = re.search(rf"(?m)^## \[{re.escape(version)}\] - ", updated)
+            assert stamped is not None
+            updated = updated[: stamped.start()] + stub + updated[stamped.start() :]
+        return updated, dated
+
+    raise Abort(
+        f"CHANGELOG.md has no '## [Unreleased]' or '## [{version}]' section.\n"
+        f"        Write the release notes before cutting the release."
+    )
+
+
+def check_changelog(version: str, today: str) -> str:
+    """Confirm notes exist; return the heading the write step will produce."""
+    _, log_line = prepare_changelog(
+        CHANGELOG.read_text(encoding="utf-8"), version, today
+    )
+    return log_line
 
 
 def check_docs_table() -> None:
@@ -265,12 +315,12 @@ def write_docs_versions() -> list[str]:
     return changed
 
 
-def write_changelog_date(version: str, today: str) -> None:
+def write_changelog(version: str, today: str) -> str:
     text = CHANGELOG.read_text(encoding="utf-8")
-    pattern = re.compile(rf"(?m)^## \[{re.escape(version)}\].*$")
-    CHANGELOG.write_text(
-        pattern.sub(f"## [{version}] - {today}", text, count=1), encoding="utf-8"
-    )
+    updated, log_line = prepare_changelog(text, version, today)
+    if updated != text:
+        CHANGELOG.write_text(updated, encoding="utf-8")
+    return log_line
 
 
 # --- gate -----------------------------------------------------------------
@@ -370,20 +420,20 @@ def main(argv: list[str] | None = None) -> int:
 
     print(f"darsay {current} -> {version}\n")
 
+    today = dt.date.today().isoformat()
+
     print("checking:")
     check_tooling(args.skip_build)
     check_repo_state(tag, allow_branch=args.allow_branch)
-    heading = check_changelog(version)
-    print(f"  - changelog: {heading.strip()}")
+    heading = check_changelog(version, today)
+    print(f"  - changelog: {heading}")
     check_docs_table()
     check_docs_flags()
     print("  - docs: version table rows present, flags match the CLI")
     print("  - repo clean, tag free\n")
 
-    today = dt.date.today().isoformat()
-
     if args.dry_run:
-        print("dry run: would update version, docs, changelog date; then:")
+        print("dry run: would update version, docs, changelog heading; then:")
         print(f"  commit  release: {version}")
         print(f"  tag     {tag}")
         return 0
@@ -393,8 +443,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  - {INIT.relative_to(ROOT)}")
     if rows := write_docs_versions():
         print(f"  - {DOCS_INDEX.relative_to(ROOT)} ({', '.join(rows)})")
-    write_changelog_date(version, today)
-    print(f"  - {CHANGELOG.relative_to(ROOT)} (dated {today})\n")
+    log_line = write_changelog(version, today)
+    print(f"  - {CHANGELOG.relative_to(ROOT)} ({log_line})\n")
 
     print("verifying:")
     try:

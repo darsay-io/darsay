@@ -75,16 +75,18 @@ The tool version lives in exactly one place: `__version__` in
 `src/darsay/__init__.py`. `pyproject.toml` derives it via
 `[tool.setuptools.dynamic]`, so there is no second copy to keep in sync.
 
-Write the `CHANGELOG.md` section first. The script confirms it and will
-never invent one. Then prepare the release:
+Keep release notes under `## [Unreleased]` in `CHANGELOG.md` (or under
+`## [X.Y.Z]` if you already named the version). The script will not invent
+notes. Then:
 
 ```bash
-.venv/bin/python scripts/release.py 0.8.1
+.venv/bin/python scripts/release.py 0.11.0
 ```
 
 It refuses to start unless the tree is clean, you are on `main`, level
 with `origin/main`, and the tag is free both locally and on the remote.
-Then it bumps the version, dates the changelog, updates the docs version
+Then it bumps the version, promotes `[Unreleased]` (or stamps a missing
+date), leaves a fresh `[Unreleased]` stub, updates the docs version
 table, and runs the full CI gate: lint, format, tests with the coverage
 floor, `python -m build`, `twine check`. Only then does it commit and
 tag. If the gate fails it reverts the bump and commits nothing.
