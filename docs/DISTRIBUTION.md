@@ -38,7 +38,9 @@ uvx darsay estimate sshleifer/tiny-gpt2
 `pipx` / `uv tool` / `uvx` are the idiomatic way to consume a Python CLI:
 the tool gets its own environment, it does not pollute the user's global
 site-packages, and upgrades are one command (`pipx upgrade darsay`,
-`uv tool upgrade darsay`).
+`uv tool upgrade darsay`). Nothing upgrades itself: `darsay --version`
+reports what the isolated environment holds, so after a release the
+release machine needs that command too.
 
 ### Other sources
 

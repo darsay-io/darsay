@@ -319,6 +319,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"    git push {REMOTE} {RELEASE_BRANCH}")
         print(f"    git push {REMOTE} {tag}")
     print(f"\nUndo before pushing: git tag -d {tag} && git reset --hard HEAD~1")
+    print("Once PyPI has it, this machine too: pipx upgrade darsay")
     return 0
 
 
