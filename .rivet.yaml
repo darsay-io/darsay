@@ -43,8 +43,7 @@ releases:
       actions:
         - id: release-files
           run:
-            - python
-            - scripts/release.py
+            - ./scripts/release.py
             - "${release.version.bare}"
             - --prepare-only
           writes:
@@ -56,8 +55,7 @@ releases:
           release: ${release.version.bare}
       verify:
         run:
-          - python
-          - scripts/release.py
+          - ./scripts/release.py
           - "${release.version.bare}"
           - --check
 

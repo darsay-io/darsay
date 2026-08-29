@@ -80,7 +80,7 @@ version = { attr = "darsay.__version__" }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["."]
+pythonpath = ["src"]
 addopts = [
     "-ra",
     "--strict-markers",
