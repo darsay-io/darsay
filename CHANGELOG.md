@@ -9,6 +9,33 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Added
+
+- **Archive one pin across two disks that never meet — `assemble --move` and
+  skeletons.** When the disk with the bandwidth and the disk with the room
+  are never mounted together (a laptop at the café, the big drive at home),
+  fetch a half where the network is, hand it over with `darsay assemble
+  <partial> --move`, and the source keeps a **skeleton**: the pin and every
+  recorded hash stay, the moved bytes are deleted. The source can then fetch
+  the *other* half without re-downloading what it carried over — a moved
+  file is fetched by no one and registers nowhere. The move is
+  verify-then-delete, per file: only a file the destination has re-hashed
+  against the pinned upstream digest is released, so a bad copy never costs
+  the source its only copy. A skeleton with nothing left to fetch is removed
+  (exactly what a plain `mv` would leave); one that still owes bytes reports
+  how much remains. If moved bytes reappear at the source, reconciliation
+  re-adopts them — the record is a hint, and bytes always win.
+- **`moved` is a fourth per-file transfer state**, beside verified / partial
+  / missing, entered only through `assemble --move`. `darsay list` shows a
+  skeleton's progress as bytes-anywhere and names the moved amount
+  (`archiving: 52% (28.9/55.6 GB, 7/22 files verified, 27.8 GB moved out)`);
+  `darsay estimate` and the transfer plan grow a `moved` line; `list --json`
+  gains `moved_bytes`. An `archive` run with nothing left to fetch here but
+  files moved away pauses cleanly (`end_reason: "moved"`, exit 10) with the
+  hint to assemble the halves. No change to the manifest, the `.mvb.tar`
+  export format, or the catalog schema — `moved` is machine-local transfer
+  state, excluded from exports, and never reaches a registered bundle.
+
 ## [0.12.0] - 2026-08-30
 
 

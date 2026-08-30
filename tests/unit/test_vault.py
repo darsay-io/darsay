@@ -144,7 +144,53 @@ def test_bundle_records_source_address_and_remaining(tmp_path):
     assert rows[0]["status"] == "have"
     assert rows[0]["source_address"] == "huggingface:acme/toy"
     assert rows[0]["remaining_bytes"] == 0
+    assert rows[0]["moved_bytes"] == 0
     assert rows[0]["revision"].startswith("aaaa")
+
+
+def test_bundle_records_skeleton_row_reports_moved(tmp_path):
+    """A partial with moved files reads as a skeleton: percent counts what
+    exists anywhere, and the row says how much was moved out."""
+    import json
+
+    from darsay.vault import bundle_records
+
+    bundle = tmp_path / "test--acme--toy" / "bbbbbbbbbbbb"
+    (bundle / "model").mkdir(parents=True)
+    (bundle / "transfer.json").write_text(
+        json.dumps(
+            {
+                "transfer_version": 1,
+                "provider": "test",
+                "address": "test:acme/toy",
+                "repo_id": "acme/toy",
+                "repo_type": "model",
+                "revision": "b" * 40,
+                "revision_ref": "main",
+                "pinned_at": "2026-08-30T00:00:00+00:00",
+                "expected": [
+                    {"path": "a.bin", "size": 40},
+                    {"path": "b.bin", "size": 60},
+                ],
+                "files": {
+                    "a.bin": {"status": "verified", "size": 40},
+                    "b.bin": {"status": "moved", "size": 60, "moved_at": "2026-08-30"},
+                },
+                "metadata": {},
+                "sessions": [],
+                "events": [],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (row,) = bundle_records(tmp_path)
+    assert row["status"] == "partial"
+    assert row["moved_bytes"] == 60
+    # 40 verified here + 60 moved out = 100 of 100 bytes exist somewhere.
+    assert row["percent"] == 100
+    # Nothing left to fetch here.
+    assert row["remaining_bytes"] == 0
+    assert "60 B moved out" in row["integrity"]
 
 
 def test_resolve_miss_hints_catalog(tmp_path):

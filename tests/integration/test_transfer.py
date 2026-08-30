@@ -456,3 +456,114 @@ def test_preflight_confirm_declined_pauses_before_any_byte(
     with pytest.raises(PartialTransfer) as unattended:
         archive_quiet("test:acme/other", vault=vault, min_free=floor)
     assert "declined" not in unattended.value.detail
+
+
+def _archive_half(source, *, vault):
+    """Fetch as much as a one-byte budget allows; return the partial dir."""
+    try:
+        archive_quiet(source, vault=vault, max_bytes=1)
+    except PartialTransfer as stop:
+        return stop.bundle_dir
+    found = list(vault.glob("*/*"))
+    assert found
+    return found[0]
+
+
+def test_assemble_move_skeletonizes_source_and_never_refetches(
+    vault, test_provider, tmp_path
+):
+    """Archive one pin across two disks that never mount together.
+
+    Laptop fetches a half, hands it to the big vault with ``--move`` (keeping
+    a skeleton), fetches the rest, hands that over too, and the big vault
+    registers with zero payload network bytes — the moved half is never
+    re-downloaded.
+    """
+    files = model_files(param_shape=[64, 64])
+    test_provider.add_repo("acme/big", files)
+    laptop = tmp_path / "laptop"
+    laptop.mkdir()
+    big = vault
+
+    skeleton = _archive_half("test:acme/big", vault=laptop)
+
+    # First hand-over: the verified half moves out; the skeleton remains.
+    dest, _plan = assemble_partials([skeleton], big, progress=silent, move=True)
+    src_ledger = load_ledger(skeleton)
+    moved = {p for p, s in src_ledger["files"].items() if s.get("status") == "moved"}
+    assert moved, "expected at least one file to move out"
+    for path in moved:
+        state = src_ledger["files"][path]
+        assert "moved_at" in state
+        assert not (skeleton / "model" / path).exists(), "moved bytes still on disk"
+    assert any(e["event"] == "moved_out" for e in src_ledger["events"])
+    dest_ledger = load_ledger(dest)
+    assert any(e["event"] == "moved_in" for e in dest_ledger["events"])
+
+    # Fetch the rest on the laptop: a moved file is never requested again.
+    test_provider.downloads.clear()
+    with pytest.raises(PartialTransfer) as paused:
+        archive_quiet("test:acme/big", vault=laptop)
+    assert paused.value.reason == "moved"
+    assert not (set(test_provider.downloads) & moved)
+
+    # Second hand-over drains the skeleton: it holds no payload byte, so it
+    # dissolves — exactly what a plain mv would have left.
+    assemble_partials([skeleton], big, progress=silent, move=True)
+    assert not skeleton.exists()
+
+    # The big vault now has every file verified; archive registers with no
+    # payload network bytes.
+    test_provider.downloads.clear()
+    bundle = archive_quiet("test:acme/big", vault=big)
+    assert bundle is not None
+    assert (bundle / "manifest.json").is_file()
+    assert test_provider.downloads == []
+    assert load_manifest(bundle)["inventory"]["file_count"] == len(files)
+
+
+def test_archive_on_a_fully_moved_skeleton_pauses_moved(vault, test_provider, tmp_path):
+    """A skeleton with every file moved out has nothing to fetch: it pauses
+    cleanly with reason 'moved' (assemble to register), never errors."""
+    from darsay.sources import parse_source
+    from darsay.transfer import new_ledger, save_ledger
+
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    snap = test_provider.pin(parse_source("test:acme/toy"), None)
+
+    # Every expected file is verified-elsewhere (moved), none present here.
+    skel = tmp_path / "vault" / "test--acme--toy" / snap.revision[:12]
+    (skel / "model").mkdir(parents=True)
+    ledger = new_ledger(snap)
+    for item in ledger["expected"]:
+        ledger["files"][item["path"]] = {
+            "status": "moved",
+            "size": item["size"],
+            "sha256": "x",
+            "moved_at": "2026-08-30T00:00:00+00:00",
+        }
+    save_ledger(skel, ledger)
+
+    with pytest.raises(PartialTransfer) as paused:
+        archive_quiet("test:acme/toy", vault=(tmp_path / "vault"))
+    assert paused.value.reason == "moved"
+    # Nothing was fetched; the skeleton is untouched.
+    assert test_provider.downloads == []
+    assert load_ledger(skel)["sessions"][-1]["end_reason"] == "moved"
+
+
+def test_assemble_move_via_cli_reports_the_skeleton(vault, test_provider, tmp_path):
+    from darsay.cli import main
+
+    files = model_files(param_shape=[64, 64])
+    test_provider.add_repo("acme/big", files)
+    laptop = tmp_path / "laptop"
+    laptop.mkdir()
+    skeleton = _archive_half("test:acme/big", vault=laptop)
+
+    rc = main(["--vault", str(vault), "assemble", str(skeleton), "--move"])
+    assert rc == 0
+    # The moved half is gone from the skeleton; its ledger records the move.
+    src_ledger = load_ledger(skeleton)
+    assert any(s.get("status") == "moved" for s in src_ledger["files"].values())

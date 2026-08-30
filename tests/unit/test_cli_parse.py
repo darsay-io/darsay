@@ -162,6 +162,7 @@ def test_flags_by_command_walks_every_subparser():
     ]
     assert "--desire" in flags["catalog add"]
     assert "--prune" in flags["envs"]
+    assert "--move" in flags["assemble"]
 
 
 def test_tty_confirm_defaults_to_yes_and_restores_sigint(monkeypatch):

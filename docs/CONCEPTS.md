@@ -106,6 +106,14 @@ chase a moving `main`. To take a new snapshot, `--force` pins again.
 That is why resume works without a special subcommand, and why a 50 GB
 job can be ten evenings of `--max-gb 10`.
 
+A **skeleton** is a partial pin whose verified bytes have been handed to
+another vault (`assemble --move`): the pin and every recorded hash stay,
+the payload does not. It is how one pin crosses two disks that never mount
+together — fetch a half where there is bandwidth, hand it to the disk with
+the room, then fetch the rest without re-downloading what you carried over.
+The next `archive` fetches only what no vault has yet.
+[Incremental transfer](INCREMENTAL.md#across-disks-assemble---move-and-skeletons).
+
 ## Payload vs metadata
 
 This distinction is the whole design.

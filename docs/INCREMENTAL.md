@@ -9,7 +9,8 @@
 # Incremental archiving — idempotent, resumable transfer
 
 > **In one sentence.** `archive` is interruptible by default. Rerun the
-> same command. `--max-gb` stops cleanly. `--shard N/T` shares the work.
+> same command. `--max-gb` stops cleanly. `--shard N/T` shares the work
+> across people; `assemble --move` shares it across disks that never meet.
 > Copy-paste: [pause and resume](../examples/README.md#pause-and-resume-a-large-archive).
 
 Companion to [QUANTIZATION.md](QUANTIZATION.md) (what to archive) — this
@@ -73,7 +74,10 @@ around that one line.
    per-file ledger in `transfer.json` (§4) exists to avoid re-hashing
    terabytes on every run — but deleting it loses nothing: reconciliation
    (§3) rebuilds it by hashing what's on disk against upstream expectations.
-   Same doctrine as hydration: derived state must never hold archival truth.
+   The one fact the bytes cannot tell you is that a *deliberately* absent
+   file is verified in another vault (a `moved` file — a skeleton, §5); the
+   ledger records that, and losing it costs network, never truth. Same
+   doctrine as hydration: derived state must never hold archival truth.
 3. **Verify each file once, immediately, at its freshest.** A file is hashed
    the moment its last byte lands and checked against the upstream digest
    right there — not in a giant pass at the end (hashing 500 GB is itself
@@ -116,6 +120,8 @@ ledger; classify each file:
 |---|---|---|
 | Ledger says verified, size matches on stat | `verified` | trust (or re-hash under `--rehash`) |
 | Present, size matches, no ledger entry | `unverified` | hash now; matching digest → **adopt** (zero network); mismatch → demote |
+| Ledger says moved, absent | `moved` | trust — the bytes are verified in another vault (§5); never fetch, never demote |
+| Ledger says moved, present | `unverified` | the bytes came back: hash and adopt as `verified` (bytes always win over the hint) |
 | `.incomplete` bytes in the payload's `.cache/huggingface/` | `partial` | resume via Range from current length |
 | Absent | `missing` | fetch |
 | Present but wrong size, or hash mismatch | `mismatch` | delete, log the event, treat as missing |
@@ -187,7 +193,7 @@ pin whose reconciliation adopts every verified byte, i.e. a re-verification
 plus manifest rebuild, not a re-download.
 
 Session accounting: every run appends a session record (started, ended, end
-reason — `complete` / `budget` / `disk` / `offline` / `interrupt` /
+reason — `complete` / `budget` / `disk` / `offline` / `moved` / `interrupt` /
 `assemble` / `error` — the darsay build that ran it, bytes from network,
 bytes adopted, files completed, reconnects, host).
 Ctrl-C escalates: the
@@ -202,7 +208,9 @@ the number of merged inputs.
 **Exit codes:** `0` — bundle completed and registered by this invocation;
 `10` — clean partial stop, more remains (budgets, the free-space floor or
 a full disk, a declined preflight, a network gone longer than
-`max_offline`, and interrupts), so wrappers can loop; `1` — error.
+`max_offline`, a skeleton whose remainder lives in another vault
+(`end_reason: moved`, §5), and interrupts), so wrappers can loop; `1` —
+error.
 
 ```bash
 # unattended completion over nightly cron: rerun until exit 0
@@ -232,7 +240,14 @@ Bundle-root, machine-local, excluded from `.mvb.tar` exports exactly like
   "files": {
     "config.json": {"status": "verified", "sha256": "…", "blake3": "…",
                     "git_sha1": "…", "verified_at": "…",
-                    "source": "network", "attempts": 1}
+                    "source": "network", "attempts": 1},
+    // status "moved": a verified record whose bytes were handed to another
+    // vault (skeleton, §5). Every hash is kept; "moved_at" is added.
+    "model-00003-of-00012.safetensors":
+                   {"status": "moved", "size": 4966786096, "sha256": "…",
+                    "blake3": "…", "git_sha1": null, "verified_at": "…",
+                    "verified_against_upstream": true, "source": "network",
+                    "attempts": 1, "moved_at": "2026-08-25T09:12:40+00:00"}
     // source: "network" | "adopted" | "local:<bundle_id>"
   },
   "sessions": [
@@ -241,9 +256,15 @@ Bundle-root, machine-local, excluded from `.mvb.tar` exports exactly like
      "bytes_network": 10737418240, "bytes_adopted": 0,
      "bytes_local_sources": 4966786096, "retries": 0, "reconnects": 1,
      "files_completed": 3, "host": "…", "shard": "1/3"}
+    // end_reason also includes "moved": nothing left to fetch here, but the
+    // pin is not complete here — assemble the halves to register (§5).
   ],
   "events": [
     {"at": "…", "path": "…", "event": "digest_mismatch", "detail": "…"},
+    {"at": "…", "path": null, "event": "moved_out",
+     "detail": "handed 7 files (27.8 GB) to vault 'big' on jn-mbp"},
+    {"at": "…", "path": null, "event": "moved_in",
+     "detail": "received 7 files (27.8 GB) from a skeleton on jn-mbp"},
     {"at": "…", "path": "…", "event": "network_lost",
      "detail": "DNS lookup failed; waiting to reconnect"},
     {"at": "…", "path": "…", "event": "network_restored",
@@ -307,7 +328,20 @@ In descending order of bytes saved:
    sessions make no API calls, and registration makes only the
    completion-time ecosystem queries. Card facts come from the pin ledger.
 
-### Cooperative shard keys and offline assembly
+### Coordinating a download: shards, assembly, and skeletons
+
+One pin can be too big for one session, one person, or one disk. All three
+splits ride the same durable partial and the same `assemble` verb — because
+a pinned revision is an *enumerable, content-addressed set*, the same set
+arithmetic that lets a single run resume also lets many partials of the same
+pin merge into one verified bundle. Three shapes of the same idea:
+
+- **Across sessions** — `--max-gb` (§6). One machine, many evenings.
+- **Across people** — `--shard N/T`, below. Distinct starts, merge later.
+- **Across disks that never meet** — `assemble --move`, below. Fetch a half,
+  hand it over, keep a skeleton, fetch the rest.
+
+#### Across people: cooperative shard keys
 
 `--shard N/T` is an advisory transfer-order key for T collaborators. It does
 not filter the expected set: every participant still proceeds through all
@@ -327,7 +361,7 @@ lane order. This is whole-file scheduling: a normally sharded weight set
 distributes well, while one monolithic weight file cannot yield three distinct
 starting thirds without a different Range protocol.
 
-Matching partials can then be combined with no network access:
+Matching partials are then combined with no network access:
 
 ```bash
 darsay --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle> /usb/carol/<bundle>
@@ -341,6 +375,70 @@ copy of each matching `.incomplete`, and records an `assemble` session without
 embedding source-machine paths in the ledger. The final `archive` invocation
 continues any remainder—or, when assembly reached 100%, performs registration
 with zero payload network bytes.
+
+#### Across disks: `assemble --move` and skeletons
+
+The cooperative case has every partial on hand at merge time. The two-disk
+case is the mirror image: the disk with the bandwidth and the disk with the
+room are *never mounted together*. A laptop can fetch half a 60 GB model at
+the café, but only the big drive at home can hold it — and the laptop is full
+of the half it already carried home. Deleting that half to make room for the
+rest would normally re-download it: reconcile treats an absent verified file
+as `missing` (a crash between file-write and ledger-write must heal), so a
+plain `rm` is a re-fetch.
+
+`assemble --move` is the honest way to free that space. It runs an ordinary
+assembly into the big vault, then — *only for files the destination has
+re-hashed against the pin* — deletes the source's copy and rewrites the
+source record from `verified` to **`moved`**: verified, and now living in
+another vault. A partial with any `moved` file is a **skeleton**: the pin,
+the expected inventory, and every recorded hash stay behind; the payload
+bytes do not. The laptop can then fetch the *other* half without re-fetching
+what it handed over, because a `moved` file is fetched by no one and
+registers nowhere — it counts toward neither remaining network nor this
+bundle's completeness.
+
+```bash
+# laptop, at the café — the first 30 GB
+darsay archive Qwen/Qwen3.8-27B --max-gb 30
+
+# laptop plugged into the big drive — hand the half over, keep the skeleton
+darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
+
+# laptop, back at the café — the other 30 GB; the moved half is never re-fetched
+darsay archive Qwen/Qwen3.8-27B --max-gb 30
+
+# big drive again — the second hand-over completes it and dissolves the skeleton
+darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
+darsay --vault /Volumes/big archive Qwen/Qwen3.8-27B          # registers, zero network bytes
+```
+
+The move is **verify-then-delete, per file**: the destination's hash against
+the pinned upstream digest — the same gate that admits a file to a manifest —
+is what permits the source deletion, so an interrupted or rotted copy leaves
+the source bytes untouched. If the moved bytes ever reappear at the source
+(restored by hand from the big vault), reconcile hashes and re-adopts them as
+`verified`: the `moved` record is a hint, and bytes always win. A source with
+nothing left to fetch — every file moved out — holds no payload byte and is
+removed, leaving exactly what a plain `mv` would have. A source that still owes
+bytes stays a skeleton and reports how much remains to fetch there.
+
+When an `archive` run has fetched everything it can *here* but some files are
+`moved` (or when it is run on a fully-drained skeleton), it does not error and
+does not register: it pauses cleanly with `end_reason: "moved"`, exit 10, and
+the hint to assemble the halves into one vault. A skeleton's `list` row counts
+what exists anywhere and names the moved amount:
+
+```
+archiving: 52% (28.9/55.6 GB, 7/22 files verified, 27.8 GB moved out)
+```
+
+`moved` is machine-local transfer state, like every other per-file status: it
+lives in `transfer.json` (§4), is excluded from `.mvb.tar` exports, never
+reaches a manifest, and — losing the ledger — degrades a skeleton to a plain
+partial that simply re-fetches. It is the CLI-side, *verified* counterpart to
+the darsay.io board's typed "who has a copy" string: not a human claim, but
+recorded hashes for bytes this pin handed to a named vault.
 
 ## 6. Session budgets
 
@@ -547,6 +645,9 @@ final mega-pass.
 | Two concurrent runs | Second exits on the live lock. |
 | Partial bundle copied or moved | Relative ledger/cache state resumes at the new vault; an inherited lock is reclaimed only when the physical directory identity changed. |
 | Cooperative inputs disagree | `assemble` rejects them before creating a destination; repo, type, full pin, and expected inventory must all match. |
+| `assemble --move`, destination copy fails to verify | That file's source bytes are kept, not deleted (verify-then-delete, per file, §5); only files the destination re-hashed against the pin are released. |
+| Moved bytes reappear at a skeleton | Reconciliation hashes and re-adopts them as `verified`; the `moved` record is only a hint. |
+| Skeleton ledger lost | Degrades to a plain partial: what is on disk is re-adopted, what was moved out is re-fetched. Never corrupt, only slower. |
 
 ## 9. Considered and rejected
 
@@ -586,6 +687,13 @@ final mega-pass.
 - Cooperative lanes and `assemble` were added during implementation. They
   operate above the same pinned expected set: order and offline aggregation
   are acceleration only and cannot change the registered payload.
+- Skeletons (`assemble --move`, the `moved` file state) reuse that same
+  machinery: `moved` is a fourth per-file status beside verified / partial /
+  missing, entered only through `assemble --move`, read by the same
+  reconcile → plan → transfer loop. No new verb, no new schema, no change to
+  the manifest, the export format, or the catalog — a skeleton is a partial
+  whose verified bytes moved out, and the registration bar (every file
+  verified *here*) does not move.
 
 ## See also
 

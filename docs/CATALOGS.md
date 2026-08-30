@@ -127,7 +127,11 @@ grows bytes. A friend’s overlay against their empty vault is all `want`.
 
 Remaining GiB is remaining-to-finish: want entries contribute cached
 `payload_bytes`; partials contribute `remaining_network`; have is 0.
-Unknown bytes print as `+ ?`, never as zero.
+Unknown bytes print as `+ ?`, never as zero. A partial that is a
+*skeleton* — bytes handed to another vault (`assemble --move`, see
+[Incremental](INCREMENTAL.md#across-disks-assemble---move-and-skeletons)) —
+counts those moved bytes as done, not as remaining: its `remaining_network`
+is only what is still to fetch here.
 
 ## CLI
 

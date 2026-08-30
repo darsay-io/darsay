@@ -25,6 +25,7 @@ This page is the cookbook you return to.
 | Load the payload myself | [Use the files directly](#use-the-files-directly) |
 | Put a bundle on a USB drive | [Export](#export-to-a-usb-drive) |
 | Split a download with a friend | [Cooperative shards](#split-a-download-across-machines) |
+| Fetch a model in halves across two disks | [Archive in halves](#archive-in-halves-across-two-disks) |
 | Move a half-finished archive to another disk | [Relocate a partial](#move-a-partial-bundle) |
 | Write curator notes | [Curation](#write-curator-notes) |
 | Curate a want-list and share it | [Share a catalog](#share-a-catalog) |
@@ -333,7 +334,8 @@ Manual recovery without even that script: [MVB format](../docs/MVB-FORMAT.md).
 
 `--shard N/T` is a priority, not a partition. Each participant prefers
 a different byte-balanced set of whole files, but any one of them can
-finish the bundle alone.
+finish the bundle alone. (One person, two disks that never meet? Same
+`assemble`, with [`--move`](#archive-in-halves-across-two-disks).)
 
 ```bash
 # alice, on her machine
@@ -352,6 +354,40 @@ darsay --vault ./combined archive Qwen/Qwen3.8-27B   # register if complete
 
 `assemble` merges matching partials by content. It does not talk to the
 network.
+
+---
+
+## Archive in halves across two disks
+
+Same `assemble`, one disk instead of two friends. The laptop has the
+bandwidth but not the room; the big drive has the room but is at home. They
+are never plugged in together. Fetch a half where the network is, hand it
+to the big drive with `--move`, and the laptop keeps a **skeleton** — the
+pin and the hashes, with the moved bytes deleted — so it can fetch the
+*other* half without re-downloading the first.
+
+```bash
+# laptop, at the café — the first 30 GB
+darsay archive Qwen/Qwen3.8-27B --max-gb 30
+
+# laptop plugged into the big drive — hand the half over, keep the skeleton
+darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
+
+# laptop, back at the café — the other 30 GB (the moved half is never re-fetched)
+darsay archive Qwen/Qwen3.8-27B --max-gb 30
+
+# big drive — the second hand-over completes it and dissolves the skeleton
+darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
+darsay --vault /Volumes/big archive Qwen/Qwen3.8-27B     # registers, zero network
+```
+
+`--move` only ever deletes a file the destination has re-hashed against the
+pin, so a bad copy never costs the laptop its only copy. On the laptop,
+`darsay list` shows the skeleton — `archiving: 52% (…, 27.8 GB moved out)` —
+and an `archive` run there stops cleanly with `assemble to register` once
+everything left is either verified locally or already moved away. A skeleton
+with nothing left to fetch is removed, leaving exactly what a plain `mv`
+would have. Full design: [Incremental transfer](../docs/INCREMENTAL.md#across-disks-assemble---move-and-skeletons).
 
 ---
 
@@ -470,4 +506,4 @@ command: [Sources](../docs/SOURCES.md).
 
 - [Concepts](../docs/CONCEPTS.md) — the objects these recipes assume
 - [Documentation home](../docs/README.md) — specs, design, testing
-- [Incremental transfer](../docs/INCREMENTAL.md) — pin, reconcile, shard, assemble
+- [Incremental transfer](../docs/INCREMENTAL.md) — pin, reconcile, shard, assemble, skeletons

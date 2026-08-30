@@ -370,6 +370,15 @@ def cmd_archive(args) -> int:
     except PartialTransfer as stop:
         print(f"\nArchive paused cleanly ({stop.reason}: {stop.detail}).")
         print(f"Partial bundle: {stop.bundle_dir}")
+        if stop.reason == "moved":
+            print(
+                "Everything here is verified or already moved to another vault. "
+                "Assemble the halves into one vault, then run archive there to register:"
+            )
+            print(
+                f"  darsay --vault <vault-with-the-other-half> assemble {stop.bundle_dir}"
+            )
+            return 10
         action = {
             "disk": "Free disk space, then re-run",
             "offline": "Once the network is back, re-run",
@@ -1047,6 +1056,7 @@ def cmd_assemble(args) -> int:
     bundle, plan = assemble_partials(
         [Path(path) for path in args.partials],
         _vault_path(args, announce=True),
+        move=args.move,
     )
     ledger = json.loads((bundle / "transfer.json").read_text(encoding="utf-8"))
     from .sources import source_from_ledger
@@ -1566,6 +1576,14 @@ def build_parser() -> argparse.ArgumentParser:
         nargs="+",
         metavar="BUNDLE",
         help="partial bundle directories with the same pinned revision",
+    )
+    p.add_argument(
+        "--move",
+        action="store_true",
+        help=(
+            "after verifying, delete each source's copied bytes and mark them "
+            "moved (leave a skeleton the source can keep fetching into)"
+        ),
     )
     p.set_defaults(func=cmd_assemble)
 

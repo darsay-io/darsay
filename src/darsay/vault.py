@@ -75,6 +75,7 @@ def bundle_records(vault: Path) -> list[dict]:
                         "revision_ref": None,
                         "include": None,
                         "remaining_bytes": None,
+                        "moved_bytes": None,
                         "percent": None,
                     }
                 )
@@ -100,6 +101,7 @@ def bundle_records(vault: Path) -> list[dict]:
                     "revision_ref": src.get("revision_ref"),
                     "include": include,
                     "remaining_bytes": 0,
+                    "moved_bytes": 0,
                     "percent": None,
                 }
             )
@@ -110,12 +112,16 @@ def bundle_records(vault: Path) -> list[dict]:
             plan = transfer_plan(bundle_dir / root, ledger)
             sizes = plan["bytes"]
             files = plan["files"]
-            banked = sizes["verified"] + sizes["partial"]
+            moved_bytes = sizes.get("moved", 0)
+            # Percent = how far along the pin is anywhere: bytes verified here,
+            # banked in partials, or verified in another vault (a skeleton).
+            banked = sizes["verified"] + sizes["partial"] + moved_bytes
             percent = int(banked * 100 / sizes["total"]) if sizes["total"] else 0
+            moved_note = f", {human_size(moved_bytes)} moved out" if moved_bytes else ""
             status = (
                 f"archiving: {percent}% "
                 f"({human_size(banked)}/{human_size(sizes['total'])}, "
-                f"{files['verified']}/{files['total']} files verified)"
+                f"{files['verified']}/{files['total']} files verified{moved_note})"
             )
             card = ledger.get("metadata", {}).get("card_data", {})
             license_id = card.get("license") if isinstance(card, dict) else None
@@ -138,6 +144,7 @@ def bundle_records(vault: Path) -> list[dict]:
                     "revision_ref": ledger.get("revision_ref"),
                     "include": include,
                     "remaining_bytes": sizes["remaining_network"],
+                    "moved_bytes": moved_bytes,
                     "percent": percent,
                 }
             )
@@ -159,6 +166,7 @@ def bundle_records(vault: Path) -> list[dict]:
                     "revision_ref": None,
                     "include": None,
                     "remaining_bytes": None,
+                    "moved_bytes": None,
                     "percent": None,
                 }
             )

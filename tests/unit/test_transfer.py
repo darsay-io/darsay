@@ -29,11 +29,14 @@ from darsay.transfer import (
     disk_verdict,
     load_ledger,
     new_ledger,
+    reconcile,
+    release_moved,
     save_ledger,
     transfer_groups,
     transfer_plan,
     transfer_summary,
 )
+from tests.conftest import silent
 from tests.fakes import Clock
 
 
@@ -310,6 +313,155 @@ def test_transfer_plan_complete_and_remaining(tmp_path):
     assert plan["complete"] is False
     ledger["files"]["b"] = {"status": "verified"}
     assert transfer_plan(tmp_path, ledger)["complete"] is True
+
+
+def test_transfer_plan_moved_bucket_is_fetched_not_complete(tmp_path):
+    """A moved file is done for the pin but not registerable here."""
+    ledger = {
+        "provider": "huggingface",
+        "expected": [
+            {"path": "a", "size": 10},
+            {"path": "b", "size": 20},
+        ],
+        "files": {
+            "a": {"status": "verified"},
+            "b": {"status": "moved"},
+        },
+    }
+    plan = transfer_plan(tmp_path, ledger)
+    assert plan["files"]["moved"] == 1
+    assert plan["bytes"]["moved"] == 20
+    # Moved bytes owe no network and do not make the bundle registerable.
+    assert plan["bytes"]["remaining_network"] == 0
+    assert plan["fetched"] is True
+    assert plan["complete"] is False
+
+
+def test_print_plan_shows_a_moved_line_only_when_present(tmp_path):
+    from darsay.transfer import print_plan
+
+    def plan_with(moved_files, moved_bytes):
+        return {
+            "files": {
+                "verified": 1,
+                "moved": moved_files,
+                "partial": 0,
+                "missing": 0,
+                "total": 1 + moved_files,
+            },
+            "bytes": {
+                "verified": 10,
+                "moved": moved_bytes,
+                "partial": 0,
+                "missing": 0,
+                "total": 10 + moved_bytes,
+                "remaining_network": 0,
+            },
+            "disk": {
+                "checked_path": str(tmp_path),
+                "free_bytes": 10**12,
+                "needed_bytes": 0,
+                "min_free_bytes": None,
+                "verdict": "ok",
+            },
+        }
+
+    lines: list[str] = []
+    print_plan(plan_with(1, 5 * 1024**2), progress=lines.append)
+    assert any("moved:" in line and "another vault" in line for line in lines)
+    lines.clear()
+    print_plan(plan_with(0, 0), progress=lines.append)
+    assert not any("moved:" in line for line in lines)
+
+
+def test_reconcile_trusts_an_absent_moved_file(tmp_path):
+    """A moved record whose bytes are absent is kept, never demoted."""
+    payload = tmp_path / "model"
+    payload.mkdir()
+    ledger = {
+        "provider": "huggingface",
+        "expected": [{"path": "w.bin", "size": 4, "lfs_sha256": "deadbeef"}],
+        "files": {
+            "w.bin": {
+                "status": "moved",
+                "size": 4,
+                "sha256": "abc",
+                "moved_at": "2026-08-30T00:00:00+00:00",
+            }
+        },
+        "events": [],
+    }
+    session = {"files_completed": 0, "bytes_adopted": 0}
+    plan = reconcile(tmp_path, payload, ledger, session, progress=silent)
+    assert ledger["files"]["w.bin"]["status"] == "moved"
+    assert plan["files"]["moved"] == 1
+    assert plan["fetched"] is True
+    # No spurious demotion event.
+    assert not any(e["event"] == "verified_file_missing" for e in ledger["events"])
+
+
+def test_reconcile_adopts_a_moved_file_that_reappears(tmp_path):
+    """If moved bytes come back, they are re-hashed and promoted to verified."""
+    import hashlib
+
+    payload = tmp_path / "model"
+    payload.mkdir()
+    data = b"come-back"
+    (payload / "w.bin").write_bytes(data)
+    ledger = {
+        "provider": "huggingface",
+        "expected": [
+            {
+                "path": "w.bin",
+                "size": len(data),
+                "lfs_sha256": hashlib.sha256(data).hexdigest(),
+            }
+        ],
+        "files": {
+            "w.bin": {
+                "status": "moved",
+                "size": len(data),
+                "moved_at": "2026-08-30T00:00:00+00:00",
+            }
+        },
+        "events": [],
+    }
+    session = {"files_completed": 0, "bytes_adopted": 0}
+    plan = reconcile(tmp_path, payload, ledger, session, progress=silent)
+    assert ledger["files"]["w.bin"]["status"] == "verified"
+    assert "moved_at" not in ledger["files"]["w.bin"]
+    assert plan["complete"] is True
+
+
+def test_release_moved_only_releases_destination_verified_bytes(tmp_path):
+    """Verify-then-delete: a file the destination did not verify stays put."""
+    source_dir = tmp_path / "src"
+    payload = source_dir / "model"
+    payload.mkdir(parents=True)
+    for name in ("a.bin", "b.bin"):
+        (payload / name).write_bytes(name.encode())
+    source_ledger = {
+        "expected": [{"path": "a.bin", "size": 5}, {"path": "b.bin", "size": 5}],
+        "files": {
+            "a.bin": {"status": "verified", "size": 5, "sha256": "x"},
+            "b.bin": {"status": "verified", "size": 5, "sha256": "y"},
+        },
+        "events": [],
+        "sessions": [],
+    }
+    # Destination verified only a.bin; b.bin's copy is not trusted there.
+    destination_ledger = {"files": {"a.bin": {"status": "verified"}}}
+    moved_files, moved_bytes = release_moved(
+        source_dir, source_ledger, destination_ledger, "model"
+    )
+    assert moved_files == 1
+    assert moved_bytes == 5
+    assert source_ledger["files"]["a.bin"]["status"] == "moved"
+    assert "moved_at" in source_ledger["files"]["a.bin"]
+    assert not (payload / "a.bin").exists()
+    # b.bin was never verified at the destination, so its only copy survives.
+    assert source_ledger["files"]["b.bin"]["status"] == "verified"
+    assert (payload / "b.bin").read_bytes() == b"b.bin"
 
 
 def test_transfer_summary_aggregates_sessions():

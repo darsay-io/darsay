@@ -1107,11 +1107,17 @@ def meter_from_plan(
     disk_floor = (
         getattr(stop_controller, "min_free_bytes", None) if stop_controller else None
     )
+    # Bytes handed to another vault (a skeleton) are done for this pin even
+    # though this session will not fetch them: fold them into the verified
+    # baseline so the panel shows true overall progress and reaches 100%
+    # once everything fetchable *here* has landed.
+    moved_bytes = int(sizes.get("moved") or 0)
+    moved_files = int(files.get("moved") or 0)
     return TransferMeter(
         total_bytes=int(sizes.get("total") or 0),
         total_files=int(files.get("total") or 0),
-        verified_bytes=int(sizes.get("verified") or 0),
-        verified_files=int(files.get("verified") or 0),
+        verified_bytes=int(sizes.get("verified") or 0) + moved_bytes,
+        verified_files=int(files.get("verified") or 0) + moved_files,
         partial_bytes=int(sizes.get("partial") or 0),
         session=session,
         files_completed_base=int(session.get("files_completed") or 0),
