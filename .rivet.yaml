@@ -1,7 +1,7 @@
 api_version: rivet/v1alpha1
 
 compatibility:
-  minimum_rivet_version: v0.4.172
+  minimum_rivet_version: v0.4.182
 
 upstreams:
   ruff-stable:
@@ -64,6 +64,8 @@ releases:
 land:
   description: Normalize and land the attached local commit chain.
   normalize:
+    author: repository_config
+    committer: repository_config
     messages:
       - uses: commit.message.decode_escaped_newlines
       - uses: commit.message.remove_trailer
