@@ -46,6 +46,7 @@ releases:
             - ./scripts/release.py
             - "${release.version.bare}"
             - --prepare-only
+            - --metadata-only
           writes:
             - CHANGELOG.md
             - docs/README.md
@@ -58,6 +59,7 @@ releases:
           - ./scripts/release.py
           - "${release.version.bare}"
           - --check
+          - --metadata-only
 
 land:
   description: Normalize and land the attached local commit chain.

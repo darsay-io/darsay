@@ -20,6 +20,7 @@ somewhere a user reads.
     python scripts/release.py 0.8.1 --push        # also push the branch
     python scripts/release.py 0.8.1 --prepare-only  # caller owns commit + tag
     python scripts/release.py 0.8.1 --check       # verify prepared source
+    python scripts/release.py 0.8.1 --prepare-only --metadata-only
 
 Stdlib only, like the bundle verifier: a release must not depend on the
 optional extras it is packaging.
@@ -395,7 +396,9 @@ def run_gate(version: str, skip_build: bool) -> None:
     )
 
 
-def check_prepared_release(version: str, today: str, skip_build: bool) -> None:
+def check_prepared_release(
+    version: str, today: str, skip_build: bool, metadata_only: bool = False
+) -> None:
     """Verify one already-prepared source tree without changing Git or files."""
     current = read_current_version()
     if current != version:
@@ -408,7 +411,10 @@ def check_prepared_release(version: str, today: str, skip_build: bool) -> None:
 
     check_docs_versions_current()
     check_docs_flags()
-    run_gate(version, skip_build)
+    if metadata_only:
+        print("  - project gate (covered by exact source CI)")
+    else:
+        run_gate(version, skip_build)
 
 
 # --- main -----------------------------------------------------------------
@@ -440,6 +446,14 @@ def main(argv: list[str] | None = None) -> int:
         help="skip the sdist/wheel gate (faster; CI still runs it)",
     )
     parser.add_argument(
+        "--metadata-only",
+        action="store_true",
+        help=(
+            "verify only derived release metadata; requires --prepare-only or "
+            "--check and leaves the project gate to exact source CI"
+        ),
+    )
+    parser.add_argument(
         "--allow-branch",
         action="store_true",
         help=f"allow releasing from a branch other than {RELEASE_BRANCH}",
@@ -450,6 +464,8 @@ def main(argv: list[str] | None = None) -> int:
         help=f"push {RELEASE_BRANCH} when done (never the tag -- that is the release)",
     )
     args = parser.parse_args(argv)
+    if args.metadata_only and not (args.prepare_only or args.check):
+        parser.error("--metadata-only requires --prepare-only or --check")
 
     # Subprocess output is unbuffered; keep ours interleaved correctly when
     # this is piped to a log rather than a terminal.
@@ -464,8 +480,11 @@ def main(argv: list[str] | None = None) -> int:
     today = dt.date.today().isoformat()
     if args.check:
         print(f"checking prepared darsay {version}:")
-        check_tooling(args.skip_build)
-        check_prepared_release(version, today, args.skip_build)
+        if not args.metadata_only:
+            check_tooling(args.skip_build)
+        check_prepared_release(
+            version, today, args.skip_build, metadata_only=args.metadata_only
+        )
         print("prepared release verified")
         return 0
 
@@ -475,7 +494,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"darsay {current} -> {version}\n")
 
     print("checking:")
-    check_tooling(args.skip_build)
+    if not args.metadata_only:
+        check_tooling(args.skip_build)
     if not args.prepare_only:
         check_repo_state(tag, allow_branch=args.allow_branch)
     heading = check_changelog(version, today)
@@ -500,13 +520,16 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  - {CHANGELOG.relative_to(ROOT)} ({log_line})\n")
 
     print("verifying:")
-    try:
-        run_gate(version, args.skip_build)
-    except SystemExit:
-        # Leave the tree exactly as it was; a failed gate must cost nothing.
-        run("git", "checkout", "--", str(INIT), str(CHANGELOG), str(DOCS_INDEX))
-        print("\n  reverted the version bump; nothing was committed")
-        raise
+    if args.metadata_only:
+        print("  - project gate (covered by exact source CI)")
+    else:
+        try:
+            run_gate(version, args.skip_build)
+        except SystemExit:
+            # Leave the tree exactly as it was; a failed gate must cost nothing.
+            run("git", "checkout", "--", str(INIT), str(CHANGELOG), str(DOCS_INDEX))
+            print("\n  reverted the version bump; nothing was committed")
+            raise
     print()
 
     if args.prepare_only:

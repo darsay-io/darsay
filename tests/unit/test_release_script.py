@@ -111,6 +111,37 @@ def test_prepare_only_reuses_writers_without_owning_git(release, monkeypatch):
     assert calls == ["tooling", "docs", "flags", "1.2.3", ("1.2.3", True)]
 
 
+def test_metadata_only_prepare_needs_no_ambient_tooling(release, monkeypatch):
+    calls = []
+    monkeypatch.setattr(release, "read_current_version", lambda: "1.2.2")
+    monkeypatch.setattr(
+        release,
+        "check_tooling",
+        lambda *args: pytest.fail("metadata-only must not require ambient tools"),
+    )
+    monkeypatch.setattr(release, "check_changelog", lambda *args: "heading")
+    monkeypatch.setattr(release, "check_docs_table", lambda: calls.append("docs"))
+    monkeypatch.setattr(release, "check_docs_flags", lambda: calls.append("flags"))
+    monkeypatch.setattr(release, "write_version", lambda value: calls.append(value))
+    monkeypatch.setattr(release, "write_docs_versions", lambda: [])
+    monkeypatch.setattr(release, "write_changelog", lambda *args: "heading")
+    monkeypatch.setattr(
+        release,
+        "run_gate",
+        lambda *args: pytest.fail("metadata-only must not run the project gate"),
+    )
+
+    assert release.main(["1.2.3", "--prepare-only", "--metadata-only"]) == 0
+    assert calls == ["docs", "flags", "1.2.3"]
+
+
+def test_metadata_only_refuses_to_weaken_native_release(release, capsys):
+    with pytest.raises(SystemExit) as stopped:
+        release.main(["1.2.3", "--metadata-only"])
+    assert stopped.value.code == 2
+    assert "--metadata-only requires" in capsys.readouterr().err
+
+
 def test_flag_token_scoping(release):
     """A flag belongs to the last program named before it on the line."""
     line = "rsync's `--link-dest`, then `darsay archive --max-gb 10`"
