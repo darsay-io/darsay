@@ -9,6 +9,47 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-08-30
+
+A follow-up to the 0.14.0 rsync work. The warning that was supposed to stop
+`assemble` from silently pulling a payload back over the wire could not fire
+on macOS, and it watched the flag instead of the read.
+
+### Fixed
+
+- **Network-mount detection now actually detects.** The 0.14.0 probe shelled
+  out to `stat -f %T`, which on macOS is BSD stat's *file* type specifier —
+  it prints `Directory`, never a filesystem name — so the warning could not
+  fire in its own headline scenario (`--vault /Volumes/<share>` from a
+  laptop), and the Linux table missed `smb2`, what a current cifs mount
+  reports. `is_network_filesystem()` replaces it: on macOS it reads
+  `mount(8)` and trusts the kernel's own `local` flag (absent on `smbfs`,
+  `nfs`, `afpfs`, `webdav`, and FUSE); on Linux it parses
+  `/proc/self/mountinfo` with GNU `df -l`'s remote rule (`host:path`,
+  `//host/share`, a short list of cluster filesystems by type). Both are
+  pure parsers, unit-tested against canned mount tables, and answer
+  "unknown" rather than guessing.
+- **The warning follows the cost, not the flag.** It now sits under the
+  "Hashing N files already at the destination" line and fires whenever that
+  pass would read a dest on a network mount. That covers the case `--rehash`
+  never saw: rsync `model/` alone (no `transfer.json`), then `assemble` over
+  the mount, and every file is hashed as adoption — the same full read back
+  over the wire, previously silent. `--rehash` only adds the "or omit
+  `--rehash`" advice.
+- **`assemble` no longer over-reports what the destination holds.** The
+  "Destination already held N verified files" count subtracted only
+  *present-but-unverified* files from the expected set, so files missing
+  from dest counted as trusted — a half-fetched partial claimed every
+  expected file. That line is gone.
+
+### Changed
+
+- One trust note — `trusted dest ledger + size` or `re-hashed dest against
+  the pin` — is now shared by the registered and unregistered `assemble`
+  paths, replacing the duplicated and inconsistent "Destination already
+  held" lines. The registered-destination path states plainly that it
+  copies and downloads nothing, and a test asserts it never reads dest.
+
 ## [0.14.0] - 2026-08-30
 
 
@@ -57,10 +98,9 @@ Tool version (`darsay.__version__`) is independent of
   the laptop would pull the payload back over the wire).
 - **`assemble` hashes dest only under `--rehash`** (same flag as `archive`)
   or when dest has bytes with no verified ledger record (adoption). The
-  live panel still covers that hashing pass, and when it would read a dest
-  on a network mount (SMB, NFS, sshfs, …) it warns first: run assemble where
-  the vault is a local disk. Default `--move` after rsync is metadata +
-  source delete, not a dest-wide read.
+  live panel still covers that hashing pass. `--rehash` on a network
+  filesystem (`smbfs`, `nfs`, …) warns: run it on the dest host. Default
+  `--move` after rsync is metadata + source delete, not a dest-wide read.
 - **`assemble --move` into a registered destination** trusts dest ledger +
   size (payload stays frozen) and skeletonizes the source. `--move` of a
   registered source is refused: rsync the finished bundle, then
