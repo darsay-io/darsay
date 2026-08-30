@@ -87,10 +87,11 @@ point `darsay` (argparse, subcommands in `cli.py`).
   in the ledger.
 - **rsync is a first-class copy:** an out-of-band `rsync` / `cp -a` of a
   bundle (or its payload) into the usual vault layout is the same as a
-  darsay copy. The next command verifies those bytes against the pin,
-  downloads only what is still missing, and adjusts metadata. It must not
-  re-download a file whose digest matches. Show hashing on the live panel
-  so a follow-up `assemble --move` never looks hung.
+  darsay copy. The next command trusts dest files already `verified` in
+  dest's ledger (size match), downloads only what is still missing, and
+  adjusts metadata. It must not re-download a file whose digest matches,
+  and it must not pull dest back over a network mount to re-hash a copy.
+  Hash dest where it is a local disk (`assemble --rehash` / `verify`).
 - **Export determinism:** the same bundle state must produce a byte-identical
   `.mvb.tar` (sorted entries, marker first, normalized tar metadata, no wall
   clock inside the tar). Volatile machine-local data — export logs, hydration

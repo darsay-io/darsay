@@ -14,15 +14,19 @@ Tool version (`darsay.__version__`) is independent of
 - **rsync is a first-class copy.** An out-of-band `rsync` / `cp -a` of a
   bundle (or its payload) into the usual `<vault>/<slug>/<rev>/` layout is
   the same as a darsay copy. The next `archive` / `assemble` /
-  `assemble --move` hashes what landed against the pin, fetches only what
-  is still missing, and rewrites transfer metadata. It does not re-download
-  a file whose digest matches.
-- **`assemble --move` shows hashing on the live transfer panel** (percent,
-  current file, rate, ETA) so an rsync-then-assemble run does not look
-  hung. Dest files already present are not recopied.
-- **`assemble --move` into a registered destination** verifies dest
-  read-only (payload stays frozen) and skeletonizes the source. `--move` of
-  a registered source is refused: rsync the finished bundle, then
+  `assemble --move` trusts dest files already `verified` in dest's ledger
+  (size match), fetches only what is still missing, and rewrites transfer
+  metadata. It does not re-download a file whose digest matches, and it
+  does not re-read dest to re-hash those files (hashing an SMB dest from
+  the laptop would pull the payload back over the wire).
+- **`assemble` hashes dest only under `--rehash`** (same flag as `archive`)
+  or when dest has bytes with no verified ledger record (adoption). The
+  live panel still covers that hashing pass. `--rehash` on a network
+  filesystem (`smbfs`, `nfs`, …) warns: run it on the dest host. Default
+  `--move` after rsync is metadata + source delete, not a dest-wide read.
+- **`assemble --move` into a registered destination** trusts dest ledger +
+  size (payload stays frozen) and skeletonizes the source. `--move` of a
+  registered source is refused: rsync the finished bundle, then
   `darsay rm` the source.
 
 ## [0.13.0] - 2026-08-30

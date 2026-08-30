@@ -100,7 +100,7 @@ The short list that every document, and every change, is measured against:
    Full files and bundle-local Range partials survive budgets, SIGINT,
    ledger loss, and copying to another vault. No source-machine absolute
    paths in the ledger. rsync is a first-class copy: the next darsay
-   command verifies what landed and fetches only what is still missing.
+   command trusts dest ledger + size and fetches only what is still missing.
 3. **Export determinism.** The same bundle state produces a byte-identical
    `.mvb.tar`. Volatile machine-local files are excluded.
 4. **Record, don't fabricate.** Manifests contain only what was established.

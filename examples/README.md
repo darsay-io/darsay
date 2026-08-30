@@ -383,16 +383,18 @@ darsay --vault /Volumes/big archive Qwen/Qwen3.8-27B     # registers, zero netwo
 ```
 
 Already rsync'd the partial onto the big drive? Same command — it copies
-nothing already there, re-hashes dest against the pin, then skeletonizes
-the laptop copy:
+nothing already there, trusts dest files the ledger already marks
+verified (size match), then skeletonizes the laptop copy. It does not
+re-hash dest over SMB:
 
 ```bash
 rsync -a ~/darsay/qwen--qwen3.8-27b/<rev>/ /Volumes/big/qwen--qwen3.8-27b/<rev>/
 darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
 ```
 
-`--move` only ever deletes a file the destination has re-hashed against the
-pin, so a bad copy never costs the laptop its only copy. On the laptop,
+`--move` only ever deletes a file dest has as verified, so an incomplete
+copy never costs the laptop its only copy. Hash dest on the dest host
+(`assemble --rehash`) if you do not trust the rsync. On the laptop,
 `darsay list` shows the skeleton — `archiving: 52% (…, 27.8 GB moved out)` —
 and an `archive` run there stops cleanly with `assemble to register` once
 everything left is either verified locally or already moved away. A skeleton
@@ -420,24 +422,26 @@ this works across laptops.
 
 ## rsync then darsay
 
-rsync is a first-class copy. The next darsay command hashes what landed
-against the pin, fetches only the remainder, and rewrites metadata. It
-does not re-download the majority. Put the bundle at
-`<vault>/<slug>/<rev>/`, not at the vault root.
+rsync is a first-class copy. The next darsay command trusts dest files
+the ledger already marks verified (size match), fetches only the
+remainder, and rewrites metadata. It does not re-download the majority,
+and it does not pull dest back over SMB to re-hash a copy. Put the
+bundle at `<vault>/<slug>/<rev>/`, not at the vault root.
 
 ```bash
 # resume a partial on the other disk
 rsync -a ~/darsay/qwen--qwen3.8-27b/<rev>/ /Volumes/big/qwen--qwen3.8-27b/<rev>/
 darsay --vault /Volumes/big archive Qwen/Qwen3.8-27B
 
-# or free the laptop after the copy (verify dest, delete source payload)
+# or free the laptop after the copy (trust dest ledger + size, delete source payload)
 darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
 ```
 
-`assemble --move` shows hashing on the live panel — percent, the file
-now in flight, rate, ETA — so a 50 GB dest does not look hung. A
-registered payload is frozen: rsync it, `darsay verify` dest, then
-`darsay rm` the source. `--move` is the verb for partials.
+Hash dest where it is a local disk — `assemble --rehash` or `darsay
+verify` on the NAS, not from a laptop over SMB (that reads the whole
+payload back over the wire). `--rehash` on a network mount warns.
+A registered payload is frozen: rsync it, verify dest on the dest host,
+then `darsay rm` the source. `--move` is the verb for partials.
 
 ---
 

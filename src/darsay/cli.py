@@ -1057,12 +1057,13 @@ def cmd_assemble(args) -> int:
         [Path(path) for path in args.partials],
         _vault_path(args, announce=True),
         move=args.move,
+        rehash=args.rehash,
     )
     if (bundle / "manifest.json").is_file():
         print(f"\nDestination is already a registered bundle: {bundle}")
         if args.move:
             print(
-                "Source files dest re-hashed against the pin were released "
+                "Source files dest already holds as verified were released "
                 "(the source is a skeleton, or was removed if nothing remained)."
             )
         return 0
@@ -1589,9 +1590,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--move",
         action="store_true",
         help=(
-            "after dest re-hashes a file against the pin, delete the source "
-            "copy and mark it moved (rsync first is fine: dest files already "
-            "present are hashed, not recopied)"
+            "after dest has a file as verified (ledger + size, or hashed "
+            "under --rehash), delete the source copy and mark it moved"
+        ),
+    )
+    p.add_argument(
+        "--rehash",
+        action="store_true",
+        help=(
+            "re-hash every dest payload file instead of trusting verified "
+            "ledger entries (same as archive --rehash). On a network mount "
+            "this reads the whole dest over the wire; run it on the dest host"
         ),
     )
     p.set_defaults(func=cmd_assemble)

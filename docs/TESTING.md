@@ -48,7 +48,8 @@ These match the list in `CLAUDE.md` / `CONTRIBUTING.md`:
 - `transfer.json` is relocatable: no source-machine absolute paths, a copied
   partial resumes in another vault, a copied lock is reclaimed. An rsync
   of payload bytes into dest, then `archive` / `assemble --move`, must not
-  re-download those bytes (hash + metadata only).
+  re-download those bytes and must not re-hash dest files the ledger
+  already marks verified (unless `--rehash`).
 - The same bundle state exports to a byte-identical `.mvb.tar` (marker first,
   volatile files excluded, `darsay-verify.py` always the canonical copy).
 - Manifests record what was established; unknown is `null`; query caps are

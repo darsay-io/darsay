@@ -40,6 +40,30 @@ RECONNECT_WAITS_S = (2.0, 4.0, 8.0, 15.0, 30.0)
 # Pacing and reconnect sleeps run in slices this long so Ctrl-C, budgets,
 # and the floor land promptly even mid-wait.
 PACE_SLICE_S = 0.2
+# Filesystems where hashing dest is a full payload read over the wire.
+# Assemble --rehash on these is the "pull 400 GiB back" trap; default
+# assemble trusts dest ledger + size instead (same as archive after rsync).
+_NETWORK_FS = frozenset(
+    {
+        "smbfs",
+        "smb",
+        "cifs",
+        "nfs",
+        "nfs4",
+        "afpfs",
+        "afp",
+        "fuse.sshfs",
+        "fuse.rclone",
+        "fuse.s3fs",
+        "davfs",
+        "fuse.davfs",
+        "webdav",
+        "9p",
+        "afs",
+        "ceph",
+        "glusterfs",
+    }
+)
 
 
 class LedgerError(ValueError):
@@ -2080,6 +2104,43 @@ def _release_sources(
                     )
 
 
+def filesystem_type(path: Path) -> str | None:
+    """Best-effort local filesystem type (``smbfs``, ``apfs``, ``ext4``, …)."""
+    probe = path if path.exists() else path.parent
+    if not probe.exists():
+        return None
+    if sys.platform == "darwin":
+        cmd = ["stat", "-f", "%T", str(probe)]
+    else:
+        cmd = ["stat", "-f", "-c", "%T", str(probe)]
+    try:
+        result = subprocess.run(
+            cmd,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+    except OSError:
+        return None
+    if result.returncode != 0:
+        return None
+    kind = (result.stdout or "").strip().lower()
+    return kind or None
+
+
+def _warn_if_network_rehash(path: Path, progress) -> None:
+    """``--rehash`` of an SMB/NFS dest reads every payload byte over the wire."""
+    kind = filesystem_type(path)
+    if kind is None or kind not in _NETWORK_FS:
+        return
+    progress(
+        f"warning: destination is on {kind}; --rehash will read every dest "
+        "byte over the network. Hash dest on the machine where this vault is "
+        "a local disk, or omit --rehash to trust dest's ledger and file sizes "
+        "(the same gate archive uses after rsync)."
+    )
+
+
 def _files_to_hash(
     payload_dir: Path, ledger: dict, *, rehash: bool
 ) -> list[tuple[str, int]]:
@@ -2163,6 +2224,7 @@ def assemble_partials(
     progress=print,
     *,
     move: bool = False,
+    rehash: bool = False,
 ) -> tuple[Path, dict]:
     """Combine matching partial bundles offline into one resumable target.
 
@@ -2174,10 +2236,15 @@ def assemble_partials(
 
     An out-of-band copy (``rsync``, ``cp -a``) of the partial into the
     destination is the same as this function's copy step: files dest already
-    holds are not recopied, they are re-hashed against the pin, and
-    ``move=True`` then skeletonizes the source. A destination that is already
+    holds and dest's ledger already marks ``verified`` (size match) are
+    trusted, not re-read — the same gate ``archive`` uses after rsync.
+    Hashing dest is ``--rehash`` (or ``darsay verify``) and must run where
+    dest is a local disk; hashing an SMB dest from the laptop pulls the
+    whole payload back over the wire. Present dest files with no verified
+    record are still hashed (adoption). ``move=True`` then skeletonizes
+    the source for dest-verified files. A destination that is already
     *registered* is frozen — without ``--move`` that is an error; with
-    ``--move`` dest is verified read-only and the source is skeletonized.
+    ``--move`` dest is not rewritten and the source is skeletonized.
     """
     import copy
 
@@ -2220,6 +2287,8 @@ def assemble_partials(
         _refuse_move_of_registered_sources(sources, destination)
 
     progress(f"Assembling into {destination}")
+    if rehash:
+        _warn_if_network_rehash(destination, progress)
     with transfer_lock(destination, progress=progress):
         if dest_registered and not move:
             raise SystemExit(
@@ -2250,11 +2319,11 @@ def assemble_partials(
 
         if dest_registered:
             # rsync (or archive) already produced the museum copy. Payload is
-            # frozen: hash dest against the pin with apply=False, copy
-            # nothing, then skeletonize sources. Dest metadata is not rewritten.
+            # frozen: trust dest ledger + size unless --rehash, copy nothing,
+            # then skeletonize sources. Dest metadata is not rewritten.
             progress(
-                "Destination is already registered; verifying its payload "
-                "against the pin (no recopy, no download)."
+                "Destination is already registered; payload is frozen. "
+                "Source files dest already holds as verified will be released."
             )
             session = {"files_completed": 0, "bytes_adopted": 0, "bytes_network": 0}
             work = copy.deepcopy(ledger)
@@ -2265,11 +2334,9 @@ def assemble_partials(
                 session,
                 progress,
                 apply=False,
-                rehash=True,
+                rehash=rehash,
             )
-            progress(
-                "Destination verified against the pin. Releasing source payload files..."
-            )
+            progress("Releasing source payload files dest already holds as verified...")
             _release_sources(sources, destination, work, root, progress)
             plan = add_disk_preflight(
                 destination,
@@ -2278,7 +2345,9 @@ def assemble_partials(
             )
             progress(
                 "Destination already registered; copied 0 payload files "
-                "(verified against the pin)"
+                "(trusted dest ledger + size"
+                + (", hashed dest" if rehash else "")
+                + ")"
             )
             print_plan(plan, progress=progress)
             return destination, plan
@@ -2290,10 +2359,9 @@ def assemble_partials(
         copied_cache_files = 0
         copied_partial_bytes = 0
         try:
-            # Validate anything already present in the destination before it
-            # suppresses a good copy from one of the incoming partials.
-            # An rsync/cp -a into dest is this path: exists() skips the copy,
-            # rehash verifies the landed bytes against the pin.
+            # Dest files the ledger already marks verified (size match) are
+            # trusted — the rsync/cp -a path must not pull dest back over
+            # SMB to re-hash. --rehash opts into a dest-local read.
             plan = _reconcile_visible(
                 destination,
                 destination_payload,
@@ -2301,7 +2369,7 @@ def assemble_partials(
                 session,
                 progress,
                 apply=True,
-                rehash=True,
+                rehash=rehash,
             )
             for ordinal, (source_dir, source_ledger) in enumerate(sources, 1):
                 source_payload = source_dir / root
@@ -2343,8 +2411,7 @@ def assemble_partials(
 
             if move:
                 progress(
-                    "Destination verified against the pin. "
-                    "Releasing source payload files..."
+                    "Releasing source payload files dest already holds as verified..."
                 )
                 _release_sources(sources, destination, ledger, root, progress)
 
@@ -2361,9 +2428,17 @@ def assemble_partials(
             min_free=free_space_floor(vault),
         )
         if copied_payload_files == 0 and copied_cache_files == 0:
+            still_to_hash = _files_to_hash(destination_payload, ledger, rehash=False)
+            trusted_n = len(ledger.get("expected") or []) - len(still_to_hash)
+            if not rehash and trusted_n:
+                progress(
+                    f"Destination already held {trusted_n} verified files "
+                    "(ledger + size); not re-hashing dest. Pass --rehash to "
+                    "hash dest where it is a local disk."
+                )
             progress(
-                "Destination already held the payload; copied 0 files "
-                "(verified against the pin)"
+                "Destination already held the payload; copied 0 files"
+                + (" (hashed dest)" if rehash else " (trusted dest ledger + size)")
             )
         else:
             progress(

@@ -45,10 +45,13 @@ instead of downloading them again.
 rsync is the disk-to-disk copy. darsay does not replace it. An `rsync` (or
 `cp -a`, a USB, a restic restore) of payload bytes into a vault is a
 **first-class copy**: the next `archive` / `assemble` / `assemble --move`
-verifies what landed against the pin, fetches only what is still missing,
-and rewrites transfer metadata. It must not re-download a file whose digest
-matches. Users who rsync then run darsay should never be astonished by a
-second download of the majority.
+trusts dest files the ledger already marks `verified` (size match), fetches
+only what is still missing, and rewrites transfer metadata. It must not
+re-download a file whose digest matches, and it must not pull dest back
+over the wire to re-hash a copy. Users who rsync then run darsay should
+never be astonished by a second trip of the majority — not as a Hub
+download, and not as an SMB dest-hash. Hash dest where it is a local disk
+(`assemble --rehash` / `darsay verify`).
 
 Where darsay beats rsync is the *upstream* transfer. rsync's source is
 *mutable*, so it must interrogate both sides (size/mtime quick-check, then
@@ -100,10 +103,15 @@ around that one line.
 5. **rsync is a first-class copy.** Out-of-band copies (`rsync`, `cp -a`,
    USB, restic restore) of a bundle — or just its payload — into the usual
    `<vault>/<slug>/<rev>/` layout are the same as a darsay copy. The next
-   command hashes those bytes against the pin (and shows that hashing on the
-   live panel), downloads only what is still missing, and adjusts metadata
-   (`transfer.json`, `moved`). A registered payload stays frozen: rsync a
-   finished bundle, `verify` dest, `darsay rm` the source. `assemble --move`
+   command trusts dest files already `verified` in dest's ledger whose size
+   still matches (the same gate `archive` uses), downloads only what is
+   still missing, and adjusts metadata (`transfer.json`, `moved`). It does
+   not re-read dest to re-hash those files: hashing dest on an SMB mount
+   from the laptop pulls the whole payload back over the wire. Hash dest
+   where the bytes live (`assemble --rehash` / `darsay verify` on the dest
+   host). Present dest files with no verified record are still hashed
+   (adoption). A registered payload stays frozen: rsync a finished bundle,
+   `verify` dest on the dest host, `darsay rm` the source. `assemble --move`
    is the verb for partials.
 6. **Every stop is clean, every run converges.** Budgets, Ctrl-C, a
    filling disk, network loss, power loss — all leave a state a later run
@@ -404,10 +412,10 @@ as `missing` (a crash between file-write and ledger-write must heal), so a
 plain `rm` is a re-fetch.
 
 `assemble --move` is the honest way to free that space. It runs an ordinary
-assembly into the big vault, then — *only for files the destination has
-re-hashed against the pin* — deletes the source's copy and rewrites the
-source record from `verified` to **`moved`**: verified, and now living in
-another vault. A partial with any `moved` file is a **skeleton**: the pin,
+assembly into the big vault, then — *only for files the destination already
+holds as `verified` (ledger + size, or hashed under `--rehash`)* — deletes
+the source's copy and rewrites the source record from `verified` to
+**`moved`**: verified, and now living in another vault. A partial with any `moved` file is a **skeleton**: the pin,
 the expected inventory, and every recorded hash stay behind; the payload
 bytes do not. The laptop can then fetch the *other* half without re-fetching
 what it handed over, because a `moved` file is fetched by no one and
@@ -430,10 +438,14 @@ darsay --vault /Volumes/big archive Qwen/Qwen3.8-27B          # registers, zero 
 ```
 
 Already `rsync`'d or `cp -a`'d the partial into the destination vault? Same
-command. `assemble --move` copies nothing for files the destination already
-holds, re-hashes them against the pin, then deletes the source bytes and
-leaves a skeleton. A second `--move` is a no-op for files already `moved`.
-The destination path is the usual two-level layout
+command. `assemble --move` copies nothing for files dest already holds,
+trusts dest files the ledger already marks `verified` (size match), then
+deletes the matching source bytes and leaves a skeleton. It does **not**
+re-hash dest: dest's `verified` records travelled with the rsync, and
+hashing dest from a laptop over SMB would pull the payload back across the
+wire. Hash dest where it is a local disk (`assemble --rehash`, or run
+assemble on the dest host). A second `--move` is a no-op for files already
+`moved`. The destination path is the usual two-level layout
 (`<vault>/<repo-slug>/<revision12>/`); rsync the bundle there, not into the
 vault root:
 
@@ -442,10 +454,12 @@ rsync -a ~/darsay/qwen--qwen3.8-27b/<rev>/ /Volumes/big/qwen--qwen3.8-27b/<rev>/
 darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
 ```
 
-The move is **verify-then-delete, per file**: the destination's hash against
-the pinned upstream digest — the same gate that admits a file to a manifest —
-is what permits the source deletion, so an interrupted or rotted copy leaves
-the source bytes untouched. If the moved bytes ever reappear at the source
+The move is **verify-then-delete, per file**: dest must already have the
+file as `verified` (ledger + size, or a dest-local `--rehash`) before the
+source copy is deleted, so an interrupted or incomplete copy leaves the
+source bytes untouched. A same-size bit-flip during rsync is the same bet
+`archive` after rsync already makes; catch it with `darsay verify` on the
+dest host, not by ingesting dest over SMB. If the moved bytes ever reappear at the source
 (restored by hand from the big vault), reconcile hashes and re-adopts them as
 `verified`: the `moved` record is a hint, and matching bytes always win. Bytes
 that come back *wrong* are removed and the record stays `moved` — a bad
@@ -675,9 +689,9 @@ final mega-pass.
 | Disk filling mid-session | Plan-phase preflight prices the free-space floor (§6), says where the transfer will stop, and asks on a terminal; the transfer pauses cleanly (`end_reason: disk`, exit 10) before a file that cannot fit above the floor, or the moment free space drops below it, leaving the margin for the rest of the machine. Clear space and rerun. With the floor disabled, a mid-session `ENOSPC` is the same clean pause with state intact. |
 | Network drops mid-session | Bytes received so far are banked in the partial; the panel reads `offline` and retries on a 2 → 30 s schedule (§6) while budgets, the floor, and Ctrl-C keep working. Back within `max_offline` (1 h): the file resumes with a Range request and the outage is one scrollback line. Longer: clean pause, `end_reason: offline`, exit 10; rerun once connected. |
 | Two concurrent runs | Second exits on the live lock. |
-| Partial bundle copied or moved | Relative ledger/cache state resumes at the new vault; an inherited lock is reclaimed only when the physical directory identity changed. rsync then `archive` / `assemble --move` hashes dest (live panel) and fetches only the remainder. |
+| Partial bundle copied or moved | Relative ledger/cache state resumes at the new vault; an inherited lock is reclaimed only when the physical directory identity changed. rsync then `archive` / `assemble --move` trusts dest ledger + size and fetches only the remainder. Hash dest on the dest host (`--rehash` / `verify`). |
 | Cooperative inputs disagree | `assemble` rejects them before creating a destination; repo, type, full pin, and expected inventory must all match. |
-| `assemble --move`, destination copy fails to verify | That file's source bytes are kept, not deleted (verify-then-delete, per file, §5); only files the destination re-hashed against the pin are released, and a skeleton still holding such a file is never dissolved. |
+| `assemble --move`, dest does not have the file as verified | That file's source bytes are kept, not deleted (verify-then-delete, per file, §5); only files dest holds as `verified` (ledger + size, or `--rehash`) are released, and a skeleton still holding such a file is never dissolved. |
 | Moved bytes reappear at a skeleton | Reconciliation hashes and re-adopts them as `verified`; the `moved` record is only a hint. Bytes that fail the pin's checks are removed and the record stays `moved`. |
 | Skeleton ledger lost | Degrades to a plain partial: what is on disk is re-adopted, what was moved out is re-fetched. Never corrupt, only slower. |
 
