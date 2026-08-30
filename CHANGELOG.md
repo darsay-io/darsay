@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-30
+
+
 ### Added
 
 - **`darsay doctor` — offline vault diagnostics with reversible repair.** The
