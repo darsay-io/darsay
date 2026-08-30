@@ -181,12 +181,19 @@ class SourceProvider(ABC):
 
     @contextmanager
     def transfer_session(
-        self, payload_dir: Path, *, max_rate: int | None = None
+        self,
+        payload_dir: Path,
+        *,
+        max_rate: int | None = None,
+        on_retry=None,
     ) -> Iterator[None]:
         """Wrap a transfer run (resume semantics, provider caches). Default is a no-op.
 
         ``max_rate`` is the operator's bytes-per-second cap when one is set;
         a provider may tune its transport (chunk sizes) to pace smoothly.
+        ``on_retry(reason)`` is for a transport that retries on its own
+        before failing a ``download_file``: calling it lets the panel show
+        ``retrying`` instead of a silent stall.
         """
         yield
 

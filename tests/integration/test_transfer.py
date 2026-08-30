@@ -352,3 +352,107 @@ def test_rate_cap_paces_the_transfer(vault, test_provider, monkeypatch):
     # Unlimited: no pacing at all.
     archive_quiet("test:acme/toy", vault=vault, max_rate=0, force=True)
     assert slept == []
+
+
+def test_disk_full_mid_transfer_pauses_cleanly_and_resumes(vault, test_provider):
+    import errno
+
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    weight = "model.safetensors"
+    # The floor is off (0) in tests: ENOSPC is the only guard left, and it
+    # must still be a pause, not an error.
+    test_provider.fail_next(weight, OSError(errno.ENOSPC, "No space left on device"))
+    with pytest.raises(PartialTransfer) as stopped:
+        archive_quiet("test:acme/toy", vault=vault)
+    assert stopped.value.reason == "disk"
+    assert f"no space left on device while writing {weight}" in stopped.value.detail
+    bundle = stopped.value.bundle_dir
+    assert not (bundle / "manifest.json").is_file()
+    session = load_ledger(bundle)["sessions"][-1]
+    assert session["end_reason"] == "disk"
+    assert session["tool"].startswith("darsay ")
+    # Space freed: the same command converges.
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    assert load_manifest(bundle)["inventory"]["file_count"] == len(files)
+
+
+def test_headroom_check_pauses_before_a_file_that_cannot_fit(
+    vault, test_provider, monkeypatch
+):
+    from types import SimpleNamespace
+
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    floor = 2 * 1024**3
+    largest = max(files, key=lambda name: len(files[name]))
+    # Every file but the largest fits above the floor.
+    disk = SimpleNamespace(free=floor + len(files[largest]) - 1)
+    monkeypatch.setattr("darsay.transfer.shutil.disk_usage", lambda path: disk)
+    with pytest.raises(PartialTransfer) as stopped:
+        archive_quiet("test:acme/toy", vault=vault, min_free=floor)
+    assert stopped.value.reason == "disk"
+    assert stopped.value.detail.startswith(
+        f"{largest} needs {len(files[largest])} B more"
+    )
+    # The file that could not fit was never begun; the others landed.
+    assert test_provider.attempts.get(largest, 0) == 0
+    ledger = load_ledger(stopped.value.bundle_dir)
+    verified = {
+        path for path, state in ledger["files"].items() if state["status"] == "verified"
+    }
+    assert verified == set(files) - {largest}
+    disk.free = 100 * 1024**3
+    bundle = archive_quiet("test:acme/toy", vault=vault, min_free=floor)
+    assert load_manifest(bundle)["inventory"]["file_count"] == len(files)
+
+
+def test_preflight_confirm_declined_pauses_before_any_byte(
+    vault, test_provider, monkeypatch
+):
+    from types import SimpleNamespace
+
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    floor = 2 * 1024**3
+    disk = SimpleNamespace(free=floor + 1)
+    monkeypatch.setattr("darsay.transfer.shutil.disk_usage", lambda path: disk)
+    questions: list[str] = []
+    logs: list[str] = []
+
+    def decline(question: str) -> bool:
+        questions.append(question)
+        return False
+
+    with pytest.raises(PartialTransfer) as stopped:
+        archive_quiet(
+            "test:acme/toy",
+            vault=vault,
+            min_free=floor,
+            confirm=decline,
+            progress=logs.append,
+        )
+    assert questions == ["Continue anyway? [Y/n] "]
+    assert stopped.value.reason == "disk"
+    assert stopped.value.detail.startswith("declined at the disk preflight")
+    assert test_provider.downloads == []
+    ledger = load_ledger(stopped.value.bundle_dir)
+    assert ledger["sessions"][-1]["end_reason"] == "disk"
+    text = "\n".join(logs)
+    assert "WARNING: disk preflight is insufficient" in text
+    assert "the transfer will pause after about 1 B more (0 of" in text
+    assert "then re-run to continue" in text
+
+    # Accepting (and, here, freeing space) lets the same command finish.
+    def accept(question: str) -> bool:
+        disk.free = 100 * 1024**3
+        return True
+
+    bundle = archive_quiet("test:acme/toy", vault=vault, min_free=floor, confirm=accept)
+    assert load_manifest(bundle)["inventory"]["file_count"] == len(files)
+    # Without a confirm callback (cron, pipes) the run simply proceeds.
+    disk.free = floor + 1
+    test_provider.add_repo("acme/other", files)
+    with pytest.raises(PartialTransfer) as unattended:
+        archive_quiet("test:acme/other", vault=vault, min_free=floor)
+    assert "declined" not in unattended.value.detail

@@ -9,6 +9,7 @@ pin/reconcile/plan/verify bookkeeping.
 
 from __future__ import annotations
 
+import errno
 import json
 import os
 import shutil
@@ -22,6 +23,7 @@ from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
 from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
 
+from . import __version__
 from .hashing import hash_file, iter_payload_files
 
 TRANSFER_VERSION = 1
@@ -135,12 +137,49 @@ class StopController:
         if free < self.min_free_bytes:
             from .readme_gen import human_size
 
-            self._disk_stop = CleanStop(
-                "disk",
+            raise self.stop_for_disk(
                 "destination free space fell below the floor "
-                f"({human_size(free)} free < {human_size(self.min_free_bytes)} floor)",
+                f"({human_size(free)} free < {human_size(self.min_free_bytes)} floor)"
             )
+
+    def stop_for_disk(self, detail: str) -> CleanStop:
+        """Trip the sticky ``disk`` stop from outside the floor probe.
+
+        ENOSPC from a write and a file that cannot fit above the floor both
+        end the session the way the floor does, and every worker stops at
+        its next check.
+        """
+        if self._disk_stop is None:
+            self._disk_stop = CleanStop("disk", detail)
+        return self._disk_stop
+
+    def check_headroom(self, relative: str, needed: int) -> None:
+        """Refuse to begin a file that cannot finish above the floor.
+
+        The floor probe pauses mid-file, once the space is already gone;
+        this pauses at the file boundary before it, so a 5 GiB shard is
+        never started with 3 GiB of headroom. Files are transferred
+        smallest first, so once one does not fit nothing after it does
+        either: the stop is sticky like the floor's. Disabled with the
+        floor (``--min-free 0``); ENOSPC then pauses the same way.
+        """
+        if not (self.min_free_bytes and self.disk_path is not None) or needed <= 0:
+            return
+        if self._disk_stop is not None:
             raise self._disk_stop
+        try:
+            free = shutil.disk_usage(self.disk_path).free
+        except OSError:
+            return
+        headroom = free - self.min_free_bytes
+        if headroom < needed:
+            from .readme_gen import human_size
+
+            raise self.stop_for_disk(
+                f"{relative} needs {human_size(needed)} more, but only "
+                f"{human_size(max(0, headroom))} is free above the "
+                f"{human_size(self.min_free_bytes)} floor"
+            )
 
     @contextmanager
     def sigint_handler(self):
@@ -411,14 +450,38 @@ def _lock_was_copied(owner: dict, ours: dict) -> bool:
         return False
 
 
+# How the panel's closing record line names a clean stop, by reason.
+_STOP_VERDICTS = {
+    "disk": "paused: disk",
+    "budget": "paused: budget",
+    "offline": "paused: offline",
+    "interrupt": "stopped: Ctrl-C",
+}
+
+
 @contextmanager
 def _live_transfer(display):
-    """Run the live panel and route log lines through it."""
+    """Run the live panel and route log lines through it.
+
+    The panel's closing record line says how the transfer ended —
+    complete, paused and why, aborted, or the error's class — so the
+    scrollback tells the whole story without the lines that follow it.
+    """
     display.start()
+    verdict = "complete"
     try:
         yield display.echo
+    except CleanStop as stop:
+        verdict = _STOP_VERDICTS.get(stop.reason, f"paused: {stop.reason}")
+        raise
+    except KeyboardInterrupt:
+        verdict = "aborted"
+        raise
+    except BaseException as exc:
+        verdict = f"error: {type(exc).__name__}"
+        raise
     finally:
-        display.stop()
+        display.stop(verdict=verdict)
 
 
 @contextmanager
@@ -579,6 +642,9 @@ def begin_session(
         "started": _utc_now(),
         "ended": None,
         "end_reason": None,
+        # The build that ran this session, so a ledger or a pasted terminal
+        # never has to be matched to a release by line numbers.
+        "tool": f"darsay {__version__}",
         "bytes_network": 0,
         "bytes_adopted": 0,
         "bytes_local_sources": 0,
@@ -886,6 +952,89 @@ def print_plan(plan: dict, progress=print, max_rate: int | None = None) -> None:
         progress(f"  rate:     capped at {human_rate(max_rate)}{at_cap}")
 
 
+# A session shorter than this says nothing reliable about the link.
+_RATE_SAMPLE_MIN_S = 60.0
+
+
+def session_rate(ledger: dict) -> float | None:
+    """Wall-clock network rate over the ledger's finished sessions, bytes/s.
+
+    Sessions include their own hashing, waiting, and reconnects, so this is
+    the honest pace an operator saw, not a link speed. ``None`` until at
+    least a minute of moving bytes is on record.
+    """
+    from datetime import datetime
+
+    moved = 0
+    seconds = 0.0
+    for session in ledger.get("sessions") or []:
+        received = int(session.get("bytes_network") or 0)
+        started, ended = session.get("started"), session.get("ended")
+        if received <= 0 or not started or not ended:
+            continue
+        try:
+            span = (
+                datetime.fromisoformat(ended) - datetime.fromisoformat(started)
+            ).total_seconds()
+        except (TypeError, ValueError):
+            continue
+        if span <= 0:
+            continue
+        moved += received
+        seconds += span
+    if seconds < _RATE_SAMPLE_MIN_S or moved <= 0:
+        return None
+    return moved / seconds
+
+
+def disk_outlook(
+    plan: dict, ledger: dict, payload_dir: Path, max_rate: int | None = None
+) -> list[str]:
+    """Where an insufficient transfer will pause, as plan-block lines.
+
+    Says how many more bytes and files land before the floor, and — when a
+    rate cap or an earlier session gives a pace — roughly how long that
+    takes, so an operator can decide now rather than ten hours in.
+    """
+    from .progress import human_duration, human_rate
+    from .readme_gen import human_size
+
+    disk = plan["disk"]
+    usable = max(0, int(disk["free_bytes"]) - int(disk.get("min_free_bytes") or 0))
+    pending = int(plan["files"]["partial"]) + int(plan["files"]["missing"])
+    fits = 0
+    budget = usable
+    # Transfer order is smallest first (``transfer_groups``); once a file
+    # does not fit, nothing after it does either.
+    for expected in sorted(
+        ledger["expected"], key=lambda item: (item.get("size") or 0, item["path"])
+    ):
+        state = ledger["files"].get(expected["path"]) or {}
+        if state.get("status") == "verified":
+            continue
+        size = int(expected.get("size") or 0)
+        need = max(0, size - _partial_bytes(payload_dir, expected, ledger))
+        if need > budget:
+            break
+        budget -= need
+        fits += 1
+    when = ""
+    paces = [rate for rate in (max_rate, session_rate(ledger)) if rate]
+    if paces and usable:
+        pace = min(paces)
+        when = f", roughly {human_duration(usable / pace)} at {human_rate(pace)}"
+    lines = [
+        f"  the transfer will pause after about {human_size(usable)} more "
+        f"({fits} of {pending} remaining files){when}."
+    ]
+    if fits < pending:
+        lines.append(
+            "  Free space (or move the vault to a larger disk), then re-run "
+            "to continue."
+        )
+    return lines
+
+
 def transfer_groups(
     expected: list[dict],
     shard: tuple[int, int] | None = None,
@@ -1016,6 +1165,29 @@ def _event(path: str | None, event: str, detail: str) -> dict:
     return {"at": _utc_now(), "path": path, "event": event, "detail": detail}
 
 
+def _disk_full(exc: BaseException) -> bool:
+    """Whether ``exc``, or anything it was raised from, is ENOSPC."""
+    from .providers.base import iter_causes
+
+    return any(
+        isinstance(node, OSError) and node.errno == errno.ENOSPC
+        for node in iter_causes(exc)
+    )
+
+
+def _disk_full_stop(stop_controller: StopController | None, relative: str) -> CleanStop:
+    """The clean pause for ENOSPC — the same ``disk`` stop the floor raises.
+
+    A full disk is a pause, not an error: the partial on disk is intact and
+    the same command resumes it. Tripping the controller stops the other
+    workers too, since none of them can write either.
+    """
+    detail = f"destination is full — no space left on device while writing {relative}"
+    if stop_controller is not None:
+        return stop_controller.stop_for_disk(detail)
+    return CleanStop("disk", detail)
+
+
 def _wait_for_link(
     link: Link,
     path: str,
@@ -1088,6 +1260,8 @@ def _fetch_with_reconnect(
         except BaseException as exc:
             if counter.pending_stop is not None:
                 raise counter.pending_stop from None
+            if _disk_full(exc):
+                raise _disk_full_stop(counter.stop_controller, relative) from exc
             reason = None
             if link is not None and isinstance(exc, Exception):
                 reason = provider.transient_network_error(exc)
@@ -1165,6 +1339,8 @@ def _download_one(
                 )
             except OSError as exc:
                 _discard_payload_file(path, payload_dir)
+                if _disk_full(exc):
+                    raise _disk_full_stop(stop_controller, relative) from exc
                 events.append(
                     {
                         "at": _utc_now(),
@@ -1198,6 +1374,12 @@ def _download_one(
         provider = get_provider(ledger.get("provider") or "huggingface")
         source = source_from_ledger(ledger)
         tqdm_class = provider.progress_wrapper(counter, meter=meter)
+
+        if stop_controller is not None and expected.get("size"):
+            # Pause at the boundary rather than start a file that cannot
+            # finish above the floor; a banked partial only needs the rest.
+            banked = provider.partial_bytes(payload_dir, expected)
+            stop_controller.check_headroom(relative, int(expected["size"]) - banked)
 
         for retry in range(2):
             attempts += 1
@@ -1327,7 +1509,17 @@ def _record_download_result(
     session["files_completed"] += 1
     session["retries"] += result["retries"]
     session["bytes_local_sources"] += result.get("bytes_local_sources", 0)
-    save_ledger(bundle_dir, ledger)
+    try:
+        save_ledger(bundle_dir, ledger)
+    except OSError as exc:
+        if not _disk_full(exc):
+            raise
+        # The verified file is on disk; reconciliation re-derives its entry.
+        raise CleanStop(
+            "disk",
+            "destination is full — the transfer ledger could not be written "
+            f"after {result['path']}",
+        ) from exc
 
 
 def _transfer_small_files(
@@ -1447,7 +1639,9 @@ def transfer_all(
     display = TransferDisplay(meter, progress=progress)
 
     with (
-        provider.transfer_session(payload_dir, max_rate=max_rate),
+        provider.transfer_session(
+            payload_dir, max_rate=max_rate, on_retry=meter.note_retry
+        ),
         _live_transfer(display) as emit,
     ):
         for lane, assigned in groups:

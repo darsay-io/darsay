@@ -819,3 +819,176 @@ def test_live_panel_reroutes_library_loggers(monkeypatch):
         assert handler.stream is real
     finally:
         logger.removeHandler(handler)
+
+
+def test_human_eta_never_spells_out_an_absurd_estimate():
+    from darsay.progress import _ETA_WIDTH
+
+    assert human_eta(29 * 86400) == "29d left"
+    assert human_eta(31 * 86400) == "> 30 days left"
+    assert human_eta(272774 * 86400) == "> 30 days left"
+    assert len("> 30 days left") <= _ETA_WIDTH
+
+
+def test_meter_eta_is_paced_by_the_long_horizon():
+    session = {"bytes_network": 0, "bytes_local_sources": 0, "files_completed": 0}
+    clock = Clock(0.0)
+    meter = _meter(session=session, clock=clock, total_bytes=10_000_000)
+    # Under thirty seconds on record the short-window rate stands in.
+    for step in range(1, 11):
+        clock.t = float(step)
+        session["bytes_network"] = step * 1000
+        meter.note()
+    early = meter.snapshot()
+    assert early["eta_seconds"] == pytest.approx(
+        early["remaining_bytes"] / early["rate"]
+    )
+    # A steady 1000 B/s for a minute, then one burst: the rate field
+    # reports the burst, the ETA does not chase it.
+    for step in range(11, 61):
+        clock.t = float(step)
+        session["bytes_network"] = step * 1000
+        meter.note()
+    clock.t = 61.0
+    session["bytes_network"] = 61 * 1000 + 500_000
+    meter.note()
+    snap = meter.snapshot()
+    assert snap["rate"] > 10_000
+    naive = snap["remaining_bytes"] / snap["rate"]
+    assert snap["eta_seconds"] > naive * 2
+    # The horizon still reflects what actually moved, not the old pace only.
+    assert snap["eta_seconds"] < snap["remaining_bytes"] / 1000
+
+
+def test_meter_retry_state_shows_until_bytes_arrive(monkeypatch):
+    from darsay.progress import status_text
+
+    monkeypatch.delenv("COLORTERM", raising=False)
+    session = {"bytes_network": 0, "bytes_local_sources": 0, "files_completed": 0}
+    clock = Clock(0.0)
+    meter = _meter(session=session, clock=clock, total_bytes=100_000)
+    for step in range(1, 6):
+        clock.t = float(step)
+        session["bytes_network"] = step * 100
+        meter.note()
+    assert meter.snapshot()["retry"] is None
+    clock.t = 17.0
+    meter.note_retry("timed out")
+    snap = meter.snapshot()
+    assert snap["retry"] == {"count": 1, "reason": "timed out", "since": 12.0}
+    assert status_text(snap) == "retrying"
+    line = snapshot_lines(snap, width=90, color=False)[1]
+    assert "retrying" in line
+    assert "retry 1 · 12s without bytes" in line
+    assert "stalled" not in line
+    colored = snapshot_lines(snap, width=90, color=True)[1]
+    assert "\033[33m" in colored
+    log = snapshot_log_line(snap)
+    assert "retrying" in log and "retry 1 · 12s without bytes" in log
+    clock.t = 28.0
+    meter.note_retry("timed out")
+    assert meter.snapshot()["retry"]["count"] == 2
+    # The first byte back ends the retry state; the ETA slot returns.
+    clock.t = 29.0
+    session["bytes_network"] += 100
+    meter.note()
+    after = meter.snapshot()
+    assert after["retry"] is None
+    assert "retry" not in snapshot_lines(after, width=90, color=False)[1]
+    # Never over the outage story: offline owns the slot and the tail.
+    meter.note_retry("boom")
+    both = {**meter.snapshot(), "link": {"state": "offline", "since": 3.0}}
+    assert status_text(both) == "offline"
+    tail = snapshot_lines(both, width=90, color=False)[1]
+    assert "offline" in tail and "retry" not in tail
+
+
+def test_meter_shows_free_space_while_the_disk_cannot_hold_the_rest(
+    monkeypatch, tmp_path
+):
+    from types import SimpleNamespace
+
+    gib = 1024**3
+    disk = {"free": 3 * gib, "probes": 0}
+
+    def usage(path):
+        disk["probes"] += 1
+        assert path == tmp_path
+        return SimpleNamespace(free=disk["free"])
+
+    monkeypatch.setattr("darsay.progress.shutil.disk_usage", usage)
+    session = {"bytes_network": 0, "bytes_local_sources": 0, "files_completed": 0}
+    clock = Clock(0.0)
+    meter = TransferMeter(
+        total_bytes=10 * gib,
+        total_files=1,
+        verified_bytes=0,
+        verified_files=0,
+        partial_bytes=0,
+        session=session,
+        disk_path=tmp_path,
+        disk_floor=2 * gib,
+        clock=clock,
+    )
+    snap = meter.snapshot()
+    assert snap["disk_free"] == 3 * gib
+    assert snap["disk_floor"] == 2 * gib
+    assert snap["disk_short"] is True
+    line = snapshot_lines(snap, width=100, color=False)[1]
+    assert line.endswith("· free 3.0 GiB")
+    assert "free 3.0 GiB" in snapshot_log_line(snap)
+    # Probed at most every couple of seconds, not per frame.
+    clock.t = 1.0
+    meter.snapshot()
+    assert disk["probes"] == 1
+    # Space freed: the note goes away.
+    disk["free"] = 100 * gib
+    clock.t = 3.0
+    later = meter.snapshot()
+    assert disk["probes"] == 2
+    assert later["disk_short"] is False
+    assert "free" not in snapshot_lines(later, width=100, color=False)[1]
+    # No destination to watch: nothing probed, nothing shown.
+    plain = _meter(clock=Clock(0.0)).snapshot()
+    assert plain["disk_free"] is None and plain["disk_short"] is False
+
+
+def test_free_note_yields_to_outage_and_narrow_widths():
+    snap = _offline_snap(link=None, stalled=False, rate=5e6, eta_seconds=600)
+    snap.update(
+        {"disk_free": 381 * 1024**3, "disk_short": True, "max_rate": 5 * 1024**2}
+    )
+    wide = snapshot_lines(snap, width=120, color=False)[1]
+    assert wide.endswith("· free 381.0 GiB · cap 5.0 MiB/s")
+    narrow = snapshot_lines(snap, width=60, color=False)[1]
+    assert "free" not in narrow and len(narrow) <= 60
+    offline = snapshot_lines(
+        {**_offline_snap(), "disk_free": 10, "disk_short": True}, width=120
+    )[1]
+    assert "free" not in offline
+
+
+def test_meter_from_plan_watches_the_stop_controllers_disk(tmp_path):
+    ctrl = types.SimpleNamespace(
+        max_bytes=None, disk_path=tmp_path, min_free_bytes=5, interrupted=False
+    )
+    plan = {"bytes": {"total": 10}, "files": {"total": 1}}
+    session = {"bytes_network": 0, "bytes_local_sources": 0, "files_completed": 0}
+    meter = meter_from_plan(plan, session, ctrl)
+    assert meter.disk_path == tmp_path
+    assert meter.disk_floor == 5
+    assert meter_from_plan(plan, session).disk_path is None
+
+
+def test_display_final_line_carries_the_verdict():
+    session = {"bytes_network": 250, "bytes_local_sources": 0, "files_completed": 1}
+    meter = _meter(total_bytes=1000, session=session, clock=Clock(5.0))
+    buf = io.StringIO()
+    display = TransferDisplay(
+        meter, progress=lambda *a, **k: None, stream=buf, live=True, color=False
+    )
+    display.start()
+    display.refresh()
+    display.stop(verdict="paused: disk")
+    after_restore = buf.getvalue().rsplit("\033[?25h", 1)[1]
+    assert after_restore.strip().endswith("elapsed · paused: disk")

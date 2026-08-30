@@ -188,8 +188,8 @@ plus manifest rebuild, not a re-download.
 
 Session accounting: every run appends a session record (started, ended, end
 reason — `complete` / `budget` / `disk` / `offline` / `interrupt` /
-`assemble` / `error` — bytes from network, bytes adopted, files completed,
-reconnects, host).
+`assemble` / `error` — the darsay build that ran it, bytes from network,
+bytes adopted, files completed, reconnects, host).
 Ctrl-C escalates: the
 first press requests a clean stop (the panel shows "stopping", the current
 chunk is banked, the state write finishes, and the CLI exits 10 with the
@@ -200,9 +200,9 @@ archive sessions also record their advisory `shard: "N/T"`; assembly records
 the number of merged inputs.
 
 **Exit codes:** `0` — bundle completed and registered by this invocation;
-`10` — clean partial stop, more remains (budgets, the free-space floor,
-a network gone longer than `max_offline`, and interrupts), so wrappers can
-loop; `1` — error.
+`10` — clean partial stop, more remains (budgets, the free-space floor or
+a full disk, a declined preflight, a network gone longer than
+`max_offline`, and interrupts), so wrappers can loop; `1` — error.
 
 ```bash
 # unattended completion over nightly cron: rerun until exit 0
@@ -237,6 +237,7 @@ Bundle-root, machine-local, excluded from `.mvb.tar` exports exactly like
   },
   "sessions": [
     {"started": "…", "ended": "…", "end_reason": "budget",
+     "tool": "darsay 0.12.0",
      "bytes_network": 10737418240, "bytes_adopted": 0,
      "bytes_local_sources": 4966786096, "retries": 0, "reconnects": 1,
      "files_completed": 3, "host": "…", "shard": "1/3"}
@@ -348,6 +349,7 @@ with zero payload network bytes.
 | `--max-gb N` / `--max-bytes SIZE` (`500M`, `20G`) | stop cleanly once network bytes this session exceed the cap |
 | `--max-minutes N` | stop cleanly at the deadline |
 | `--min-free SIZE` | pause cleanly once destination free space drops below SIZE (default 2 GiB via config; `0` disables) |
+| `--yes` / `-y` | start without asking when the disk preflight says the transfer cannot finish (a non-interactive run never asks) |
 | `--max-rate SIZE` | cap network transfer at SIZE per second across every worker (`5M`, `500K`; default unlimited via config; `0` lifts a configured cap) |
 | `--max-offline DURATION` | keep waiting for a lost network up to DURATION before pausing cleanly (`30m`, `2h`; default 1 h via config; `0` pauses at the first failure) |
 | `--revision REF` | pin a branch, tag, or commit instead of `main`; the resolved commit is frozen for every later run |
@@ -368,29 +370,54 @@ overall state is visible without running anything.
 
 Budgets bound what one session *takes*; the floor bounds what it *leaves*.
 An archive left running unattended must never fill the destination
-partition — a full disk breaks everything else on the machine, and a
-download that ends in `ENOSPC` is an error, not a pause. So `archive`
-holds a **free-space floor**, 2 GiB unless configured, and pauses cleanly
-the moment the destination's free space drops below it:
+partition — a full disk breaks everything else on the machine. So
+`archive` holds a **free-space floor**, 2 GiB unless configured, and
+pauses cleanly rather than cross it:
 
-- The floor is checked wherever budgets are checked — every transfer
-  callback and hash chunk — but the filesystem is probed at most every
-  2 s, so the guard never touches the hot path. It is measured at the
-  bundle directory, so it follows a `--vault` on a different disk.
-- The first probe under the floor trips a **sticky** stop: every worker
-  and the main thread stop at their next check, in-flight chunks are
-  banked exactly as for a budget stop, and the session ends with
-  `end_reason: "disk"`. The CLI exits 10 with the reason
-  (`disk: destination free space fell below the floor (1.9 GiB free <
-  2.0 GiB floor)`) and a "free disk space, then re-run" hint.
+- **Before each file**, the floor checks headroom: a file whose remaining
+  bytes (a banked partial only needs the rest) would not fit above the
+  floor is never begun. The session pauses at the file boundary with
+  `disk: model-00023-of-00141.safetensors needs 5.0 GiB more, but only
+  3.9 GiB is free above the 2.0 GiB floor`. Files are transferred
+  smallest first, so once one does not fit nothing after it does either.
+- **During a file**, the floor is checked wherever budgets are checked —
+  every transfer callback and hash chunk — but the filesystem is probed
+  at most every 2 s, so the guard never touches the hot path. It is
+  measured at the bundle directory, so it follows a `--vault` on a
+  different disk. This catches what the headroom check cannot: another
+  writer filling the disk mid-shard.
+- Either trips a **sticky** stop: every worker and the main thread stop
+  at their next check, in-flight chunks are banked exactly as for a
+  budget stop, and the session ends with `end_reason: "disk"`. The CLI
+  exits 10 with the reason (`disk: destination free space fell below the
+  floor (1.9 GiB free < 2.0 GiB floor)`) and a "free disk space, then
+  re-run" hint.
+- **`ENOSPC` is the same pause.** Should a write still hit a full disk —
+  the floor disabled, a race with another writer — the session ends the
+  same way (`disk: destination is full — no space left on device while
+  writing …`), never as an error. If the disk is too full even for the
+  ledger rewrite, the pause says so and the next run reconciles the
+  payload from the bytes on disk.
 - The floor is priced into headroom: plan and `estimate` verdicts compare
   free space *above the floor* to remaining bytes, and print it —
-  `needs 40.0 GiB, free 45.0 GiB (10.0 GiB floor) — INSUFFICIENT` — so a
-  run that would only reach the floor says so before the first byte. A
-  run that starts below the floor pauses at its first check.
+  `needs 40.0 GiB, free 45.0 GiB (10.0 GiB floor) — INSUFFICIENT`. An
+  insufficient `archive` plan goes on to say where it will stop:
+
+  ```text
+  WARNING: disk preflight is insufficient; the transfer will pause at the free-space floor
+    the transfer will pause after about 381.4 GiB more (67 of 140 remaining files), roughly 9h at 12.3 MiB/s.
+    Free space (or move the vault to a larger disk), then re-run to continue.
+  Continue anyway? [Y/n]
+  ```
+
+  The pace is the rate cap or the ledger's earlier sessions, whichever is
+  slower; the question is asked only on a terminal (Enter proceeds, `n`
+  pauses cleanly before any byte moves, exit 10) and `--yes` skips it.
+  Pipes and cron never see it. While the transfer runs short of space,
+  the panel's second line ends in `· free 381.2 GiB`.
 - Resume is the ordinary command: nothing about the pin, ledger, or
-  partials is floor-specific. `--min-free 0` disables the floor for one
-  run when an operator is watching.
+  partials is floor-specific. `--min-free 0` disables the floor (and the
+  headroom check) for one run when an operator is watching.
 
 Any disk-space check is a race against other writers; the floor is a
 margin, not a reservation. Two gigabytes covers the ledger rewrite, the
@@ -515,7 +542,7 @@ final mega-pass.
 | `transfer.json` deleted or corrupt | Rebuilt by reconciliation: hash present files, adopt matches. Slow, never lossy. |
 | Upstream repo gated or deleted between sessions | CDN fetches fail with the clean gated/not-found messages; the partial bundle stays resumable if access returns. Logged in `events`. |
 | Persistent digest mismatch | Retried once, then recorded; registration proceeds with `checksum_verification: fail` and the warning — same contract as the one-shot flow. |
-| Disk filling mid-session | Plan-phase preflight prices the free-space floor (§6) and warns; the transfer pauses cleanly (`end_reason: disk`, exit 10) once free space drops below the floor, leaving the margin for the rest of the machine. Clear space and rerun. With the floor disabled, a mid-session `ENOSPC` ends the session as `error` with state intact. |
+| Disk filling mid-session | Plan-phase preflight prices the free-space floor (§6), says where the transfer will stop, and asks on a terminal; the transfer pauses cleanly (`end_reason: disk`, exit 10) before a file that cannot fit above the floor, or the moment free space drops below it, leaving the margin for the rest of the machine. Clear space and rerun. With the floor disabled, a mid-session `ENOSPC` is the same clean pause with state intact. |
 | Network drops mid-session | Bytes received so far are banked in the partial; the panel reads `offline` and retries on a 2 → 30 s schedule (§6) while budgets, the floor, and Ctrl-C keep working. Back within `max_offline` (1 h): the file resumes with a Range request and the outage is one scrollback line. Longer: clean pause, `end_reason: offline`, exit 10; rerun once connected. |
 | Two concurrent runs | Second exits on the live lock. |
 | Partial bundle copied or moved | Relative ledger/cache state resumes at the new vault; an inherited lock is reclaimed only when the physical directory identity changed. |

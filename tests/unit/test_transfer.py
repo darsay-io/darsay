@@ -608,3 +608,260 @@ def test_print_plan_prices_the_rate_cap(tmp_path):
     lines.clear()
     print_plan(plan, progress=lines.append)
     assert not any("rate:" in line for line in lines)
+
+
+def test_stop_controller_headroom_pauses_before_a_file_that_cannot_fit(
+    monkeypatch, tmp_path
+):
+    from types import SimpleNamespace
+
+    disk = {"free": 6 * 1024**3}
+    monkeypatch.setattr(
+        "darsay.transfer.shutil.disk_usage",
+        lambda path: SimpleNamespace(free=disk["free"]),
+    )
+    floor = 2 * 1024**3
+    ctrl = StopController(min_free_bytes=floor, disk_path=tmp_path)
+    # 4 GiB of headroom: a 3 GiB file may begin, a 5 GiB one may not.
+    ctrl.check_headroom("small.bin", 3 * 1024**3)
+    with pytest.raises(CleanStop) as stop:
+        ctrl.check_headroom("model-00023-of-00141.safetensors", 5 * 1024**3)
+    assert stop.value.reason == "disk"
+    assert "model-00023-of-00141.safetensors needs 5.0 GiB more" in stop.value.detail
+    assert "only 4.0 GiB is free above the 2.0 GiB floor" in stop.value.detail
+    # Sticky like the floor: the ordinary check trips too, without probing.
+    with pytest.raises(CleanStop) as again:
+        ctrl.check({"bytes_network": 0})
+    assert again.value is stop.value
+
+    def forbidden(_path):
+        raise AssertionError("probed with nothing to fetch or no floor")
+
+    monkeypatch.setattr("darsay.transfer.shutil.disk_usage", forbidden)
+    StopController(min_free_bytes=floor, disk_path=tmp_path).check_headroom("x", 0)
+    StopController(disk_path=tmp_path).check_headroom("x", 10**12)
+    StopController(min_free_bytes=0, disk_path=tmp_path).check_headroom("x", 10**12)
+
+
+def test_disk_full_is_recognised_through_the_cause_chain():
+    import errno
+
+    from darsay.transfer import _disk_full, _disk_full_stop
+
+    full = OSError(errno.ENOSPC, "No space left on device")
+    assert _disk_full(full)
+    wrapped = RuntimeError("write failed")
+    wrapped.__cause__ = full
+    assert _disk_full(wrapped)
+    assert not _disk_full(OSError(errno.EIO, "io"))
+    assert not _disk_full(ValueError("nope"))
+
+    ctrl = StopController(min_free_bytes=1, disk_path=None)
+    stop = _disk_full_stop(ctrl, "weights.bin")
+    assert stop.reason == "disk"
+    assert "no space left on device while writing weights.bin" in stop.detail
+    assert ctrl.wants_stop()
+    assert _disk_full_stop(None, "w.bin").reason == "disk"
+
+
+def test_fetch_with_reconnect_turns_enospc_into_a_disk_pause(tmp_path):
+    import errno
+
+    class _FullDisk:
+        calls = 0
+
+        def download_file(self, *args, **kwargs):
+            self.calls += 1
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        def transient_network_error(self, exc):
+            # Would be waited out for an hour if the disk were mistaken for
+            # the network.
+            return "connection reset"
+
+    session = {"bytes_network": 0, "reconnects": 0}
+    ctrl = StopController(min_free_bytes=1, disk_path=None)
+    link = Link(3600.0, session)
+    counter = NetworkCounter(session, ctrl, link=link)
+    provider = _FullDisk()
+    events: list[dict] = []
+    with pytest.raises(CleanStop) as stop:
+        _fetch_with_reconnect(
+            provider,
+            None,
+            {"revision": "r"},
+            "w.bin",
+            tmp_path,
+            force=False,
+            tqdm_class=None,
+            counter=counter,
+            events=events,
+        )
+    assert stop.value.reason == "disk"
+    assert provider.calls == 1
+    assert ctrl.wants_stop()
+    assert events == []
+    assert link.snapshot() is None
+
+
+def test_record_download_result_treats_a_full_disk_as_a_pause(monkeypatch, tmp_path):
+    import errno
+
+    from darsay.transfer import _record_download_result
+
+    def full(_bundle_dir, _ledger):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr("darsay.transfer.save_ledger", full)
+    ledger = {"events": [], "files": {}}
+    session = {"files_completed": 0, "retries": 0, "bytes_local_sources": 0}
+    result = {
+        "path": "a.bin",
+        "record": {"status": "verified", "source": "network"},
+        "events": [],
+        "retries": 0,
+    }
+    with pytest.raises(CleanStop) as stop:
+        _record_download_result(tmp_path, ledger, session, result)
+    assert stop.value.reason == "disk"
+    assert "ledger could not be written after a.bin" in stop.value.detail
+    # The in-memory state is already committed; reconciliation re-derives
+    # it on disk next run.
+    assert ledger["files"]["a.bin"]["status"] == "verified"
+
+
+def test_live_transfer_reports_how_it_ended():
+    from darsay.transfer import _live_transfer
+
+    class _Display:
+        def __init__(self):
+            self.verdicts: list = []
+
+        def start(self):
+            pass
+
+        def stop(self, verdict=None):
+            self.verdicts.append(verdict)
+
+        def echo(self, *args, **kwargs):
+            pass
+
+    display = _Display()
+    with _live_transfer(display):
+        pass
+    with pytest.raises(CleanStop), _live_transfer(display):
+        raise CleanStop("disk", "full")
+    with pytest.raises(CleanStop), _live_transfer(display):
+        raise CleanStop("budget", "cap")
+    with pytest.raises(KeyboardInterrupt), _live_transfer(display):
+        raise KeyboardInterrupt
+    with pytest.raises(ValueError), _live_transfer(display):
+        raise ValueError("boom")
+    assert display.verdicts == [
+        "complete",
+        "paused: disk",
+        "paused: budget",
+        "aborted",
+        "error: ValueError",
+    ]
+
+
+def test_session_rate_needs_a_minute_of_moving_bytes():
+    from darsay.transfer import session_rate
+
+    ledger: dict = {"sessions": []}
+    assert session_rate(ledger) is None
+    ledger["sessions"].append(
+        {
+            "started": "2026-08-29T00:00:00+00:00",
+            "ended": "2026-08-29T00:00:30+00:00",
+            "bytes_network": 30 * 1024**2,
+        }
+    )
+    assert session_rate(ledger) is None  # thirty seconds says nothing yet
+    ledger["sessions"].append(
+        {
+            "started": "2026-08-29T01:00:00+00:00",
+            "ended": "2026-08-29T01:01:30+00:00",
+            "bytes_network": 90 * 1024**2,
+        }
+    )
+    assert session_rate(ledger) == pytest.approx(1024**2)
+    # Unfinished, byte-less, or malformed sessions are skipped, not fatal.
+    ledger["sessions"].extend(
+        [
+            {
+                "started": "2026-08-29T02:00:00+00:00",
+                "ended": None,
+                "bytes_network": 10**9,
+            },
+            {
+                "started": "2026-08-29T03:00:00+00:00",
+                "ended": "later",
+                "bytes_network": 5,
+            },
+            {"started": "x", "ended": "y", "bytes_network": 0},
+        ]
+    )
+    assert session_rate(ledger) == pytest.approx(1024**2)
+
+
+def test_disk_outlook_counts_the_files_that_fit_and_prices_the_wait(tmp_path):
+    from darsay.transfer import disk_outlook
+
+    gib = 1024**3
+    ledger = {
+        "provider": "huggingface",
+        "expected": [
+            {"path": "b.bin", "size": 5 * gib},
+            {"path": "a.bin", "size": 1 * gib},
+            {"path": "c.bin", "size": 5 * gib},
+            {"path": "done.bin", "size": 9 * gib},
+        ],
+        "files": {"done.bin": {"status": "verified"}},
+        "sessions": [
+            {
+                "started": "2026-08-29T00:00:00+00:00",
+                "ended": "2026-08-29T00:10:00+00:00",
+                "bytes_network": 600 * 1024**2,
+            }
+        ],
+    }
+    plan = {
+        "files": {"verified": 1, "partial": 0, "missing": 3, "total": 4},
+        "bytes": {"remaining_network": 11 * gib},
+        "disk": {
+            "free_bytes": 9 * gib,
+            "min_free_bytes": 2 * gib,
+            "needed_bytes": 11 * gib,
+            "verdict": "insufficient",
+        },
+    }
+    # 7 GiB usable above the floor: a.bin and b.bin land, c.bin does not.
+    lines = disk_outlook(plan, ledger, tmp_path)
+    assert lines == [
+        "  the transfer will pause after about 7.0 GiB more "
+        "(2 of 3 remaining files), roughly 1h 59 min at 1.0 MiB/s.",
+        "  Free space (or move the vault to a larger disk), then re-run to continue.",
+    ]
+    # A rate cap below the observed pace is the honest one.
+    capped = disk_outlook(plan, ledger, tmp_path, max_rate=512 * 1024)
+    assert "roughly 3h 58 min at 512.0 KiB/s" in capped[0]
+    # No pace on record: the bytes and files still tell the story.
+    ledger["sessions"].clear()
+    assert disk_outlook(plan, ledger, tmp_path)[0].endswith("(2 of 3 remaining files).")
+    # Everything fits (the floor alone made the verdict): no hint to free space.
+    plan["disk"]["free_bytes"] = 14 * gib
+    assert disk_outlook(plan, ledger, tmp_path) == [
+        "  the transfer will pause after about 12.0 GiB more (3 of 3 remaining files)."
+    ]
+
+
+def test_begin_session_records_the_tool_version(tmp_path):
+    from darsay import __version__
+    from darsay.transfer import begin_session
+
+    ledger = {"sessions": []}
+    session = begin_session(tmp_path, ledger)
+    assert session["tool"] == f"darsay {__version__}"
+    assert (tmp_path / "transfer.json").is_file()

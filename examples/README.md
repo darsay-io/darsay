@@ -151,7 +151,19 @@ min_free = "10G"
 `--min-free 0` disables the floor for one run; `$DARSAY_MIN_FREE` overrides
 per shell. The plan line and `estimate` price the floor in —
 `needs 40.0 GiB, free 45.0 GiB (10.0 GiB floor) — INSUFFICIENT` — so a
-run that cannot finish says so before the first byte. Design:
+run that cannot finish says so before the first byte, and says where it
+will stop:
+
+```text
+WARNING: disk preflight is insufficient; the transfer will pause at the free-space floor
+  the transfer will pause after about 381.4 GiB more (67 of 140 remaining files), roughly 9h at 12.3 MiB/s.
+  Free space (or move the vault to a larger disk), then re-run to continue.
+Continue anyway? [Y/n]
+```
+
+Enter banks what fits now (the pause comes before the first file that
+would not fit); `n` exits 10 with nothing moved. `darsay archive … --yes`
+skips the question, and a run without a terminal never sees it. Design:
 [Incremental transfer](../docs/INCREMENTAL.md#6-session-budgets).
 
 ---

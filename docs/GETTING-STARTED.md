@@ -166,7 +166,8 @@ If a later source is gated, set `$HF_TOKEN` or run
 | Situation | What to do |
 |---|---|
 | The download is huge | `darsay archive … --max-gb 10` — exits 10, rerun to resume |
-| The disk is filling up | `archive` pauses at 2 GiB free by default (exit 10). Clear space, rerun. `darsay config` shows the floor; `--min-free 10G` raises it |
+| The disk is filling up | `archive` pauses at 2 GiB free by default (exit 10) — before a file that cannot fit, or the moment the disk fills. Clear space, rerun. `darsay config` shows the floor; `--min-free 10G` raises it |
+| The plan says INSUFFICIENT | It also says where the transfer will stop and asks `Continue anyway?`. Enter to bank what fits now, `n` to free space first; `--yes` skips the question |
 | The Wi-Fi drops | Nothing to do. The panel reads `offline`, keeps what arrived, and resumes when the network is back (up to an hour; `--max-offline 4h` waits longer, `0` pauses at once) |
 | It must not hog the connection | `darsay archive … --max-rate 5M` — 5 MiB/s across every worker; set `max_rate` in `config.toml` to make it the default |
 | You hit Ctrl-C | Once stops cleanly, twice aborts now. Rerun the same `archive` command; completed files are kept |
@@ -185,10 +186,12 @@ Copy-paste for each of those: [Examples](../examples/README.md).
 - **`No bundles in …/darsay/`** — you passed `--vault` / `$DARSAY_HOME`
   when you archived. The default is `~/darsay`; `list` prints the path it used.
 - **Disk verdict `insufficient`** — `estimate` is doing its job. Free
-  space, or pick a smaller source.
+  space, or pick a smaller source. `archive` will still start if you say
+  so, and pause cleanly when the space runs out.
 - **Archive paused with exit code 10** — a budget ran out, the disk hit
-  its floor, or the network stayed away longer than `max_offline`. Rerun
-  the same command; that is success, not failure.
+  its floor (or filled), you declined the preflight, or the network
+  stayed away longer than `max_offline`. Rerun the same command; that is
+  success, not failure.
 - **`run` wants to install torch** — expected, once, into the shared
   runtime. The bundle itself stays a few files of metadata plus `model/`.
 - **Windows** — untested best-effort. macOS and Linux are the supported

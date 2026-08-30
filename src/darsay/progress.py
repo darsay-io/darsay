@@ -23,7 +23,13 @@ Panel discipline (the terminal is shared, so the panel defends itself):
 - A lost network is a panel state, not a stack trace: the time-remaining
   slot reads ``offline`` / ``reconnecting`` in amber, the tail counts down
   to the next attempt, and one scrollback line records each outage and
-  each reconnect.
+  each reconnect. The transport's own retries (the Hub client resumes a
+  cut stream a few times before giving up) read ``retrying`` the same way.
+- The rate field is the last few seconds; the time remaining is paced by
+  the last five minutes, so a day-long ETA does not twitch with every
+  chunk, and nothing longer than a month is ever spelled out in days.
+- When the destination cannot hold the rest of the payload, the tail shows
+  free space, so the number that will end the session is on screen.
 
 The Hub client still owns HTTP Range and retries; we only consume its
 tqdm callbacks and render.
@@ -79,6 +85,16 @@ _STALL_AFTER_S = 15.0
 # balloons; hold the last estimate made while bytes were flowing instead,
 # until the stall threshold says so plainly.
 _ETA_FRESH_S = 2.0
+# The ETA is paced by a long horizon — one point every _ETA_POINT_S, up to
+# _ETA_POINTS of them (five minutes) — once at least _ETA_MIN_SPAN_S is on
+# record; before that the short-window rate stands in.
+_ETA_POINT_S = 5.0
+_ETA_POINTS = 60
+_ETA_MIN_SPAN_S = 30.0
+# Beyond this an ETA is a statement about the link, not a time; say so.
+_ETA_MAX_S = 30 * 86400.0
+# Free space is probed at most this often while the panel is live.
+_DISK_PROBE_S = 2.0
 _LIVE_HZ = 0.1
 # Log mode prints a status line every _LOG_INTERVAL_S but polls every
 # second so outage / reconnect notices land promptly.
@@ -169,6 +185,8 @@ def human_eta(seconds: float | None, *, stalled: bool = False) -> str:
         return "starting"
     if seconds < 1.5:
         return "almost done"
+    if seconds > _ETA_MAX_S:
+        return "> 30 days left"
     return f"{human_duration(seconds)} left"
 
 
@@ -275,12 +293,29 @@ def status_text(snap: dict) -> str:
     link = snap.get("link")
     if link:
         return str(link.get("state") or "offline")
+    if snap.get("retry"):
+        return "retrying"
     return human_eta(snap.get("eta_seconds"), stalled=bool(snap.get("stalled")))
 
 
 def _waiting(snap: dict) -> bool:
     """States drawn in amber: the transfer is alive but no bytes are moving."""
-    return bool(snap.get("link") or snap.get("stalled")) and not snap.get("interrupted")
+    return bool(
+        snap.get("link") or snap.get("retry") or snap.get("stalled")
+    ) and not snap.get("interrupted")
+
+
+def _retry_tail(retry: dict) -> str:
+    since = human_duration(retry.get("since") or 0)
+    return f"retry {int(retry.get('count') or 0)} · {since} without bytes"
+
+
+def _free_note(snap: dict) -> str | None:
+    """``free X`` when the destination cannot hold the rest of the payload."""
+    free = snap.get("disk_free")
+    if free is None or not snap.get("disk_short"):
+        return None
+    return f"free {human_size(int(free))}"
 
 
 def _link_tail(link: dict) -> str:
@@ -320,9 +355,12 @@ def snapshot_lines(snap: dict, *, width: int = 80, color: bool = False) -> list[
     else:
         eta = _paint(eta_text, _BOLD, enabled=color)
     link = snap.get("link")
+    retry = snap.get("retry")
     budget = snap.get("budget_bytes")
     if link:
         tail = _link_tail(link)
+    elif retry:
+        tail = _retry_tail(retry)
     elif budget:
         used = human_size(snap.get("budget_used") or 0)
         tail = f"budget {used:>{_size_field_width(budget)}} / {human_size(budget)}"
@@ -330,8 +368,14 @@ def snapshot_lines(snap: dict, *, width: int = 80, color: bool = False) -> list[
         tail = f"{human_duration(snap.get('elapsed') or 0)} elapsed"
     line2 = f"  {rate}  {spark}   {eta}   {tail}"
     cap = snap.get("max_rate")
-    if cap and not link:
-        suffix = f" · cap {human_rate(cap)}"
+    suffixes = []
+    if not link and not retry:
+        free = _free_note(snap)
+        if free:
+            suffixes.append(f" · {free}")
+        if cap:
+            suffixes.append(f" · cap {human_rate(cap)}")
+    for suffix in suffixes:
         if _visible_len(line2) + len(suffix) <= width:
             line2 += _paint(suffix, _DIM, enabled=color)
 
@@ -394,6 +438,7 @@ def snapshot_log_line(snap: dict) -> str:
         else human_size(snap.get("done_bytes") or 0)
     )
     link = snap.get("link")
+    retry = snap.get("retry")
     files_done = int(snap.get("files_done") or 0)
     files_total = int(snap.get("files_total") or 0)
     current = snap.get("current") or []
@@ -408,6 +453,8 @@ def snapshot_log_line(snap: dict) -> str:
         f"cap {human_rate(cap)}" if cap else "",
         status_text(snap),
         _link_tail(link) if link else "",
+        _retry_tail(retry) if retry and not link else "",
+        _free_note(snap) or "",
         f"{files_done}/{files_total} files" if files_total else "",
         name,
     ]
@@ -431,6 +478,8 @@ class TransferMeter:
         stop_controller=None,
         link=None,
         max_rate: int | None = None,
+        disk_path=None,
+        disk_floor: int | None = None,
         clock=time.monotonic,
     ):
         self.total_bytes = max(0, int(total_bytes or 0))
@@ -444,6 +493,8 @@ class TransferMeter:
         self.stop_controller = stop_controller
         self.link = link
         self.max_rate = max_rate
+        self.disk_path = disk_path
+        self.disk_floor = max(0, int(disk_floor or 0))
         self._clock = clock
         self.started = clock()
         self._held_eta: float | None = None
@@ -454,6 +505,11 @@ class TransferMeter:
         self._rates: deque[float] = deque(maxlen=24)
         self._last_spark: float | None = None
         self._ema: float | None = None
+        self._eta_points: deque[tuple[float, int]] = deque(maxlen=_ETA_POINTS)
+        self._last_eta_point: float | None = None
+        self._retry: dict | None = None
+        self._disk_free: int | None = None
+        self._disk_probed_at: float | None = None
         self._last_byte_at = self.started
         self._last_done = self.verified_bytes + self.partial_bytes
 
@@ -507,10 +563,18 @@ class TransferMeter:
             if done != self._last_done:
                 self._last_byte_at = now
                 self._last_done = done
+                # Bytes arriving end whatever retry was under way.
+                self._retry = None
             self._samples.append((now, done))
             cutoff = now - _SAMPLE_WINDOW_S
             while self._samples and self._samples[0][0] < cutoff:
                 self._samples.popleft()
+            if (
+                self._last_eta_point is None
+                or now - self._last_eta_point >= _ETA_POINT_S
+            ):
+                self._last_eta_point = now
+                self._eta_points.append((now, done))
             rate = self._window_rate_locked(now)
             if rate is not None:
                 if self._ema is None:
@@ -534,6 +598,18 @@ class TransferMeter:
             return min(self.total_bytes, done)
         return done
 
+    def note_retry(self, reason: str | None = None) -> None:
+        """The transport is retrying on its own (a cut stream being resumed).
+
+        Counts up until bytes arrive again; the panel shows ``retrying``
+        with the count and how long it has been since the last byte.
+        """
+        with self.lock:
+            if self._retry is None:
+                self._retry = {"count": 0, "reason": None}
+            self._retry["count"] += 1
+            self._retry["reason"] = reason
+
     def _window_rate_locked(self, now: float) -> float | None:
         if len(self._samples) < 2:
             return None
@@ -544,6 +620,25 @@ class TransferMeter:
             return None
         return max(0.0, (b1 - b0) / dt)
 
+    def _horizon_rate_locked(self) -> float | None:
+        """Pace over the last few minutes, for an ETA that does not twitch."""
+        if len(self._eta_points) < 2:
+            return None
+        t0, b0 = self._eta_points[0]
+        t1, b1 = self._eta_points[-1]
+        if t1 - t0 < _ETA_MIN_SPAN_S:
+            return None
+        return max(0.0, (b1 - b0) / (t1 - t0))
+
+    def _disk_free_locked(self, now: float) -> int | None:
+        if self.disk_path is None:
+            return None
+        if self._disk_probed_at is None or now - self._disk_probed_at >= _DISK_PROBE_S:
+            self._disk_probed_at = now
+            with suppress(OSError):
+                self._disk_free = shutil.disk_usage(self.disk_path).free
+        return self._disk_free
+
     def snapshot(self) -> dict:
         now = self._clock()
         self.note()
@@ -551,6 +646,9 @@ class TransferMeter:
             done = self._done_bytes()
             remaining = max(0, self.total_bytes - done) if self.total_bytes else 0
             rate = self._ema
+            pace = self._horizon_rate_locked()
+            if pace is None:
+                pace = rate
             quiet_for = now - self._last_byte_at
             stalled = quiet_for >= _STALL_AFTER_S and remaining > 0
             eta = None
@@ -558,11 +656,22 @@ class TransferMeter:
                 eta = 0.0
             elif stalled:
                 self._held_eta = None
-            elif rate and rate > 1 and remaining and quiet_for < _ETA_FRESH_S:
-                eta = remaining / rate
+            elif pace and pace > 1 and remaining and quiet_for < _ETA_FRESH_S:
+                eta = remaining / pace
                 self._held_eta = eta
             else:
                 eta = self._held_eta
+            retry = None
+            if self._retry is not None and remaining > 0:
+                retry = {
+                    "count": self._retry["count"],
+                    "reason": self._retry.get("reason"),
+                    "since": max(0.0, quiet_for),
+                }
+            disk_free = self._disk_free_locked(now)
+            disk_short = disk_free is not None and remaining > max(
+                0, disk_free - self.disk_floor
+            )
             files_done = self.verified_files + max(
                 0,
                 int(self.session.get("files_completed") or 0)
@@ -609,7 +718,11 @@ class TransferMeter:
                     getattr(self.stop_controller, "interrupted", False)
                 ),
                 "link": self.link.snapshot() if self.link is not None else None,
+                "retry": retry,
                 "max_rate": self.max_rate,
+                "disk_free": disk_free,
+                "disk_floor": self.disk_floor,
+                "disk_short": disk_short,
                 "current": current,
             }
 
@@ -726,13 +839,14 @@ class TransferDisplay:
         self._thread.start()
         self.refresh()
 
-    def stop(self) -> None:
+    def stop(self, verdict: str | None = None) -> None:
+        """Take the panel down, leaving one record line ending in ``verdict``."""
         self._stop.set()
         if self._thread is not None:
             self._thread.join(timeout=1.0)
             self._thread = None
         self._release_std_streams()
-        final = self._final_line() if self.live and self._painted else None
+        final = self._final_line(verdict) if self.live and self._painted else None
         self._painted = False
         with self._io:
             self._restore_locked()
@@ -879,8 +993,8 @@ class TransferDisplay:
         with suppress(OSError):
             self.stream.flush()
 
-    def _final_line(self) -> str:
-        """One scrollback line recording where the transfer ended."""
+    def _final_line(self, verdict: str | None = None) -> str:
+        """One scrollback line recording where, and how, the transfer ended."""
         snap = self.meter.snapshot()
         done = human_size(snap.get("done_bytes") or 0)
         total = snap.get("total_bytes") or 0
@@ -893,7 +1007,7 @@ class TransferDisplay:
         files_done = int(snap.get("files_done") or 0)
         files = f"{files_done}/{files_total} files" if files_total else None
         elapsed = f"{human_duration(snap.get('elapsed') or 0)} elapsed"
-        bits = [bit for bit in (bytes_part, files, elapsed) if bit]
+        bits = [bit for bit in (bytes_part, files, elapsed, verdict) if bit]
         return _paint("  " + " · ".join(bits), _DIM, enabled=self.color)
 
     def _capture_std_streams(self) -> None:
@@ -995,6 +1109,10 @@ def meter_from_plan(
     sizes = plan.get("bytes") or {}
     files = plan.get("files") or {}
     budget = getattr(stop_controller, "max_bytes", None) if stop_controller else None
+    disk_path = getattr(stop_controller, "disk_path", None) if stop_controller else None
+    disk_floor = (
+        getattr(stop_controller, "min_free_bytes", None) if stop_controller else None
+    )
     return TransferMeter(
         total_bytes=int(sizes.get("total") or 0),
         total_files=int(files.get("total") or 0),
@@ -1007,4 +1125,6 @@ def meter_from_plan(
         stop_controller=stop_controller,
         link=link,
         max_rate=max_rate,
+        disk_path=disk_path,
+        disk_floor=disk_floor,
     )

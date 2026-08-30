@@ -275,6 +275,7 @@ darsay archive  datasets/saidutta69/fable-5-premium
 darsay archive  Qwen/Qwen3.8-27B --revision v1.0      # pin a tag or commit instead of main
 darsay archive  Qwen/Qwen3.8-27B --max-gb 10          # pause; rerun to resume
 darsay archive  Qwen/Qwen3.8-27B --min-free 10G       # pause below 10 GiB free
+darsay archive  Qwen/Qwen3.8-27B --yes                # bank what fits even if the disk cannot hold it all
 darsay archive  Qwen/Qwen3.8-27B --max-rate 5M        # cap at 5 MiB/s
 darsay archive  Qwen/Qwen3.8-27B --max-offline 4h     # wait out a lost network longer
 darsay config                                         # effective settings + config files

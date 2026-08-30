@@ -322,3 +322,95 @@ def test_transfer_session_shrinks_chunks_and_filters_retry_chatter(tmp_path):
             assert original == hub_constants.DOWNLOAD_CHUNK_SIZE
     finally:
         hub_logger.removeHandler(handler)
+
+
+def _hub_record(message: str, *args):
+    import logging
+
+    return logging.LogRecord(
+        "huggingface_hub.file_download",
+        logging.WARNING,
+        __file__,
+        1,
+        message,
+        args,
+        None,
+    )
+
+
+def test_retry_chatter_becomes_a_panel_state(tmp_path):
+    import logging
+
+    from darsay.providers.huggingface import HuggingFaceProvider, _RetryChatterFilter
+
+    seen: list = []
+    chatter = _RetryChatterFilter(on_retry=seen.append)
+    resume = _hub_record(
+        "Error while downloading from %s: %s\nTrying to resume download...",
+        "https://cas-bridge.xethub.hf.co/x?X-Xet-Signed-Range=bytes%3D0-1",
+        "timed out",
+    )
+    assert chatter.filter(resume) is False
+    gave_up = _hub_record(
+        "Error while downloading from %s: %s\nMax retries exceeded.",
+        "https://x",
+        "boom",
+    )
+    assert chatter.filter(gave_up) is False
+    assert chatter.filter(_hub_record("Rate limited. Waiting 3s before retry")) is True
+    assert seen == ["timed out", "boom"]
+
+    def broken(_reason):
+        raise RuntimeError("panel gone")
+
+    # A failing callback never breaks the transport's logging.
+    assert _RetryChatterFilter(on_retry=broken).filter(resume) is False
+    assert _RetryChatterFilter().filter(resume) is False
+
+    # And the session plumbs it onto the Hub client's handlers.
+    hub_logger = logging.getLogger("huggingface_hub")
+    handler = logging.Handler()
+    hub_logger.addHandler(handler)
+    seen.clear()
+    try:
+        with HuggingFaceProvider().transfer_session(tmp_path, on_retry=seen.append):
+            assert not handler.filter(resume)
+        assert seen == ["timed out"]
+    finally:
+        hub_logger.removeHandler(handler)
+
+
+def test_resumable_download_skips_the_hub_disk_warning(tmp_path, monkeypatch):
+    """darsay checks headroom against its floor before a file begins; the
+    client's per-file UserWarning would only repeat that, badly."""
+    import huggingface_hub.file_download as file_download
+
+    from darsay.providers.huggingface import HuggingFaceProvider
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("the Hub client's disk check ran")
+
+    monkeypatch.setattr(file_download, "_check_disk_space", forbidden)
+
+    def fake_http_get(url, temp_file, *, resume_size=0, expected_size=None, **kwargs):
+        temp_file.write(b"x" * (expected_size - resume_size))
+
+    monkeypatch.setattr(file_download, "http_get", fake_http_get)
+    incomplete = tmp_path / "w.bin.incomplete"
+    incomplete.write_bytes(b"xx")
+    destination = tmp_path / "w.bin"
+    with HuggingFaceProvider().transfer_session(tmp_path):
+        file_download._download_to_tmp_and_move(
+            incomplete,
+            destination,
+            "https://x/w.bin",
+            {},
+            5,
+            "w.bin",
+            False,
+            "etag",
+            None,
+            tqdm_class=None,
+        )
+    assert destination.read_bytes() == b"xxxxx"
+    assert not incomplete.exists()

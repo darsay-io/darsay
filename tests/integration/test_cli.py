@@ -609,3 +609,61 @@ def test_cli_archive_rate_cap_prints_plan_line(vault, test_provider, capsys):
     assert code == 0
     out = capsys.readouterr().out
     assert "rate:     capped at 50.0 MiB/s" in out
+
+
+def test_cli_archive_announces_its_version_and_accepts_yes(
+    vault, test_provider, capsys
+):
+    from darsay import __version__
+
+    test_provider.add_repo("acme/toy", model_files())
+    code = main(
+        ["--vault", str(vault), "archive", "test:acme/toy", "--yes", "--jobs", "1"]
+    )
+    assert code == 0
+    captured = capsys.readouterr()
+    assert captured.err.splitlines()[0] == f"darsay {__version__}"
+
+
+def test_cli_archive_disk_full_is_a_clean_pause(vault, test_provider, capsys):
+    import errno
+
+    test_provider.add_repo("acme/toy", model_files())
+    test_provider.fail_next(
+        "model.safetensors", OSError(errno.ENOSPC, "No space left on device")
+    )
+    code = main(["--vault", str(vault), "archive", "test:acme/toy", "--jobs", "1"])
+    assert code == 10
+    out = capsys.readouterr().out
+    assert "paused cleanly (disk: destination is full — no space left on device" in out
+    assert "Free disk space, then re-run" in out
+
+
+def test_cli_dry_run_prints_the_disk_outlook(vault, test_provider, capsys, monkeypatch):
+    from types import SimpleNamespace
+
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    smallest = min(len(data) for data in files.values())
+    disk = SimpleNamespace(free=2 * 1024**3 + smallest)
+    monkeypatch.setattr("darsay.transfer.shutil.disk_usage", lambda path: disk)
+    code = main(
+        [
+            "--vault",
+            str(vault),
+            "archive",
+            "test:acme/toy",
+            "--dry-run",
+            "--min-free",
+            "2G",
+        ]
+    )
+    assert code == 0
+    out = capsys.readouterr().out
+    assert "INSUFFICIENT" in out
+    assert "the transfer will pause at the free-space floor" in out
+    assert (
+        f"the transfer will pause after about {smallest} B more (1 of {len(files)} remaining files)."
+        in out
+    )
+    assert "then re-run to continue" in out

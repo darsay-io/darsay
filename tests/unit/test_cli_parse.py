@@ -157,9 +157,35 @@ def test_flags_by_command_walks_every_subparser():
 
     flags = flags_by_command()
     assert {"--version", "--vault"} <= flags[""]
-    assert {"--max-rate", "--max-offline", "--min-free", "--shard"} <= flags["archive"]
+    assert {"--max-rate", "--max-offline", "--min-free", "--shard", "--yes"} <= flags[
+        "archive"
+    ]
     assert "--desire" in flags["catalog add"]
     assert "--prune" in flags["envs"]
+
+
+def test_tty_confirm_defaults_to_yes_and_restores_sigint(monkeypatch):
+    import signal
+
+    from darsay.cli import _tty_confirm
+
+    sentinel = signal.getsignal(signal.SIGINT)
+    answers = iter(["", "y", "YES ", "n", "no"])
+    monkeypatch.setattr("builtins.input", lambda question: next(answers))
+    assert [_tty_confirm("Continue? ") for _ in range(5)] == [
+        True,
+        True,
+        True,
+        False,
+        False,
+    ]
+
+    def closed(_question):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", closed)
+    assert _tty_confirm("Continue? ") is False
+    assert signal.getsignal(signal.SIGINT) is sentinel
 
 
 def test_rate_and_duration_flags():

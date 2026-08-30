@@ -304,10 +304,32 @@ def _estimate_catalog(args, vault, cat_path) -> int:
     return 1 if failed else 0
 
 
+def _tty_confirm(question: str) -> bool:
+    """Ask on the terminal; Enter and ``y`` mean yes, ``n`` or EOF mean no.
+
+    The archive's SIGINT handler swallows a first Ctrl-C (it requests a
+    clean stop mid-transfer), which at a prompt would just leave the user
+    waiting; the default handler is restored for the question so Ctrl-C
+    aborts it.
+    """
+    import signal
+
+    previous = signal.signal(signal.SIGINT, signal.default_int_handler)
+    try:
+        answer = input(question)
+    except EOFError:
+        return False
+    finally:
+        signal.signal(signal.SIGINT, previous)
+    return answer.strip().lower() in {"", "y", "yes"}
+
+
 def cmd_archive(args) -> int:
     from .archiver import archive
     from .transfer import PartialTransfer
 
+    # The build that is running, so a pasted terminal identifies itself.
+    print(f"darsay {__version__}", file=sys.stderr)
     vault = _vault_path(args, announce=True)
     target = _archive_target(args, vault)
     if target is None:
@@ -315,6 +337,14 @@ def cmd_archive(args) -> int:
     source, revision, include = target
     max_bytes = (
         int(args.max_gb * 1024**3) if args.max_gb is not None else args.max_bytes
+    )
+    # Ask before a transfer that cannot finish only when someone is there
+    # to answer; cron and pipes proceed, as they always have.
+    interactive = bool(
+        not args.yes
+        and hasattr(sys.stdin, "isatty")
+        and sys.stdin.isatty()
+        and sys.stdout.isatty()
     )
     try:
         bundle = archive(
@@ -332,6 +362,7 @@ def cmd_archive(args) -> int:
             jobs=args.jobs,
             shard=args.shard,
             include=include,
+            confirm=_tty_confirm if interactive else None,
         )
     except PartialTransfer as stop:
         print(f"\nArchive paused cleanly ({stop.reason}: {stop.detail}).")
@@ -1214,6 +1245,13 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="SIZE",
         help="pause cleanly when destination free space drops below SIZE "
         "(default: 2G, or config transfer.min_free; 0 disables)",
+    )
+    p.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        help="start without asking when the disk preflight says the transfer "
+        "cannot finish (a non-interactive run never asks)",
     )
     p.add_argument(
         "--max-rate",

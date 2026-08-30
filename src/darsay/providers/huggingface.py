@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -129,10 +129,28 @@ def throttled_chunk_size(max_rate: int, default: int) -> int:
 
 
 class _RetryChatterFilter(logging.Filter):
-    """Drop the Hub client's retry notices while darsay's transfer runs."""
+    """Drop the Hub client's retry notices while darsay's transfer runs.
+
+    Each dropped notice is handed to ``on_retry`` (the panel's
+    ``note_retry``) with the transport's reason, so the retry shows as a
+    panel state rather than as a log line or a silent stall.
+    """
+
+    def __init__(self, on_retry=None):
+        super().__init__()
+        self.on_retry = on_retry
 
     def filter(self, record: logging.LogRecord) -> bool:
-        return not record.getMessage().startswith(_HUB_RETRY_CHATTER)
+        message = record.getMessage()
+        if not message.startswith(_HUB_RETRY_CHATTER):
+            return True
+        if self.on_retry is not None:
+            # "Error while downloading from <url>: <reason>\nTrying to ..."
+            first = message.split("\n", 1)[0]
+            reason = first.split(": ", 1)[1] if ": " in first else None
+            with suppress(Exception):
+                self.on_retry(reason)
+        return False
 
 
 def parse_base_model_tags(tags: list[str]) -> tuple[list[str], dict[str, str]]:
@@ -337,7 +355,11 @@ class HuggingFaceProvider(SourceProvider):
 
     @contextmanager
     def transfer_session(
-        self, payload_dir: Path, *, max_rate: int | None = None
+        self,
+        payload_dir: Path,
+        *,
+        max_rate: int | None = None,
+        on_retry=None,
     ) -> Iterator[None]:
         """Restore safe same-bundle partial resume around ``hf_hub_download``.
 
@@ -349,8 +371,10 @@ class HuggingFaceProvider(SourceProvider):
         lifetime while the darsay lock is held.
 
         Under a rate cap the client's 10 MiB read chunk is shrunk so pacing
-        sleeps stay short, and the client's own retry log lines are filtered:
-        darsay owns the outage story on the terminal.
+        sleeps stay short, and the client's own retry log lines are turned
+        into ``on_retry`` calls: darsay owns the outage story on the terminal.
+        The client's per-file free-space warning is not restored either —
+        darsay checks headroom against its floor before a file begins.
         """
         import os
 
@@ -366,7 +390,7 @@ class HuggingFaceProvider(SourceProvider):
 
         original = file_download._download_to_tmp_and_move
         original_chunk = hub_constants.DOWNLOAD_CHUNK_SIZE
-        chatter = _RetryChatterFilter()
+        chatter = _RetryChatterFilter(on_retry)
         hub_handlers = list(logging.getLogger("huggingface_hub").handlers)
         original_xet_cache = hub_constants.HF_XET_CACHE
         old_xet_cache_env = os.environ.get("HF_XET_CACHE")
@@ -398,13 +422,6 @@ class HuggingFaceProvider(SourceProvider):
                 incomplete_path.unlink(missing_ok=True)
             with incomplete_path.open("ab") as handle:
                 resume_size = handle.tell()
-                if expected_size is not None:
-                    file_download._check_disk_space(
-                        expected_size, incomplete_path.parent
-                    )
-                    file_download._check_disk_space(
-                        expected_size, destination_path.parent
-                    )
                 if xet_file_data is not None and file_download.is_xet_available():
                     file_download.xet_get(
                         incomplete_path=incomplete_path,

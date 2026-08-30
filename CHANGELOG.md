@@ -9,6 +9,53 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Added
+
+- **A full disk is a pause, never a traceback** — `ENOSPC` while writing a
+  file, copying a sibling blob, or saving the ledger now ends the session
+  exactly as the free-space floor does: `end_reason: "disk"`, exit 10, the
+  partial kept, and the "free disk space, then re-run" hint (`disk:
+  destination is full — no space left on device while writing
+  model-00023-of-00141.safetensors`). The floor also checks headroom
+  *before* each file begins — `model-00023-of-00141.safetensors needs
+  5.0 GiB more, but only 3.9 GiB is free above the 2.0 GiB floor` — so a
+  shard that cannot finish is never started, and the Hub client's own
+  per-file "Not enough free disk space" `UserWarning` (two of them, three
+  lines each, per shard) is gone with it.
+- **The preflight says where it will stop, and asks** — an insufficient
+  plan now continues: `the transfer will pause after about 381.4 GiB more
+  (67 of 140 remaining files), roughly 9h at 12.3 MiB/s.` (the pace is
+  the rate cap or the ledger's earlier sessions, whichever is slower) and
+  `Free space (or move the vault to a larger disk), then re-run to
+  continue.` On a terminal `archive` then asks `Continue anyway? [Y/n]`;
+  Enter proceeds, `n` pauses cleanly before any byte moves (exit 10,
+  `end_reason: "disk"`). `--yes` / `-y` skips the question; pipes and cron
+  never see it.
+- **Free space on the panel** — while the destination cannot hold the
+  rest of the payload, the panel's second line ends in `· free 381.2 GiB`
+  (probed every 2 s; the log line carries it too), so the number that
+  will end the session is on screen. It goes away once space is freed.
+- **`retrying` is a panel state** — the Hub client's own attempts to
+  resume a cut stream (up to five, ten seconds apart) now read `retrying`
+  in amber with `retry 2 · 23s without bytes` in the tail, instead of a
+  bare `stalled`; the first byte back clears it. Providers hand those
+  through `transfer_session(on_retry=…)`.
+- **Which build ran** — `archive` prints `darsay <version>` as its first
+  line, and every ledger session records `"tool": "darsay <version>"`,
+  so a pasted terminal or a `transfer.json` identifies the release
+  without matching traceback line numbers.
+
+### Changed
+
+- **Steadier ETA** — time remaining is paced by the last five minutes of
+  transfer (the rate field still shows the last eight seconds), so a
+  day-long estimate no longer twitches with every chunk, and anything over
+  a month reads `> 30 days left` rather than `272774d 13h left`.
+- **The record line says how it ended** — the dim scrollback line the
+  panel leaves behind now closes with `complete`, `paused: disk` /
+  `budget` / `offline`, `stopped: Ctrl-C`, `aborted`, or
+  `error: <Class>`.
+
 ## [0.11.0] - 2026-08-29
 
 ### Added
