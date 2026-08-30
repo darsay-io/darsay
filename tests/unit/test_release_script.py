@@ -58,9 +58,7 @@ def test_prepared_release_check_is_read_only(release, monkeypatch, tmp_path):
     monkeypatch.setattr(release, "CHANGELOG", changelog)
     monkeypatch.setattr(release, "read_current_version", lambda: "1.2.3")
     monkeypatch.setattr(
-        release,
-        "prepare_changelog",
-        lambda text, version, today: (text, f"{version} {today}"),
+        release, "check_prepared_changelog", lambda version: calls.append("changelog")
     )
     monkeypatch.setattr(
         release, "check_docs_versions_current", lambda: calls.append("docs")
@@ -75,7 +73,20 @@ def test_prepared_release_check_is_read_only(release, monkeypatch, tmp_path):
     release.check_prepared_release("1.2.3", "2026-08-29", True)
 
     assert changelog.read_text(encoding="utf-8") == "prepared\n"
-    assert calls == ["docs", "flags", ("1.2.3", True)]
+    assert calls == ["changelog", "docs", "flags", ("1.2.3", True)]
+
+
+def test_prepared_changelog_keeps_its_frozen_release_date(
+    release, monkeypatch, tmp_path
+):
+    changelog = tmp_path / "CHANGELOG.md"
+    changelog.write_text(
+        "# Changelog\n\n## [Unreleased]\n\n## [1.2.3] - 2026-08-30\n\n- Shipped.\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(release, "CHANGELOG", changelog)
+
+    release.check_prepared_changelog("1.2.3")
 
 
 def test_prepared_release_check_refuses_wrong_version(release, monkeypatch):
@@ -114,6 +125,33 @@ def test_prepare_only_reuses_writers_without_owning_git(release, monkeypatch):
 
     assert release.main(["1.2.3", "--prepare-only", "--skip-build"]) == 0
     assert calls == ["tooling", "docs", "flags", "1.2.3", ("1.2.3", True)]
+
+
+def test_prepare_only_converges_when_source_is_already_prepared(
+    release, monkeypatch
+):
+    calls = []
+    monkeypatch.setattr(release, "read_current_version", lambda: "1.2.3")
+    monkeypatch.setattr(
+        release,
+        "check_tooling",
+        lambda *args: pytest.fail("metadata-only must not require ambient tools"),
+    )
+    monkeypatch.setattr(
+        release,
+        "check_prepared_release",
+        lambda *args, **kwargs: calls.append((args, kwargs)),
+    )
+    monkeypatch.setattr(
+        release,
+        "write_version",
+        lambda *args: pytest.fail("converged preparation must not write"),
+    )
+
+    assert release.main(["1.2.3", "--prepare-only", "--metadata-only"]) == 0
+    assert calls == [
+        (("1.2.3", release.dt.date.today().isoformat(), False), {"metadata_only": True})
+    ]
 
 
 def test_metadata_only_prepare_needs_no_ambient_tooling(release, monkeypatch):

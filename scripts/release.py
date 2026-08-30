@@ -233,6 +233,24 @@ def check_changelog(version: str, today: str) -> str:
     return log_line
 
 
+def check_prepared_changelog(version: str) -> None:
+    """Verify frozen release notes without re-deriving their release date."""
+    text = CHANGELOG.read_text(encoding="utf-8")
+    heading = re.compile(
+        rf"(?m)^## \[{re.escape(version)}\] - (\d{{4}}-\d{{2}}-\d{{2}})[ \t]*$"
+    ).search(text)
+    if heading is None:
+        raise Abort(f"CHANGELOG.md is not prepared for {version}")
+    try:
+        dt.date.fromisoformat(heading.group(1))
+    except ValueError as exc:
+        raise Abort(f"CHANGELOG.md has an invalid date for {version}") from exc
+    if not _has_notes(_section_body(text, heading)):
+        raise Abort(f"CHANGELOG.md section for {version} has no notes")
+    if _UNRELEASED.search(text) is None:
+        raise Abort("CHANGELOG.md has no fresh [Unreleased] section")
+
+
 def check_docs_table() -> None:
     """Every derived row must have a source literal and a table row to land in."""
     text = DOCS_INDEX.read_text(encoding="utf-8")
@@ -404,17 +422,14 @@ def run_gate(version: str, skip_build: bool) -> None:
 
 
 def check_prepared_release(
-    version: str, today: str, skip_build: bool, metadata_only: bool = False
+    version: str, _today: str, skip_build: bool, metadata_only: bool = False
 ) -> None:
     """Verify one already-prepared source tree without changing Git or files."""
     current = read_current_version()
     if current != version:
         raise Abort(f"source version is {current}, expected prepared {version}")
 
-    text = CHANGELOG.read_text(encoding="utf-8")
-    updated, _ = prepare_changelog(text, version, today)
-    if updated != text:
-        raise Abort(f"CHANGELOG.md is not prepared for {version}")
+    check_prepared_changelog(version)
 
     check_docs_versions_current()
     check_docs_flags()
@@ -495,8 +510,20 @@ def main(argv: list[str] | None = None) -> int:
         print("prepared release verified")
         return 0
 
-    if parse(version) <= parse(current):
+    if parse(version) < parse(current):
         raise Abort(f"{version} does not come after the current {current}")
+
+    if version == current:
+        if not args.prepare_only:
+            raise Abort(f"{version} does not come after the current {current}")
+        print(f"darsay {version} is already prepared\n")
+        if not args.metadata_only:
+            check_tooling(args.skip_build)
+        check_prepared_release(
+            version, today, args.skip_build, metadata_only=args.metadata_only
+        )
+        print(f"prepared {tag}; caller owns the commit and tag")
+        return 0
 
     print(f"darsay {current} -> {version}\n")
 
