@@ -107,7 +107,10 @@ slowest gate, and `--push` pushes `main` so the tag is the only step left.
 
 The `release` workflow attaches the wheel and sdist to the GitHub Release
 and publishes them to PyPI (Trusted Publishing, environment `pypi`),
-re-checking that the tag matches the artifacts it just built.
+re-checking that the tag matches the artifacts it just built. PyPI's
+index cache can keep `pipx upgrade` on the previous version for about
+ten minutes; the force-refresh is in
+[docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
 
 darsay.io `/docs/` pins that same GitHub Release in `darsay-io/website`'s
 `docs.lock.json`. After the tag exists, that repo's `Sync CLI docs`

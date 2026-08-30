@@ -42,6 +42,17 @@ site-packages, and upgrades are one command (`pipx upgrade darsay`,
 reports what the isolated environment holds, so after a release the
 release machine needs that command too.
 
+PyPI's project index is cached for about ten minutes (Warehouse, not
+darsay). `pip` and `pipx` honor that in their HTTP cache, so
+`pipx upgrade darsay` can keep reporting the previous version even after
+the new wheel is on PyPI. Wait, or force a fresh fetch. A pipx-only
+install has no `pip` on `PATH`; `--pip-args` is the lever, not
+`pip cache purge`:
+
+```bash
+pipx upgrade darsay --pip-args='--no-cache-dir'
+```
+
 ### Other sources
 
 Homebrew **tap** (not [homebrew/core](https://github.com/Homebrew/homebrew-core)).
@@ -93,11 +104,14 @@ should attach:
 Do **not** attach vault bundles, `.mvb.tar` files, or hydrated envs.
 Those are archival payloads, not software releases.
 
-The workflow in `.github/workflows/release.yml` runs on a `v*` tag. It
-builds the wheel and sdist, attaches them to the GitHub Release, and
-publishes the same files to PyPI via Trusted Publishing (OIDC, no API
-token). The job uses the GitHub Environment `pypi`, which should require
-a reviewer so a tag cannot publish unattended.
+The workflow in `.github/workflows/release.yml` runs on a `v*` tag
+(pushing `main` does not publish). It builds the wheel and sdist,
+attaches them to the GitHub Release, then publishes the same files to
+PyPI via Trusted Publishing (OIDC, no API token). The job uses the
+GitHub Environment `pypi`, which should require a reviewer so a tag
+cannot publish unattended. The Release page can therefore exist a minute
+before the version is installable; after the upload, the ten-minute
+index cache above can still keep `pipx upgrade` on the previous latest.
 
 ## Self-contained binaries
 
