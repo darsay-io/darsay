@@ -30,11 +30,18 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import os
 import re
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+
+# Release validation imports the prepared source in child Python processes.
+# Keep those read-only checks from leaving bytecode in Rivet's private source
+# view or an operator's checkout.
+os.environ["PYTHONDONTWRITEBYTECODE"] = "1"
+sys.dont_write_bytecode = True
 
 ROOT = Path(__file__).resolve().parents[1]
 INIT = ROOT / "src" / "darsay" / "__init__.py"

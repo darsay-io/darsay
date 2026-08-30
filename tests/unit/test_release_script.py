@@ -28,6 +28,11 @@ def test_docs_flags_match_the_cli(release):
     release.check_docs_flags()
 
 
+def test_release_validation_suppresses_bytecode_caches(release):
+    assert release.sys.dont_write_bytecode is True
+    assert release.os.environ["PYTHONDONTWRITEBYTECODE"] == "1"
+
+
 def test_docs_version_table_tracks_source_literals(release):
     """Between releases the landing table must already agree with the source."""
     from darsay import SCHEMA_VERSION, __version__
