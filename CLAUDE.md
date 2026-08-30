@@ -85,6 +85,12 @@ point `darsay` (argparse, subcommands in `cli.py`).
   `.cache/huggingface/` partials must survive budgets, SIGINT, ledger loss,
   and copying to a different vault. Never put source-machine absolute paths
   in the ledger.
+- **rsync is a first-class copy:** an out-of-band `rsync` / `cp -a` of a
+  bundle (or its payload) into the usual vault layout is the same as a
+  darsay copy. The next command verifies those bytes against the pin,
+  downloads only what is still missing, and adjusts metadata. It must not
+  re-download a file whose digest matches. Show hashing on the live panel
+  so a follow-up `assemble --move` never looks hung.
 - **Export determinism:** the same bundle state must produce a byte-identical
   `.mvb.tar` (sorted entries, marker first, normalized tar metadata, no wall
   clock inside the tar). Volatile machine-local data — export logs, hydration

@@ -40,16 +40,24 @@ heals. A registered bundle remains protected by the existing already-exists
 guard; `--force` performs a fresh pin and adopts matching payload bytes
 instead of downloading them again.
 
-## 1. Why this can beat rsync at its own game
+## 1. Why this can beat rsync at fetching — and why rsync still copies disks
 
-rsync solves a harder problem than ours: its source is *mutable*, so it must
-interrogate both sides (size/mtime quick-check, then rolling checksums) to
-discover what changed. Our source is a **pinned, content-addressed git
-revision**: once `archive` resolves ref → commit on the first run, the
-transfer set is frozen and fully enumerable from one metadata call —
-every file's path, exact size, and upstream digest (LFS SHA-256 for large
-files, git blob SHA-1 for small ones) are known *before a single payload
-byte moves*.
+rsync is the disk-to-disk copy. darsay does not replace it. An `rsync` (or
+`cp -a`, a USB, a restic restore) of payload bytes into a vault is a
+**first-class copy**: the next `archive` / `assemble` / `assemble --move`
+verifies what landed against the pin, fetches only what is still missing,
+and rewrites transfer metadata. It must not re-download a file whose digest
+matches. Users who rsync then run darsay should never be astonished by a
+second download of the majority.
+
+Where darsay beats rsync is the *upstream* transfer. rsync's source is
+*mutable*, so it must interrogate both sides (size/mtime quick-check, then
+rolling checksums) to discover what changed. Our source is a **pinned,
+content-addressed git revision**: once `archive` resolves ref → commit on
+the first run, the transfer set is frozen and fully enumerable from one
+metadata call — every file's path, exact size, and upstream digest (LFS
+SHA-256 for large files, git blob SHA-1 for small ones) are known *before a
+single payload byte moves*.
 
 That turns the whole problem into set arithmetic:
 
@@ -89,13 +97,21 @@ around that one line.
    they match. Partial files resume with Range requests from the byte where
    they stopped. Identical blobs already verified in sibling bundles are
    copied locally instead of fetched (§5).
-5. **Every stop is clean, every run converges.** Budgets, Ctrl-C, a
+5. **rsync is a first-class copy.** Out-of-band copies (`rsync`, `cp -a`,
+   USB, restic restore) of a bundle — or just its payload — into the usual
+   `<vault>/<slug>/<rev>/` layout are the same as a darsay copy. The next
+   command hashes those bytes against the pin (and shows that hashing on the
+   live panel), downloads only what is still missing, and adjusts metadata
+   (`transfer.json`, `moved`). A registered payload stays frozen: rsync a
+   finished bundle, `verify` dest, `darsay rm` the source. `assemble --move`
+   is the verb for partials.
+6. **Every stop is clean, every run converges.** Budgets, Ctrl-C, a
    filling disk, network loss, power loss — all leave a state a later run
    continues from. The
    state file is written atomically (temp + rename) after every file
    completion, so the worst possible loss is one in-flight file's progress
    record, which reconciliation recovers anyway.
-6. **Record, don't fabricate — for the transfer itself.** Sessions, bytes
+7. **Record, don't fabricate — for the transfer itself.** Sessions, bytes
    moved, adoptions, local-copy sources, retries, and digest mismatches are
    all logged. A bundle assembled over fourteen sessions says so in its
    manifest; a file that came from a sibling bundle instead of the network
@@ -659,7 +675,7 @@ final mega-pass.
 | Disk filling mid-session | Plan-phase preflight prices the free-space floor (§6), says where the transfer will stop, and asks on a terminal; the transfer pauses cleanly (`end_reason: disk`, exit 10) before a file that cannot fit above the floor, or the moment free space drops below it, leaving the margin for the rest of the machine. Clear space and rerun. With the floor disabled, a mid-session `ENOSPC` is the same clean pause with state intact. |
 | Network drops mid-session | Bytes received so far are banked in the partial; the panel reads `offline` and retries on a 2 → 30 s schedule (§6) while budgets, the floor, and Ctrl-C keep working. Back within `max_offline` (1 h): the file resumes with a Range request and the outage is one scrollback line. Longer: clean pause, `end_reason: offline`, exit 10; rerun once connected. |
 | Two concurrent runs | Second exits on the live lock. |
-| Partial bundle copied or moved | Relative ledger/cache state resumes at the new vault; an inherited lock is reclaimed only when the physical directory identity changed. |
+| Partial bundle copied or moved | Relative ledger/cache state resumes at the new vault; an inherited lock is reclaimed only when the physical directory identity changed. rsync then `archive` / `assemble --move` hashes dest (live panel) and fetches only the remainder. |
 | Cooperative inputs disagree | `assemble` rejects them before creating a destination; repo, type, full pin, and expected inventory must all match. |
 | `assemble --move`, destination copy fails to verify | That file's source bytes are kept, not deleted (verify-then-delete, per file, §5); only files the destination re-hashed against the pin are released, and a skeleton still holding such a file is never dissolved. |
 | Moved bytes reappear at a skeleton | Reconciliation hashes and re-adopts them as `verified`; the `moved` record is only a hint. Bytes that fail the pin's checks are removed and the record stays `moved`. |

@@ -9,6 +9,22 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Changed
+
+- **rsync is a first-class copy.** An out-of-band `rsync` / `cp -a` of a
+  bundle (or its payload) into the usual `<vault>/<slug>/<rev>/` layout is
+  the same as a darsay copy. The next `archive` / `assemble` /
+  `assemble --move` hashes what landed against the pin, fetches only what
+  is still missing, and rewrites transfer metadata. It does not re-download
+  a file whose digest matches.
+- **`assemble --move` shows hashing on the live transfer panel** (percent,
+  current file, rate, ETA) so an rsync-then-assemble run does not look
+  hung. Dest files already present are not recopied.
+- **`assemble --move` into a registered destination** verifies dest
+  read-only (payload stays frozen) and skeletonizes the source. `--move` of
+  a registered source is refused: rsync the finished bundle, then
+  `darsay rm` the source.
+
 ## [0.13.0] - 2026-08-30
 
 

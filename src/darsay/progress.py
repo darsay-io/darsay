@@ -392,25 +392,28 @@ def snapshot_lines(snap: dict, *, width: int = 80, color: bool = False) -> list[
         item = current[0]
         path = str(item.get("path") or "")
         phase = item.get("phase") or "download"
+        hashing = phase == "hashing"
+        prefix = "hashing " if hashing else ""
+        file_total = item.get("total")
+        file_n = int(item.get("n") or 0)
         name_budget = max(12, width - _visible_len(files) - 8)
-        if phase == "hashing":
-            detail = f"{files} · hashing {_truncate_end(path, name_budget)}"
+        if file_total:
+            file_width = _size_field_width(int(file_total))
+            file_part = (
+                f"{format_percent(min(1.0, file_n / file_total))}  "
+                f"{human_size(file_n):>{file_width}} / {human_size(int(file_total))}"
+            )
+            name_budget = max(
+                12, width - _visible_len(files) - len(file_part) - 9 - len(prefix)
+            )
+            detail = (
+                f"{files} · {prefix}{_truncate_end(path, name_budget)}  {file_part}"
+            )
         else:
-            file_total = item.get("total")
-            file_n = int(item.get("n") or 0)
-            if file_total:
-                file_width = _size_field_width(int(file_total))
-                file_part = (
-                    f"{format_percent(min(1.0, file_n / file_total))}  "
-                    f"{human_size(file_n):>{file_width}} / {human_size(int(file_total))}"
-                )
-                name_budget = max(12, width - _visible_len(files) - len(file_part) - 9)
-                detail = f"{files} · {_truncate_end(path, name_budget)}  {file_part}"
-            else:
-                detail = (
-                    f"{files} · {_truncate_end(path, name_budget)}  "
-                    f"{human_size(file_n)}"
-                )
+            detail = (
+                f"{files} · {prefix}{_truncate_end(path, name_budget)}  "
+                f"{human_size(file_n)}"
+            )
     else:
         lead = max(current, key=lambda item: int(item.get("total") or 0))
         name = _truncate_end(str(lead.get("path") or ""), max(12, width - 40))
@@ -443,6 +446,8 @@ def snapshot_log_line(snap: dict) -> str:
     files_total = int(snap.get("files_total") or 0)
     current = snap.get("current") or []
     name = current[0]["path"] if len(current) == 1 else ""
+    if len(current) == 1 and (current[0].get("phase") or "") == "hashing":
+        name = f"hashing {name}"
     if len(current) > 1:
         name = f"{len(current)} files"
     cap = snap.get("max_rate")
@@ -513,6 +518,53 @@ class TransferMeter:
         self._disk_probed_at: float | None = None
         self._last_byte_at = self.started
         self._last_done = self.verified_bytes + self.partial_bytes
+
+    def begin_hash(self, path: str, size: int | None = None) -> None:
+        """Start hashing ``path``; the panel shows hash throughput, not download."""
+        self._tls.hashed = 0
+        self.set_current(path, size, phase="hashing")
+
+    def note_hash_bytes(
+        self, path: str, n: int, total: int | None = None, *, count: bool = True
+    ) -> None:
+        """Record bytes hashed so far in the current file (chunk callback).
+
+        ``count=True`` advances the overall bar (assemble verifying dest).
+        ``count=False`` only updates the current-file line (archive hashing a
+        file it just downloaded — those bytes are already in the session).
+        """
+        prev = int(getattr(self._tls, "hashed", 0) or 0)
+        hashed = max(0, int(n))
+        self._tls.hashed = hashed
+        delta = max(0, hashed - prev)
+        with self.lock:
+            if delta and count:
+                self.session["bytes_local_sources"] = (
+                    int(self.session.get("bytes_local_sources") or 0) + delta
+                )
+            current = self._inflight.get(path) or {
+                "path": path,
+                "phase": "hashing",
+            }
+            current["n"] = hashed
+            current["phase"] = "hashing"
+            if total is not None:
+                current["size"] = total
+            self._inflight[path] = current
+        if delta:
+            self.note()
+
+    def finish_hash(self, path: str, size: int = 0) -> None:
+        """Close the current hash and count the file as done on the panel."""
+        prev = int(getattr(self._tls, "hashed", 0) or 0)
+        if size and prev < size:
+            self.note_hash_bytes(path, size, size)
+        self.clear_current(path)
+        with self.lock:
+            self.session["files_completed"] = (
+                int(self.session.get("files_completed") or 0) + 1
+            )
+        self._tls.hashed = 0
 
     def set_current(
         self, path: str, size: int | None = None, *, phase: str = "download"
@@ -681,8 +733,6 @@ class TransferMeter:
                     n = int(getattr(bar, "n", 0) or 0)
                 else:
                     n = int(info.get("n") or 0)
-                if info.get("phase") == "hashing" and total:
-                    n = int(total)
                 current.append(
                     {
                         "path": path,

@@ -39,7 +39,11 @@ want-list on the same vault. `list --json` is the script surface (paths,
 licenses). `info` / `run` / `verify` accept a path, a bundle id, or a
 unique prefix. `darsay du` is disk use of bundles and `.runtime` only
 (catalog JSON is curator data, not payload). `darsay rm` deletes a bundle.
-The vault is yours to rsync, restic, or put on a shelf.
+The vault is yours to rsync, restic, or put on a shelf. rsync is a
+first-class copy: the next `archive` / `assemble` / `assemble --move`
+verifies what landed, fetches only what is still missing, and rewrites
+metadata. It does not re-download the majority.
+[Incremental transfer](INCREMENTAL.md#1-why-this-can-beat-rsync-at-fetching--and-why-rsync-still-copies-disks).
 
 `config.toml` is operator preference, not archival fact — for example the
 free-space floor an archive pauses at, a bandwidth cap, or how long to

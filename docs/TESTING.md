@@ -46,7 +46,9 @@ These match the list in `CLAUDE.md` / `CONTRIBUTING.md`:
 - Payload bytes under `model/` (or `data/`) do not change when the tool
   rewrites metadata.
 - `transfer.json` is relocatable: no source-machine absolute paths, a copied
-  partial resumes in another vault, a copied lock is reclaimed.
+  partial resumes in another vault, a copied lock is reclaimed. An rsync
+  of payload bytes into dest, then `archive` / `assemble --move`, must not
+  re-download those bytes (hash + metadata only).
 - The same bundle state exports to a byte-identical `.mvb.tar` (marker first,
   volatile files excluded, `darsay-verify.py` always the canonical copy).
 - Manifests record what was established; unknown is `null`; query caps are

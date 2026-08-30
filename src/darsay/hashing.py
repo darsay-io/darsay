@@ -27,31 +27,40 @@ def hash_file(
     with_blake3: bool = True,
     with_git_sha1: bool = False,
     interrupt_check=None,
+    on_bytes=None,
 ) -> dict:
     """Hash one file in a single pass. Returns {"sha256": ..., "blake3": ...?, "git_sha1": ...?}.
 
     ``interrupt_check`` is called every 32 MiB; it may raise to abandon the
     hash (the file on disk is untouched and can simply be re-hashed later).
+    ``on_bytes(n, total)`` is called after every chunk so a live panel can
+    show hash throughput instead of looking hung.
     """
     sha256 = hashlib.sha256()
     b3 = _blake3.blake3() if (with_blake3 and HAVE_BLAKE3) else None
     git = None
+    total = path.stat().st_size
     if with_git_sha1:
         git = hashlib.sha1()
-        git.update(b"blob %d\0" % path.stat().st_size)
+        git.update(b"blob %d\0" % total)
 
     chunks = 0
+    seen = 0
     with open(path, "rb") as f:
         while chunk := f.read(CHUNK_SIZE):
-            if interrupt_check is not None:
-                chunks += 1
-                if chunks % 32 == 0:
-                    interrupt_check()
+            seen += len(chunk)
+            chunks += 1
+            if interrupt_check is not None and chunks % 32 == 0:
+                interrupt_check()
+            if on_bytes is not None:
+                on_bytes(seen, total)
             sha256.update(chunk)
             if b3 is not None:
                 b3.update(chunk)
             if git is not None:
                 git.update(chunk)
+    if on_bytes is not None and seen == 0:
+        on_bytes(0, total)
 
     out = {"sha256": sha256.hexdigest()}
     if b3 is not None:

@@ -73,6 +73,20 @@ def test_iter_payload_files_skips_cache_and_sorts(tmp_path):
     assert names == ["a.txt", "z.txt"]
 
 
+def test_hash_file_on_bytes_reports_chunks(tmp_path):
+    from darsay.hashing import CHUNK_SIZE
+
+    path = tmp_path / "blob.bin"
+    path.write_bytes(b"\0" * (CHUNK_SIZE + 10))
+    seen = []
+    hash_file(
+        path, with_blake3=False, on_bytes=lambda n, total: seen.append((n, total))
+    )
+    assert seen[-1] == (CHUNK_SIZE + 10, CHUNK_SIZE + 10)
+    assert seen[0][0] == CHUNK_SIZE
+    assert all(total == CHUNK_SIZE + 10 for _n, total in seen)
+
+
 def test_hash_file_interrupt_check_can_abort(tmp_path):
     from darsay.hashing import CHUNK_SIZE
 

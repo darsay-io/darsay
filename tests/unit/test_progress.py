@@ -132,6 +132,48 @@ def test_snapshot_lines_are_three_glanceable_rows():
     assert "\033[" not in joined
 
 
+def test_snapshot_lines_hashing_shows_intra_file_percent():
+    snap = {
+        "fraction": 0.4,
+        "done_bytes": 400,
+        "total_bytes": 1000,
+        "rate": 50,
+        "rate_history": [],
+        "eta_seconds": 12,
+        "stalled": False,
+        "files_done": 1,
+        "files_total": 3,
+        "elapsed": 10,
+        "current": [
+            {
+                "path": "weights.safetensors",
+                "n": 400,
+                "total": 1000,
+                "phase": "hashing",
+            }
+        ],
+    }
+    joined = "\n".join(snapshot_lines(snap, width=80, color=False))
+    assert "hashing weights.safetensors" in joined
+    assert "40.0%" in joined
+
+
+def test_meter_note_hash_bytes_advances_the_bar():
+    session = {"bytes_network": 0, "bytes_local_sources": 0, "files_completed": 0}
+    meter = _meter(session=session, total_bytes=1000, total_files=1)
+    meter.begin_hash("weights.bin", 1000)
+    meter.note_hash_bytes("weights.bin", 400, 1000)
+    snap = meter.snapshot()
+    assert snap["done_bytes"] == 400
+    assert snap["current"][0]["phase"] == "hashing"
+    assert snap["current"][0]["n"] == 400
+    meter.finish_hash("weights.bin", 1000)
+    snap = meter.snapshot()
+    assert snap["done_bytes"] == 1000
+    assert snap["files_done"] == 1
+    assert snap["current"] == []
+
+
 def test_snapshot_lines_hashing_and_budget():
     snap = {
         "fraction": 0.9,

@@ -710,8 +710,14 @@ def _verified_record(
     source: str,
     attempts: int,
     interrupt_check=None,
+    on_bytes=None,
 ) -> dict:
-    hashes = hash_file(path, with_git_sha1=True, interrupt_check=interrupt_check)
+    hashes = hash_file(
+        path,
+        with_git_sha1=True,
+        interrupt_check=interrupt_check,
+        on_bytes=on_bytes,
+    )
     return {
         "status": "verified",
         "size": path.stat().st_size,
@@ -755,12 +761,40 @@ def reconcile(
     apply: bool = True,
     rehash: bool = False,
     stop: StopController | None = None,
+    meter=None,
 ) -> dict:
-    """Reconcile ledger acceleration state with authoritative payload bytes."""
+    """Reconcile ledger acceleration state with authoritative payload bytes.
+
+    ``meter`` is an optional live ``TransferMeter`` for a hashing pass — assemble
+    uses it so a dest that already holds the bytes does not look hung.
+    """
     payload_dir.mkdir(parents=True, exist_ok=True)
     expected_by_path = {item["path"]: item for item in ledger["expected"]}
     present_by_path = dict(iter_payload_files(payload_dir))
     interrupt_check = (lambda: stop.check(session)) if stop is not None else None
+
+    def hashed_record(expected, path, source, attempts):
+        relative = expected["path"]
+        size = path.stat().st_size if path.is_file() else 0
+        on_bytes = None
+        if meter is not None:
+            meter.begin_hash(relative, size)
+
+            def on_bytes(n, total, *, _path=relative):
+                meter.note_hash_bytes(_path, n, total)
+
+        try:
+            return _verified_record(
+                expected,
+                path,
+                source,
+                attempts,
+                interrupt_check=interrupt_check,
+                on_bytes=on_bytes,
+            )
+        finally:
+            if meter is not None:
+                meter.finish_hash(relative, size)
 
     for relative in sorted(set(present_by_path) - set(expected_by_path)):
         path = present_by_path[relative]
@@ -796,12 +830,11 @@ def reconcile(
         if state.get("status") == "verified" and size_matches:
             if not rehash:
                 continue
-            record = _verified_record(
+            record = hashed_record(
                 expected,
                 path,
                 str(state.get("source") or "adopted"),
                 int(state.get("attempts") or 0),
-                interrupt_check=interrupt_check,
             )
             matches = record["verified_against_upstream"]
             if matches is None and state.get("sha256"):
@@ -846,12 +879,11 @@ def reconcile(
             if apply:
                 _discard_payload_file(path, payload_dir)
         elif path.is_file():
-            record = _verified_record(
+            record = hashed_record(
                 expected,
                 path,
                 "adopted",
                 int(state.get("attempts") or 0),
-                interrupt_check=interrupt_check,
             )
             if record["verified_against_upstream"] is not False:
                 ledger["files"][relative] = record
@@ -1396,7 +1428,7 @@ def _download_one(
             attempts += 1
             try:
                 if meter is not None:
-                    meter.set_current(relative, expected.get("size"), phase="hashing")
+                    meter.begin_hash(relative, expected.get("size"))
                 method = _copy_local_file(candidate["path"], path)
                 record = _verified_record(
                     expected,
@@ -1404,6 +1436,15 @@ def _download_one(
                     f"local:{candidate['bundle_id']}",
                     attempts,
                     interrupt_check=interrupt_check,
+                    on_bytes=(
+                        None
+                        if meter is None
+                        else (
+                            lambda n, total, p=relative: meter.note_hash_bytes(
+                                p, n, total, count=False
+                            )
+                        )
+                    ),
                 )
             except OSError as exc:
                 _discard_payload_file(path, payload_dir)
@@ -1467,9 +1508,22 @@ def _download_one(
                 events=events,
             )
             if meter is not None:
-                meter.set_current(relative, expected.get("size"), phase="hashing")
+                meter.begin_hash(relative, expected.get("size"))
             record = _verified_record(
-                expected, path, "network", attempts, interrupt_check=interrupt_check
+                expected,
+                path,
+                "network",
+                attempts,
+                interrupt_check=interrupt_check,
+                on_bytes=(
+                    None
+                    if meter is None
+                    else (
+                        lambda n, total, p=relative: meter.note_hash_bytes(
+                            p, n, total, count=False
+                        )
+                    )
+                ),
             )
             if record["verified_against_upstream"] is not False:
                 break
@@ -1792,6 +1846,40 @@ def transfer_all(
     return final
 
 
+def _registered_pin_matches(destination: Path, seed: dict) -> bool:
+    """True when a registered dest is the same pin as an incoming partial."""
+    try:
+        manifest = json.loads(
+            (destination / "manifest.json").read_text(encoding="utf-8")
+        )
+    except (OSError, json.JSONDecodeError, TypeError):
+        return False
+    source = manifest.get("source") or {}
+    return source.get("revision") == seed.get("revision") and source.get(
+        "repo_id"
+    ) == seed.get("repo_id")
+
+
+def _refuse_move_of_registered_sources(
+    sources: list[tuple[Path, dict]], destination: Path
+) -> None:
+    """A registered payload is frozen; ``--move`` must not delete it.
+
+    Relocate a finished bundle with rsync, then ``darsay rm`` the source.
+    ``assemble --move`` is the partial/skeleton verb.
+    """
+    dest_real = destination.resolve()
+    for source_dir, _ledger in sources:
+        if source_dir.resolve() == dest_real:
+            continue
+        if (source_dir / "manifest.json").is_file():
+            raise SystemExit(
+                f"error: cannot --move a registered bundle: {source_dir}\n"
+                "  a registered payload is frozen. rsync it into the other "
+                "vault, then `darsay rm` the source if you want the space."
+            )
+
+
 def _same_transfer_set(left: dict, right: dict) -> bool:
     if not all(
         left.get(key) == right.get(key)
@@ -1992,6 +2080,83 @@ def _release_sources(
                     )
 
 
+def _files_to_hash(
+    payload_dir: Path, ledger: dict, *, rehash: bool
+) -> list[tuple[str, int]]:
+    """Payload files this reconcile pass will actually hash."""
+    expected = {item["path"] for item in ledger["expected"]}
+    files = []
+    for relative, path in iter_payload_files(payload_dir):
+        if relative not in expected:
+            continue
+        state = ledger["files"].get(relative) or {}
+        if state.get("status") == "verified" and not rehash:
+            continue
+        if state.get("status") == "moved" and not path.is_file():
+            continue
+        files.append((relative, path.stat().st_size))
+    return files
+
+
+def _reconcile_visible(
+    destination: Path,
+    destination_payload: Path,
+    ledger: dict,
+    session: dict,
+    progress,
+    *,
+    apply: bool,
+    rehash: bool,
+) -> dict:
+    """Reconcile dest with a live panel when dest already holds bytes to hash."""
+    from .progress import TransferDisplay, TransferMeter
+    from .readme_gen import human_size
+
+    targets = _files_to_hash(destination_payload, ledger, rehash=rehash)
+    total = sum(size for _path, size in targets)
+    if not targets:
+        return reconcile(
+            destination,
+            destination_payload,
+            ledger,
+            session,
+            progress=progress,
+            apply=apply,
+            rehash=rehash,
+        )
+
+    hash_session = {
+        "bytes_network": 0,
+        "bytes_local_sources": 0,
+        "files_completed": 0,
+    }
+    meter = TransferMeter(
+        total_bytes=total,
+        total_files=len(targets),
+        verified_bytes=0,
+        verified_files=0,
+        partial_bytes=0,
+        session=hash_session,
+        disk_path=destination,
+    )
+    display = TransferDisplay(meter, progress=progress)
+    with _live_transfer(display) as emit:
+        emit(
+            f"Hashing {len(targets)} files already at the destination "
+            f"({human_size(total)}) against the pin — not downloading."
+        )
+        return reconcile(
+            destination,
+            destination_payload,
+            ledger,
+            session,
+            progress=emit,
+            apply=apply,
+            rehash=rehash,
+            meter=meter,
+        )
+
+
 def assemble_partials(
     partials: list[Path],
     vault: Path,
@@ -2006,11 +2171,19 @@ def assemble_partials(
     the recorded hashes stay behind, the payload bytes do not, so the source
     machine can go on to fetch the *other* half without re-downloading what
     it already handed over. A source left with nothing to fetch is removed.
+
+    An out-of-band copy (``rsync``, ``cp -a``) of the partial into the
+    destination is the same as this function's copy step: files dest already
+    holds are not recopied, they are re-hashed against the pin, and
+    ``move=True`` then skeletonizes the source. A destination that is already
+    *registered* is frozen — without ``--move`` that is an error; with
+    ``--move`` dest is verified read-only and the source is skeletonized.
     """
     import copy
 
     from .archiver import bundle_dir_for
     from .config import free_space_floor
+    from .readme_gen import human_size
     from .schema import payload_root_for
     from .sources import source_from_ledger
 
@@ -2041,9 +2214,14 @@ def assemble_partials(
     root = payload_root_for(seed["repo_type"])
     destination_payload = destination / root
     expected_paths = {item["path"] for item in seed["expected"]}
+    dest_registered = (destination / "manifest.json").is_file()
 
+    if move:
+        _refuse_move_of_registered_sources(sources, destination)
+
+    progress(f"Assembling into {destination}")
     with transfer_lock(destination, progress=progress):
-        if (destination / "manifest.json").is_file():
+        if dest_registered and not move:
             raise SystemExit(
                 f"error: destination is already a registered bundle: {destination}"
             )
@@ -2053,12 +2231,57 @@ def assemble_partials(
                 raise SystemExit(
                     f"error: destination partial has a different transfer set: {destination}"
                 )
+        elif dest_registered:
+            if not _registered_pin_matches(destination, seed):
+                raise SystemExit(
+                    f"error: destination is a registered bundle of a different "
+                    f"pin: {destination}"
+                )
+            ledger = copy.deepcopy(seed)
+            ledger["files"] = {}
+            ledger["sessions"] = []
+            ledger["events"] = []
         else:
             ledger = copy.deepcopy(seed)
             ledger["files"] = {}
             ledger["sessions"] = []
             ledger["events"] = []
             save_ledger(destination, ledger)
+
+        if dest_registered:
+            # rsync (or archive) already produced the museum copy. Payload is
+            # frozen: hash dest against the pin with apply=False, copy
+            # nothing, then skeletonize sources. Dest metadata is not rewritten.
+            progress(
+                "Destination is already registered; verifying its payload "
+                "against the pin (no recopy, no download)."
+            )
+            session = {"files_completed": 0, "bytes_adopted": 0, "bytes_network": 0}
+            work = copy.deepcopy(ledger)
+            _reconcile_visible(
+                destination,
+                destination_payload,
+                work,
+                session,
+                progress,
+                apply=False,
+                rehash=True,
+            )
+            progress(
+                "Destination verified against the pin. Releasing source payload files..."
+            )
+            _release_sources(sources, destination, work, root, progress)
+            plan = add_disk_preflight(
+                destination,
+                transfer_plan(destination_payload, work),
+                min_free=free_space_floor(vault),
+            )
+            progress(
+                "Destination already registered; copied 0 payload files "
+                "(verified against the pin)"
+            )
+            print_plan(plan, progress=progress)
+            return destination, plan
 
         session = begin_session(destination, ledger)
         session["assembly_sources"] = len(sources)
@@ -2069,12 +2292,15 @@ def assemble_partials(
         try:
             # Validate anything already present in the destination before it
             # suppresses a good copy from one of the incoming partials.
-            plan = reconcile(
+            # An rsync/cp -a into dest is this path: exists() skips the copy,
+            # rehash verifies the landed bytes against the pin.
+            plan = _reconcile_visible(
                 destination,
                 destination_payload,
                 ledger,
                 session,
-                progress=progress,
+                progress,
+                apply=True,
                 rehash=True,
             )
             for ordinal, (source_dir, source_ledger) in enumerate(sources, 1):
@@ -2086,6 +2312,9 @@ def assemble_partials(
                     destination_file = _payload_path(destination_payload, relative)
                     if destination_file.exists():
                         continue
+                    progress(
+                        f"Copying {relative} ({human_size(source_file.stat().st_size)})..."
+                    )
                     _copy_local_file(source_file, destination_file)
                     copied_payload_files += 1
 
@@ -2097,12 +2326,14 @@ def assemble_partials(
                     "assembled_partial",
                     f"merged cooperative input {ordinal}/{len(sources)} from {host_note}",
                 )
-                plan = reconcile(
+                plan = _reconcile_visible(
                     destination,
                     destination_payload,
                     ledger,
                     session,
-                    progress=progress,
+                    progress,
+                    apply=True,
+                    rehash=False,
                 )
 
             copied_cache_files, copied_partial_bytes = _merge_transfer_caches(
@@ -2111,6 +2342,10 @@ def assemble_partials(
             )
 
             if move:
+                progress(
+                    "Destination verified against the pin. "
+                    "Releasing source payload files..."
+                )
                 _release_sources(sources, destination, ledger, root, progress)
 
             finish_session(destination, ledger, session, "assemble")
@@ -2125,10 +2360,17 @@ def assemble_partials(
             transfer_plan(destination_payload, ledger),
             min_free=free_space_floor(vault),
         )
-        progress(
-            f"Assembled {copied_payload_files} payload files and {copied_cache_files} cache files "
-            f"({copied_partial_bytes} partial bytes copied)"
-        )
+        if copied_payload_files == 0 and copied_cache_files == 0:
+            progress(
+                "Destination already held the payload; copied 0 files "
+                "(verified against the pin)"
+            )
+        else:
+            progress(
+                f"Assembled {copied_payload_files} payload files and "
+                f"{copied_cache_files} cache files "
+                f"({copied_partial_bytes} partial bytes copied)"
+            )
         print_plan(plan, progress=progress)
         return destination, plan
 

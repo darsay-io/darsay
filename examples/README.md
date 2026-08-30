@@ -27,6 +27,7 @@ This page is the cookbook you return to.
 | Split a download with a friend | [Cooperative shards](#split-a-download-across-machines) |
 | Fetch a model in halves across two disks | [Archive in halves](#archive-in-halves-across-two-disks) |
 | Move a half-finished archive to another disk | [Relocate a partial](#move-a-partial-bundle) |
+| rsync bytes, then let darsay verify | [rsync then darsay](#rsync-then-darsay) |
 | Write curator notes | [Curation](#write-curator-notes) |
 | Curate a want-list and share it | [Share a catalog](#share-a-catalog) |
 | Prove the bytes have not drifted | [Verify](#verify-on-a-schedule) |
@@ -414,6 +415,29 @@ darsay --vault /mnt/other/vault archive Qwen/Qwen3.8-27B
 The pin is unchanged. Completed files are adopted. The longest Range
 partial continues. The ledger holds no source-machine absolute paths, so
 this works across laptops.
+
+---
+
+## rsync then darsay
+
+rsync is a first-class copy. The next darsay command hashes what landed
+against the pin, fetches only the remainder, and rewrites metadata. It
+does not re-download the majority. Put the bundle at
+`<vault>/<slug>/<rev>/`, not at the vault root.
+
+```bash
+# resume a partial on the other disk
+rsync -a ~/darsay/qwen--qwen3.8-27b/<rev>/ /Volumes/big/qwen--qwen3.8-27b/<rev>/
+darsay --vault /Volumes/big archive Qwen/Qwen3.8-27B
+
+# or free the laptop after the copy (verify dest, delete source payload)
+darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
+```
+
+`assemble --move` shows hashing on the live panel — percent, the file
+now in flight, rate, ETA — so a 50 GB dest does not look hung. A
+registered payload is frozen: rsync it, `darsay verify` dest, then
+`darsay rm` the source. `--move` is the verb for partials.
 
 ---
 

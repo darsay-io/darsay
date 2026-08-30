@@ -194,8 +194,15 @@ def test_copied_partial_resumes_in_another_vault(vault, test_provider, tmp_path)
             }
         )
     )
+    already = [
+        path
+        for path, state in load_ledger(dest)["files"].items()
+        if state.get("status") == "verified"
+    ]
+    test_provider.downloads.clear()
     bundle = archive_quiet("test:acme/toy", vault=other_vault)
     assert (bundle / "manifest.json").is_file()
+    assert not set(already) & set(test_provider.downloads)
 
 
 def test_sibling_blob_reuse_skips_network(vault, test_provider):
@@ -706,3 +713,69 @@ def test_assemble_move_after_rsync_copies_nothing_and_skeletonizes_source(
         assert src_ledger["files"][path]["status"] == "moved"
         assert not (source / "model" / path).exists()
         assert (dest / "model" / path).read_bytes() == dest_bytes_before[path]
+
+
+def test_assemble_after_rsync_reports_hashing_not_a_hang(
+    vault, test_provider, tmp_path, monkeypatch
+):
+    """After rsync, assemble --move must say it is hashing dest, with a panel."""
+    monkeypatch.setenv("DARSAY_PROGRESS", "line")
+    files = model_files(param_shape=[64, 64])
+    test_provider.add_repo("acme/big", files)
+    laptop = tmp_path / "laptop"
+    laptop.mkdir()
+    source = _archive_half("test:acme/big", vault=laptop)
+    _plant_bundle_in_vault(source, vault)
+
+    logs: list[str] = []
+    assemble_partials([source], vault, progress=logs.append, move=True)
+    text = "\n".join(str(item) for item in logs)
+    assert "Assembling into" in text
+    assert "Hashing" in text and "already at the destination" in text
+    assert "not downloading" in text
+    assert "Releasing source payload files" in text
+
+
+def test_assemble_move_into_registered_dest_does_not_mutate_payload(
+    vault, test_provider, tmp_path
+):
+    """rsync a half, dest finishes and registers, then --move skeletonizes source."""
+    files = model_files(param_shape=[64, 64])
+    test_provider.add_repo("acme/big", files)
+    laptop = tmp_path / "laptop"
+    laptop.mkdir()
+    source = _archive_half("test:acme/big", vault=laptop)
+    dest = _plant_bundle_in_vault(source, vault)
+    verified = {
+        path
+        for path, state in load_ledger(source)["files"].items()
+        if state.get("status") == "verified"
+    }
+    dest_bytes = {path: (dest / "model" / path).read_bytes() for path in verified}
+
+    test_provider.downloads.clear()
+    registered = archive_quiet("test:acme/big", vault=vault)
+    assert (registered / "manifest.json").is_file()
+    downloads_after_register = list(test_provider.downloads)
+
+    dest, _plan = assemble_partials([source], vault, progress=silent, move=True)
+    assert (dest / "manifest.json").is_file()
+    for path in verified:
+        assert (dest / "model" / path).read_bytes() == dest_bytes[path]
+        assert load_ledger(source)["files"][path]["status"] == "moved"
+        assert not (source / "model" / path).exists()
+    assert test_provider.downloads == downloads_after_register
+
+
+def test_assemble_move_refuses_registered_source(vault, test_provider, tmp_path):
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    source = archive_quiet("test:acme/toy", vault=vault)
+    other = tmp_path / "other"
+    other.mkdir()
+    with pytest.raises(SystemExit, match="cannot --move a registered bundle"):
+        assemble_partials([source], other, progress=silent, move=True)
+    assert (source / "manifest.json").is_file()
+    assert (source / "model" / "config.json").is_file() or any(
+        (source / "model").rglob("*")
+    )

@@ -1058,6 +1058,14 @@ def cmd_assemble(args) -> int:
         _vault_path(args, announce=True),
         move=args.move,
     )
+    if (bundle / "manifest.json").is_file():
+        print(f"\nDestination is already a registered bundle: {bundle}")
+        if args.move:
+            print(
+                "Source files dest re-hashed against the pin were released "
+                "(the source is a skeleton, or was removed if nothing remained)."
+            )
+        return 0
     ledger = json.loads((bundle / "transfer.json").read_text(encoding="utf-8"))
     from .sources import source_from_ledger
 
@@ -1581,8 +1589,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--move",
         action="store_true",
         help=(
-            "after verifying, delete each source's copied bytes and mark them "
-            "moved (leave a skeleton the source can keep fetching into)"
+            "after dest re-hashes a file against the pin, delete the source "
+            "copy and mark it moved (rsync first is fine: dest files already "
+            "present are hashed, not recopied)"
         ),
     )
     p.set_defaults(func=cmd_assemble)

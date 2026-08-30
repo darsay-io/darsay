@@ -55,7 +55,11 @@ The short list that must not break:
 
 - Nothing under a bundle's payload root is modified after archiving.
 - `transfer.json` is disposable; full files and bundle-local partials are
-  the portable state. No absolute host paths in the ledger.
+  the portable state. No absolute host paths in the ledger. rsync into a
+  vault is a first-class copy: the next command verifies and fetches only
+  the remainder.
+- Assemble hashing dest bytes after an out-of-band copy must show live
+  progress (percent, current file, ETA) — never a silent hang.
 - The same bundle state must export to a byte-identical `.mvb.tar`.
 - Manifests record what was established; unknown is `null`.
 - `import` re-hashes before registering; failures write nothing.
