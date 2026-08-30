@@ -440,7 +440,7 @@ def test_preflight_confirm_declined_pauses_before_any_byte(
     assert ledger["sessions"][-1]["end_reason"] == "disk"
     text = "\n".join(logs)
     assert "WARNING: disk preflight is insufficient" in text
-    assert "the transfer will pause after about 1 B more (0 of" in text
+    assert "  after about 1 B more (0 of" in text
     assert "then re-run to continue" in text
 
     # Accepting (and, here, freeing space) lets the same command finish.

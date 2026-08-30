@@ -186,7 +186,7 @@ def human_eta(seconds: float | None, *, stalled: bool = False) -> str:
     if seconds < 1.5:
         return "almost done"
     if seconds > _ETA_MAX_S:
-        return "> 30 days left"
+        return f"> {int(_ETA_MAX_S // 86400)} days left"
     return f"{human_duration(seconds)} left"
 
 
@@ -507,7 +507,8 @@ class TransferMeter:
         self._ema: float | None = None
         self._eta_points: deque[tuple[float, int]] = deque(maxlen=_ETA_POINTS)
         self._last_eta_point: float | None = None
-        self._retry: dict | None = None
+        # Transport retries since the last byte arrived.
+        self._retries = 0
         self._disk_free: int | None = None
         self._disk_probed_at: float | None = None
         self._last_byte_at = self.started
@@ -564,7 +565,7 @@ class TransferMeter:
                 self._last_byte_at = now
                 self._last_done = done
                 # Bytes arriving end whatever retry was under way.
-                self._retry = None
+                self._retries = 0
             self._samples.append((now, done))
             cutoff = now - _SAMPLE_WINDOW_S
             while self._samples and self._samples[0][0] < cutoff:
@@ -598,17 +599,14 @@ class TransferMeter:
             return min(self.total_bytes, done)
         return done
 
-    def note_retry(self, reason: str | None = None) -> None:
+    def note_retry(self) -> None:
         """The transport is retrying on its own (a cut stream being resumed).
 
         Counts up until bytes arrive again; the panel shows ``retrying``
         with the count and how long it has been since the last byte.
         """
         with self.lock:
-            if self._retry is None:
-                self._retry = {"count": 0, "reason": None}
-            self._retry["count"] += 1
-            self._retry["reason"] = reason
+            self._retries += 1
 
     def _window_rate_locked(self, now: float) -> float | None:
         if len(self._samples) < 2:
@@ -662,12 +660,8 @@ class TransferMeter:
             else:
                 eta = self._held_eta
             retry = None
-            if self._retry is not None and remaining > 0:
-                retry = {
-                    "count": self._retry["count"],
-                    "reason": self._retry.get("reason"),
-                    "since": max(0.0, quiet_for),
-                }
+            if self._retries and remaining > 0:
+                retry = {"count": self._retries, "since": max(0.0, quiet_for)}
             disk_free = self._disk_free_locked(now)
             disk_short = disk_free is not None and remaining > max(
                 0, disk_free - self.disk_floor

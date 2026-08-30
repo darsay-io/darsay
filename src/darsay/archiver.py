@@ -26,7 +26,6 @@ import re
 import shutil
 import socket
 from datetime import datetime, timezone
-from errno import ENOSPC
 from pathlib import Path
 
 from . import SCHEMA_VERSION, __version__
@@ -219,6 +218,7 @@ def archive(
         StopController,
         add_disk_preflight,
         begin_session,
+        disk_outlook,
         find_resume,
         finish_session,
         load_ledger,
@@ -337,7 +337,8 @@ def archive(
             if shard is not None:
                 print_shard_plan(ledger, shard, progress=progress)
             if plan["disk"]["verdict"] == "insufficient":
-                _warn_insufficient(plan, dry_ledger, payload_dir, floor, cap, progress)
+                for line in disk_outlook(plan, dry_ledger, payload_dir, max_rate=cap):
+                    progress(line)
             return None
 
         stop_controller = StopController(
@@ -365,7 +366,8 @@ def archive(
                 if shard is not None:
                     print_shard_plan(ledger, shard, progress=progress)
                 if plan["disk"]["verdict"] == "insufficient":
-                    _warn_insufficient(plan, ledger, payload_dir, floor, cap, progress)
+                    for line in disk_outlook(plan, ledger, payload_dir, max_rate=cap):
+                        progress(line)
                     if confirm is not None and not confirm("Continue anyway? [Y/n] "):
                         disk = plan["disk"]
                         usable = max(
@@ -416,14 +418,7 @@ def archive(
                     session_finished = True
                     return _register_bundle(bundle_dir, payload_dir, ledger, progress)
                 session["stop_detail"] = detail
-                try:
-                    finish_session(bundle_dir, ledger, session, reason)
-                except OSError as exc:
-                    # A full disk can refuse the ledger too. The payload and
-                    # partials are authoritative; the next run re-derives
-                    # what this write would have recorded.
-                    if reason != "disk" or getattr(exc, "errno", None) != ENOSPC:
-                        raise
+                if not finish_session(bundle_dir, ledger, session, reason):
                     detail += (
                         "; the transfer ledger could not be updated — the next "
                         "run reconciles the payload"
@@ -445,22 +440,6 @@ def archive(
                 if not session_finished:
                     finish_session(bundle_dir, ledger, session, "error")
                 raise
-
-
-def _warn_insufficient(
-    plan: dict, ledger: dict, payload_dir: Path, floor, cap, progress
-) -> None:
-    """Say, before the first byte, where an insufficient transfer will stop."""
-    from .transfer import disk_outlook
-
-    outcome = (
-        "the transfer will pause at the free-space floor"
-        if floor
-        else "the transfer will pause when the disk fills"
-    )
-    progress(f"WARNING: disk preflight is insufficient; {outcome}")
-    for line in disk_outlook(plan, ledger, payload_dir, max_rate=cap):
-        progress(line)
 
 
 def archive_model(

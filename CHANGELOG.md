@@ -23,11 +23,12 @@ Tool version (`darsay.__version__`) is independent of
   per-file "Not enough free disk space" `UserWarning` (two of them, three
   lines each, per shard) is gone with it.
 - **The preflight says where it will stop, and asks** — an insufficient
-  plan now continues: `the transfer will pause after about 381.4 GiB more
-  (67 of 140 remaining files), roughly 9h at 12.3 MiB/s.` (the pace is
-  the rate cap or the ledger's earlier sessions, whichever is slower) and
-  `Free space (or move the vault to a larger disk), then re-run to
-  continue.` On a terminal `archive` then asks `Continue anyway? [Y/n]`;
+  plan's warning now continues: `the transfer will pause at the
+  free-space floor / after about 381.4 GiB more (67 of 140 remaining
+  files), roughly 9h at 12.3 MiB/s.` (the pace is the rate cap or the
+  ledger's earlier sessions, whichever is slower) and `Free space (or
+  move the vault to a larger disk), then re-run to continue.` On a
+  terminal `archive` then asks `Continue anyway? [Y/n]`;
   Enter proceeds, `n` pauses cleanly before any byte moves (exit 10,
   `end_reason: "disk"`). `--yes` / `-y` skips the question; pipes and cron
   never see it.

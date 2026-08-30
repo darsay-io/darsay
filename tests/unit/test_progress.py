@@ -873,9 +873,9 @@ def test_meter_retry_state_shows_until_bytes_arrive(monkeypatch):
         meter.note()
     assert meter.snapshot()["retry"] is None
     clock.t = 17.0
-    meter.note_retry("timed out")
+    meter.note_retry()
     snap = meter.snapshot()
-    assert snap["retry"] == {"count": 1, "reason": "timed out", "since": 12.0}
+    assert snap["retry"] == {"count": 1, "since": 12.0}
     assert status_text(snap) == "retrying"
     line = snapshot_lines(snap, width=90, color=False)[1]
     assert "retrying" in line
@@ -886,7 +886,7 @@ def test_meter_retry_state_shows_until_bytes_arrive(monkeypatch):
     log = snapshot_log_line(snap)
     assert "retrying" in log and "retry 1 · 12s without bytes" in log
     clock.t = 28.0
-    meter.note_retry("timed out")
+    meter.note_retry()
     assert meter.snapshot()["retry"]["count"] == 2
     # The first byte back ends the retry state; the ETA slot returns.
     clock.t = 29.0
@@ -896,7 +896,7 @@ def test_meter_retry_state_shows_until_bytes_arrive(monkeypatch):
     assert after["retry"] is None
     assert "retry" not in snapshot_lines(after, width=90, color=False)[1]
     # Never over the outage story: offline owns the slot and the tail.
-    meter.note_retry("boom")
+    meter.note_retry()
     both = {**meter.snapshot(), "link": {"state": "offline", "since": 3.0}}
     assert status_text(both) == "offline"
     tail = snapshot_lines(both, width=90, color=False)[1]

@@ -663,7 +663,6 @@ def test_cli_dry_run_prints_the_disk_outlook(vault, test_provider, capsys, monke
     assert "INSUFFICIENT" in out
     assert "the transfer will pause at the free-space floor" in out
     assert (
-        f"the transfer will pause after about {smallest} B more (1 of {len(files)} remaining files)."
-        in out
+        f"  after about {smallest} B more (1 of {len(files)} remaining files)." in out
     )
     assert "then re-run to continue" in out

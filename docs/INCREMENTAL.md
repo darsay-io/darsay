@@ -237,7 +237,7 @@ Bundle-root, machine-local, excluded from `.mvb.tar` exports exactly like
   },
   "sessions": [
     {"started": "…", "ended": "…", "end_reason": "budget",
-     "tool": "darsay 0.12.0",
+     "tool": "darsay …",
      "bytes_network": 10737418240, "bytes_adopted": 0,
      "bytes_local_sources": 4966786096, "retries": 0, "reconnects": 1,
      "files_completed": 3, "host": "…", "shard": "1/3"}
@@ -405,7 +405,7 @@ pauses cleanly rather than cross it:
 
   ```text
   WARNING: disk preflight is insufficient; the transfer will pause at the free-space floor
-    the transfer will pause after about 381.4 GiB more (67 of 140 remaining files), roughly 9h at 12.3 MiB/s.
+    after about 381.4 GiB more (67 of 140 remaining files), roughly 9h at 12.3 MiB/s.
     Free space (or move the vault to a larger disk), then re-run to continue.
   Continue anyway? [Y/n]
   ```

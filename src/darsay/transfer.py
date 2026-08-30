@@ -660,10 +660,22 @@ def begin_session(
     return session
 
 
-def finish_session(bundle_dir: Path, ledger: dict, session: dict, reason: str) -> None:
+def finish_session(bundle_dir: Path, ledger: dict, session: dict, reason: str) -> bool:
+    """Close the session record; return whether the ledger was written.
+
+    A ``disk`` pause must not become an error because its own bookkeeping
+    hit the full disk: that one write failure is tolerated (``False``), and
+    the next run re-derives the record from the payload.
+    """
     session["ended"] = _utc_now()
     session["end_reason"] = reason
-    save_ledger(bundle_dir, ledger)
+    try:
+        save_ledger(bundle_dir, ledger)
+    except OSError as exc:
+        if reason != "disk" or not _disk_full(exc):
+            raise
+        return False
+    return True
 
 
 def record_event(ledger: dict, path: str | None, event: str, detail: str) -> None:
@@ -990,25 +1002,25 @@ def session_rate(ledger: dict) -> float | None:
 def disk_outlook(
     plan: dict, ledger: dict, payload_dir: Path, max_rate: int | None = None
 ) -> list[str]:
-    """Where an insufficient transfer will pause, as plan-block lines.
+    """The plan block's warning for a transfer the disk cannot hold.
 
-    Says how many more bytes and files land before the floor, and — when a
-    rate cap or an earlier session gives a pace — roughly how long that
-    takes, so an operator can decide now rather than ten hours in.
+    Says where it will pause — how many more bytes and files land before
+    the floor, and roughly how long that takes when a rate cap or an
+    earlier session gives a pace — so an operator can decide now rather
+    than ten hours in.
     """
     from .progress import human_duration, human_rate
     from .readme_gen import human_size
 
     disk = plan["disk"]
-    usable = max(0, int(disk["free_bytes"]) - int(disk.get("min_free_bytes") or 0))
+    floor = int(disk.get("min_free_bytes") or 0)
+    usable = max(0, int(disk["free_bytes"]) - floor)
     pending = int(plan["files"]["partial"]) + int(plan["files"]["missing"])
     fits = 0
     budget = usable
-    # Transfer order is smallest first (``transfer_groups``); once a file
-    # does not fit, nothing after it does either.
-    for expected in sorted(
-        ledger["expected"], key=lambda item: (item.get("size") or 0, item["path"])
-    ):
+    # The transfer order, smallest first: once a file does not fit, nothing
+    # after it does either.
+    for expected in transfer_groups(ledger["expected"])[0][1]:
         state = ledger["files"].get(expected["path"]) or {}
         if state.get("status") == "verified":
             continue
@@ -1019,13 +1031,15 @@ def disk_outlook(
         budget -= need
         fits += 1
     when = ""
-    paces = [rate for rate in (max_rate, session_rate(ledger)) if rate]
+    paces = [pace for pace in (max_rate, session_rate(ledger)) if pace]
     if paces and usable:
         pace = min(paces)
         when = f", roughly {human_duration(usable / pace)} at {human_rate(pace)}"
+    where = "at the free-space floor" if floor else "when the disk fills"
     lines = [
-        f"  the transfer will pause after about {human_size(usable)} more "
-        f"({fits} of {pending} remaining files){when}."
+        f"WARNING: disk preflight is insufficient; the transfer will pause {where}",
+        f"  after about {human_size(usable)} more "
+        f"({fits} of {pending} remaining files){when}.",
     ]
     if fits < pending:
         lines.append(
@@ -1175,17 +1189,20 @@ def _disk_full(exc: BaseException) -> bool:
     )
 
 
-def _disk_full_stop(stop_controller: StopController | None, relative: str) -> CleanStop:
+def _disk_stop(stop_controller: StopController | None, detail: str) -> CleanStop:
     """The clean pause for ENOSPC — the same ``disk`` stop the floor raises.
 
-    A full disk is a pause, not an error: the partial on disk is intact and
-    the same command resumes it. Tripping the controller stops the other
+    A full disk is a pause, not an error: the bytes on disk are intact and
+    the same command resumes them. Tripping the controller stops the other
     workers too, since none of them can write either.
     """
-    detail = f"destination is full — no space left on device while writing {relative}"
     if stop_controller is not None:
         return stop_controller.stop_for_disk(detail)
     return CleanStop("disk", detail)
+
+
+def _full_while_writing(relative: str) -> str:
+    return f"destination is full — no space left on device while writing {relative}"
 
 
 def _wait_for_link(
@@ -1261,7 +1278,9 @@ def _fetch_with_reconnect(
             if counter.pending_stop is not None:
                 raise counter.pending_stop from None
             if _disk_full(exc):
-                raise _disk_full_stop(counter.stop_controller, relative) from exc
+                raise _disk_stop(
+                    counter.stop_controller, _full_while_writing(relative)
+                ) from exc
             reason = None
             if link is not None and isinstance(exc, Exception):
                 reason = provider.transient_network_error(exc)
@@ -1340,7 +1359,9 @@ def _download_one(
             except OSError as exc:
                 _discard_payload_file(path, payload_dir)
                 if _disk_full(exc):
-                    raise _disk_full_stop(stop_controller, relative) from exc
+                    raise _disk_stop(
+                        stop_controller, _full_while_writing(relative)
+                    ) from exc
                 events.append(
                     {
                         "at": _utc_now(),
@@ -1501,7 +1522,11 @@ def local_source_index(bundle_dir: Path, ledger: dict) -> dict[str, list[dict]]:
 
 
 def _record_download_result(
-    bundle_dir: Path, ledger: dict, session: dict, result: dict
+    bundle_dir: Path,
+    ledger: dict,
+    session: dict,
+    result: dict,
+    stop_controller: StopController | None = None,
 ) -> None:
     """Main-thread commit point for a worker's completed file."""
     ledger["events"].extend(result["events"])
@@ -1515,8 +1540,8 @@ def _record_download_result(
         if not _disk_full(exc):
             raise
         # The verified file is on disk; reconciliation re-derives its entry.
-        raise CleanStop(
-            "disk",
+        raise _disk_stop(
+            stop_controller,
             "destination is full — the transfer ledger could not be written "
             f"after {result['path']}",
         ) from exc
@@ -1584,7 +1609,9 @@ def _transfer_small_files(
                     progress(
                         f"Verified {expected['path']} ({result['record']['size']} bytes){suffix}"
                     )
-                _record_download_result(bundle_dir, ledger, session, result)
+                _record_download_result(
+                    bundle_dir, ledger, session, result, stop_controller
+                )
                 if meter is not None:
                     meter.note()
                 if stop_controller is not None:
@@ -1693,7 +1720,9 @@ def transfer_all(
                     local_sources,
                     meter,
                 )
-                _record_download_result(bundle_dir, ledger, session, result)
+                _record_download_result(
+                    bundle_dir, ledger, session, result, stop_controller
+                )
                 meter.note()
                 if stop_controller is not None:
                     stop_controller.check(session)

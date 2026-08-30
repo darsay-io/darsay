@@ -343,8 +343,13 @@ def test_retry_chatter_becomes_a_panel_state(tmp_path):
 
     from darsay.providers.huggingface import HuggingFaceProvider, _RetryChatterFilter
 
-    seen: list = []
-    chatter = _RetryChatterFilter(on_retry=seen.append)
+    retries = 0
+
+    def on_retry():
+        nonlocal retries
+        retries += 1
+
+    chatter = _RetryChatterFilter(on_retry=on_retry)
     resume = _hub_record(
         "Error while downloading from %s: %s\nTrying to resume download...",
         "https://cas-bridge.xethub.hf.co/x?X-Xet-Signed-Range=bytes%3D0-1",
@@ -358,9 +363,9 @@ def test_retry_chatter_becomes_a_panel_state(tmp_path):
     )
     assert chatter.filter(gave_up) is False
     assert chatter.filter(_hub_record("Rate limited. Waiting 3s before retry")) is True
-    assert seen == ["timed out", "boom"]
+    assert retries == 2
 
-    def broken(_reason):
+    def broken():
         raise RuntimeError("panel gone")
 
     # A failing callback never breaks the transport's logging.
@@ -371,11 +376,11 @@ def test_retry_chatter_becomes_a_panel_state(tmp_path):
     hub_logger = logging.getLogger("huggingface_hub")
     handler = logging.Handler()
     hub_logger.addHandler(handler)
-    seen.clear()
+    retries = 0
     try:
-        with HuggingFaceProvider().transfer_session(tmp_path, on_retry=seen.append):
+        with HuggingFaceProvider().transfer_session(tmp_path, on_retry=on_retry):
             assert not handler.filter(resume)
-        assert seen == ["timed out"]
+        assert retries == 1
     finally:
         hub_logger.removeHandler(handler)
 

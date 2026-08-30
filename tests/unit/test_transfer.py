@@ -646,7 +646,7 @@ def test_stop_controller_headroom_pauses_before_a_file_that_cannot_fit(
 def test_disk_full_is_recognised_through_the_cause_chain():
     import errno
 
-    from darsay.transfer import _disk_full, _disk_full_stop
+    from darsay.transfer import _disk_full, _disk_stop, _full_while_writing
 
     full = OSError(errno.ENOSPC, "No space left on device")
     assert _disk_full(full)
@@ -657,11 +657,13 @@ def test_disk_full_is_recognised_through_the_cause_chain():
     assert not _disk_full(ValueError("nope"))
 
     ctrl = StopController(min_free_bytes=1, disk_path=None)
-    stop = _disk_full_stop(ctrl, "weights.bin")
+    stop = _disk_stop(ctrl, _full_while_writing("weights.bin"))
     assert stop.reason == "disk"
     assert "no space left on device while writing weights.bin" in stop.detail
     assert ctrl.wants_stop()
-    assert _disk_full_stop(None, "w.bin").reason == "disk"
+    # Sticky: the first detail wins for every worker after it.
+    assert _disk_stop(ctrl, "later") is stop
+    assert _disk_stop(None, "w.bin is stuck").reason == "disk"
 
 
 def test_fetch_with_reconnect_turns_enospc_into_a_disk_pause(tmp_path):
@@ -721,13 +723,35 @@ def test_record_download_result_treats_a_full_disk_as_a_pause(monkeypatch, tmp_p
         "events": [],
         "retries": 0,
     }
+    ctrl = StopController(min_free_bytes=1, disk_path=None)
     with pytest.raises(CleanStop) as stop:
-        _record_download_result(tmp_path, ledger, session, result)
+        _record_download_result(tmp_path, ledger, session, result, ctrl)
     assert stop.value.reason == "disk"
     assert "ledger could not be written after a.bin" in stop.value.detail
+    assert ctrl.wants_stop()
     # The in-memory state is already committed; reconciliation re-derives
     # it on disk next run.
     assert ledger["files"]["a.bin"]["status"] == "verified"
+
+
+def test_finish_session_tolerates_a_full_disk_only_for_a_disk_pause(
+    monkeypatch, tmp_path
+):
+    import errno
+
+    from darsay.transfer import finish_session
+
+    def full(_bundle_dir, _ledger):
+        raise OSError(errno.ENOSPC, "No space left on device")
+
+    monkeypatch.setattr("darsay.transfer.save_ledger", full)
+    session = {"ended": None, "end_reason": None}
+    assert finish_session(tmp_path, {}, session, "disk") is False
+    assert session["end_reason"] == "disk" and session["ended"]
+    with pytest.raises(OSError):
+        finish_session(tmp_path, {}, session, "budget")
+    monkeypatch.setattr("darsay.transfer.save_ledger", lambda _b, _l: None)
+    assert finish_session(tmp_path, {}, session, "disk") is True
 
 
 def test_live_transfer_reports_how_it_ended():
@@ -840,21 +864,27 @@ def test_disk_outlook_counts_the_files_that_fit_and_prices_the_wait(tmp_path):
     # 7 GiB usable above the floor: a.bin and b.bin land, c.bin does not.
     lines = disk_outlook(plan, ledger, tmp_path)
     assert lines == [
-        "  the transfer will pause after about 7.0 GiB more "
-        "(2 of 3 remaining files), roughly 1h 59 min at 1.0 MiB/s.",
+        "WARNING: disk preflight is insufficient; the transfer will pause "
+        "at the free-space floor",
+        "  after about 7.0 GiB more (2 of 3 remaining files), "
+        "roughly 1h 59 min at 1.0 MiB/s.",
         "  Free space (or move the vault to a larger disk), then re-run to continue.",
     ]
     # A rate cap below the observed pace is the honest one.
     capped = disk_outlook(plan, ledger, tmp_path, max_rate=512 * 1024)
-    assert "roughly 3h 58 min at 512.0 KiB/s" in capped[0]
+    assert "roughly 3h 58 min at 512.0 KiB/s" in capped[1]
     # No pace on record: the bytes and files still tell the story.
     ledger["sessions"].clear()
-    assert disk_outlook(plan, ledger, tmp_path)[0].endswith("(2 of 3 remaining files).")
+    assert disk_outlook(plan, ledger, tmp_path)[1].endswith("(2 of 3 remaining files).")
     # Everything fits (the floor alone made the verdict): no hint to free space.
     plan["disk"]["free_bytes"] = 14 * gib
-    assert disk_outlook(plan, ledger, tmp_path) == [
-        "  the transfer will pause after about 12.0 GiB more (3 of 3 remaining files)."
+    assert disk_outlook(plan, ledger, tmp_path)[1:] == [
+        "  after about 12.0 GiB more (3 of 3 remaining files)."
     ]
+    # Without a floor the disk itself is the stop.
+    plan["disk"]["min_free_bytes"] = None
+    plan["disk"]["free_bytes"] = 7 * gib
+    assert disk_outlook(plan, ledger, tmp_path)[0].endswith("when the disk fills")
 
 
 def test_begin_session_records_the_tool_version(tmp_path):

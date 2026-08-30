@@ -324,6 +324,14 @@ def _tty_confirm(question: str) -> bool:
     return answer.strip().lower() in {"", "y", "yes"}
 
 
+def _on_a_terminal() -> bool:
+    """Both stdin and stdout are TTYs: someone is there to answer a question."""
+    try:
+        return sys.stdin.isatty() and sys.stdout.isatty()
+    except (AttributeError, ValueError):
+        return False
+
+
 def cmd_archive(args) -> int:
     from .archiver import archive
     from .transfer import PartialTransfer
@@ -340,12 +348,7 @@ def cmd_archive(args) -> int:
     )
     # Ask before a transfer that cannot finish only when someone is there
     # to answer; cron and pipes proceed, as they always have.
-    interactive = bool(
-        not args.yes
-        and hasattr(sys.stdin, "isatty")
-        and sys.stdin.isatty()
-        and sys.stdout.isatty()
-    )
+    confirm = None if args.yes or not _on_a_terminal() else _tty_confirm
     try:
         bundle = archive(
             source,
@@ -362,7 +365,7 @@ def cmd_archive(args) -> int:
             jobs=args.jobs,
             shard=args.shard,
             include=include,
-            confirm=_tty_confirm if interactive else None,
+            confirm=confirm,
         )
     except PartialTransfer as stop:
         print(f"\nArchive paused cleanly ({stop.reason}: {stop.detail}).")

@@ -191,9 +191,9 @@ class SourceProvider(ABC):
 
         ``max_rate`` is the operator's bytes-per-second cap when one is set;
         a provider may tune its transport (chunk sizes) to pace smoothly.
-        ``on_retry(reason)`` is for a transport that retries on its own
-        before failing a ``download_file``: calling it lets the panel show
-        ``retrying`` instead of a silent stall.
+        ``on_retry()`` is for a transport that retries on its own before
+        failing a ``download_file``: calling it per attempt lets the panel
+        show ``retrying`` instead of a silent stall.
         """
         yield
 

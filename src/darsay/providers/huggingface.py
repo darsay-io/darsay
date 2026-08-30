@@ -131,9 +131,9 @@ def throttled_chunk_size(max_rate: int, default: int) -> int:
 class _RetryChatterFilter(logging.Filter):
     """Drop the Hub client's retry notices while darsay's transfer runs.
 
-    Each dropped notice is handed to ``on_retry`` (the panel's
-    ``note_retry``) with the transport's reason, so the retry shows as a
-    panel state rather than as a log line or a silent stall.
+    Each dropped notice becomes an ``on_retry()`` call (the panel's
+    ``note_retry``), so the retry shows as a panel state rather than as a
+    log line or a silent stall.
     """
 
     def __init__(self, on_retry=None):
@@ -141,15 +141,11 @@ class _RetryChatterFilter(logging.Filter):
         self.on_retry = on_retry
 
     def filter(self, record: logging.LogRecord) -> bool:
-        message = record.getMessage()
-        if not message.startswith(_HUB_RETRY_CHATTER):
+        if not record.getMessage().startswith(_HUB_RETRY_CHATTER):
             return True
         if self.on_retry is not None:
-            # "Error while downloading from <url>: <reason>\nTrying to ..."
-            first = message.split("\n", 1)[0]
-            reason = first.split(": ", 1)[1] if ": " in first else None
             with suppress(Exception):
-                self.on_retry(reason)
+                self.on_retry()
         return False
 
 
