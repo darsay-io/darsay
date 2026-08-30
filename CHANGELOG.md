@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-30
+
+
 ### Added
 
 - **`hints` on the catalog estimate digest — catalog schema 1.1.0.** The
