@@ -1,5 +1,6 @@
 # Archived bundles are large binary payloads; they live on disk, not in git.
 vault/
+.doctor/
 
 .venv/
 __pycache__/

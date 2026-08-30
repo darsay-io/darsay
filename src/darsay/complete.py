@@ -25,9 +25,22 @@ COMMANDS = (
     "rm",
     "du",
     "config",
+    "doctor",
     "complete",
 )
 CATALOG_COMMANDS = ("new", "add", "drop", "adopt", "regen")
+DOCTOR_COMMANDS = (
+    "diagnose",
+    "fix",
+    "undo",
+    "explain",
+    "capabilities",
+    "health",
+    "robot-docs",
+    "ls",
+    "diff",
+    "gc",
+)
 BUNDLE_COMMANDS = (
     "verify",
     "smoke",
@@ -91,6 +104,11 @@ _darsay() {{
       fi
       _darsay_catalogs
       ;;
+    doctor)
+      if (( CURRENT == 3 )); then
+        _values 'doctor-command' {" ".join(DOCTOR_COMMANDS)}
+      fi
+      ;;
     estimate)
       _darsay_catalogs
       ;;
@@ -152,6 +170,11 @@ _darsay() {{
         COMPREPLY=( $(compgen -W "${{ids}}" -- "${{cur}}") )
       fi
       ;;
+    doctor)
+      if [[ ${{COMP_CWORD}} -eq 2 ]]; then
+        COMPREPLY=( $(compgen -W "{" ".join(DOCTOR_COMMANDS)}" -- "${{cur}}") )
+      fi
+      ;;
     archive)
       if [[ ${{COMP_WORDS[COMP_CWORD-1]}} == --next ]]; then
         local ids
@@ -181,6 +204,7 @@ complete -c darsay -n "__fish_use_subcommand" -a "{cmds}"
 complete -c darsay -n "__fish_seen_subcommand_from {bundle}" -a "(darsay list --ids 2>/dev/null)"
 complete -c darsay -n "__fish_seen_subcommand_from list estimate catalog" -a "(darsay catalog --ids 2>/dev/null)"
 complete -c darsay -n "__fish_seen_subcommand_from catalog" -a "{" ".join(CATALOG_COMMANDS)}"
+complete -c darsay -n "__fish_seen_subcommand_from doctor" -a "{" ".join(DOCTOR_COMMANDS)}"
 complete -c darsay -n "__fish_seen_subcommand_from archive" -l next -r -a "(darsay catalog --ids 2>/dev/null)"
 complete -c darsay -n "__fish_seen_subcommand_from import" -F -a "*.mvb.tar"
 complete -c darsay -n "__fish_seen_subcommand_from complete" -a "bash zsh fish"

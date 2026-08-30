@@ -67,6 +67,7 @@ required to open a bundle. Everything else is how we got there.
 | [**Sources**](SOURCES.md) | Provider-qualified refs; Hugging Face is a plugin |
 | [**Quantization**](QUANTIZATION.md) | Canonical bundle vs satellite quants vs derived precision |
 | [**Catalogs**](CATALOGS.md) | Shareable want-lists; the vault is the same list, realized |
+| [**Doctor**](DOCTOR.md) | Offline vault diagnostics, reversible repair, JSON contract, evidence history |
 
 ## The formats
 

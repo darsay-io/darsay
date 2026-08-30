@@ -70,6 +70,7 @@ From a checkout, with the project venv:
 .venv/bin/pytest -m integration
 .venv/bin/pytest --run-e2e -m e2e        # or DARSAY_E2E=1
 .venv/bin/pytest --cov=darsay --cov-report=term-missing
+.venv/bin/pytest tests/unit/test_doctor.py tests/integration/test_doctor.py
 ```
 
 `--run-e2e` and `DARSAY_E2E=1` are equivalent. CI sets the env var on the

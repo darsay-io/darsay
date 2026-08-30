@@ -9,6 +9,33 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Added
+
+- **`darsay doctor` — offline vault diagnostics with reversible repair.** The
+  default pass validates configuration, manifests, payload paths/sizes/hashes,
+  generated bundle READMEs, transfer locks, and disposable hydration records.
+  It never follows payload symlinks, uses the network, changes payload bytes,
+  overwrites `curation.md`, or fabricates archival facts. `--quick`, `--since`,
+  `--budget`, `--only`, and `--skip` bound the scan; `health`, `explain`,
+  `capabilities --json`, and `robot-docs` give operators and agents stable
+  discovery surfaces.
+- **Locked, journaled `doctor --fix` and byte-exact `doctor undo`.** The only
+  automatic repairs regenerate derived `README.md` files or quarantine proven
+  stale/disposable `transfer.lock` and `hydration.json` state. Each mutation is
+  contained inside the vault, backed up verbatim, recorded before its atomic
+  replace/rename, and protected by a non-blocking global lock. Runs, JSON and
+  Markdown reports, actions, private backups, quarantine, history, diffs, and
+  undo scripts live under `<vault>/.doctor/`; exit codes distinguish findings,
+  partial repair, unsafe refusal, contention, usage, and I/O failure.
+- **Fail-closed interrupted-run recovery.** Prepared journal actions block new
+  work until an explicit strict undo validates their before/after hashes. Undo
+  accepts only the three canonical mutable bundle filenames, records a recovered
+  action set atomically, compensates if that marker cannot be persisted, and may
+  reclaim only a proven dead same-host lock written by the interrupted doctor.
+- Doctor JSON reports now state `artifacts_created`, `network_attempts`, and
+  `target_actions` directly; shallow `health --json` reports no artifacts, no
+  network attempts, and no target actions.
+
 ### Changed
 
 - **rsync is a first-class copy.** An out-of-band `rsync` / `cp -a` of a

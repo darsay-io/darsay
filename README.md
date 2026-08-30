@@ -254,6 +254,7 @@ archiving**; the bundle hash covers it alone.
 | Survive a dropped network | nothing to type — the panel reads `offline`, keeps what arrived, resumes when it is back (`--max-offline 4h` waits longer) |
 | Delete a bundle | `darsay rm qwen--qwen3-0.6b --yes` |
 | Re-hash and compare | `darsay verify qwen--qwen3-0.6b` |
+| Diagnose the whole vault | `darsay doctor` (offline; `--fix` is journaled and undoable) |
 | Pack one file for a USB drive | `darsay export qwen--qwen3-0.6b -o /backups` |
 | Bring that file back | `darsay import /backups/<file>.mvb.tar` |
 
@@ -279,6 +280,9 @@ darsay archive  Qwen/Qwen3.8-27B --yes                # bank what fits even if t
 darsay archive  Qwen/Qwen3.8-27B --max-rate 5M        # cap at 5 MiB/s
 darsay archive  Qwen/Qwen3.8-27B --max-offline 4h     # wait out a lost network longer
 darsay config                                         # effective settings + config files
+darsay doctor                                         # offline diagnostics; writes evidence only
+darsay doctor --fix --json                            # low-risk repairs + stable automation output
+darsay doctor undo latest                             # restore the prior bytes/state
 darsay archive  Qwen/Qwen3.8-27B --dry-run            # verified / partial / missing
 darsay archive  Qwen/Qwen3.8-27B --shard 1/3 --max-gb 20
 darsay --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle>

@@ -36,6 +36,12 @@ jobs:
           ruff check
           ruff format --check
 
+      - name: Doctor safety envelope
+        run: |
+          python -m pytest tests/unit/test_doctor.py tests/integration/test_doctor.py
+          DARSAY_HOME="$(mktemp -d)" darsay doctor capabilities --json | python -m json.tool >/dev/null
+          DARSAY_HOME="$(mktemp -d)" darsay doctor health --json | python -m json.tool >/dev/null
+
   test:
     name: Tests (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
@@ -68,6 +74,7 @@ jobs:
         run: |
           darsay --version
           darsay --help
+          DARSAY_HOME="$(mktemp -d)" darsay doctor health --json
 
   e2e:
     name: E2E (Hugging Face Hub)

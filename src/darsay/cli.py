@@ -20,6 +20,7 @@ immutable payload, recorded facts, still loadable as-is.
     darsay rm      <bundle> […]       delete bundles (confirmation unless --yes)
     darsay du                         disk usage of bundles and .runtime
     darsay config                     effective settings and the files that set them
+    darsay doctor [--fix]             offline vault diagnostics + reversible repairs
     darsay complete bash|zsh|fish     print a completion script to eval
     darsay info    <bundle>           quick manifest summary
     darsay regen   <bundle>           rebuild README.md after editing curation.md
@@ -1164,6 +1165,137 @@ def cmd_regen(args) -> int:
     return 0
 
 
+def cmd_doctor(args) -> int:
+    """Run the offline, reversible vault doctor without masking its exit contract."""
+    from .doctor import DoctorError, run
+
+    try:
+        return run(args, _vault_path(args))
+    except DoctorError as exc:
+        if getattr(args, "json", False) or getattr(args, "robot_triage", False):
+            print(
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "status": "error",
+                        "exit_code": exc.code,
+                        "error": {"code": exc.code, "message": str(exc)},
+                    },
+                    indent=2,
+                    sort_keys=True,
+                )
+            )
+        elif not getattr(args, "quiet", False):
+            print(f"darsay doctor: {exc}", file=sys.stderr)
+        return exc.code
+
+
+def _add_doctor_output_flags(parser, *, suppress_defaults: bool = False) -> None:
+    default = argparse.SUPPRESS if suppress_defaults else False
+    parser.add_argument(
+        "--json",
+        action="store_true",
+        default=default,
+        help="stable machine-readable output",
+    )
+    parser.add_argument(
+        "--quiet", action="store_true", default=default, help="suppress normal output"
+    )
+    parser.add_argument(
+        "--verbose", action="store_true", default=default, help="show evidence details"
+    )
+    parser.add_argument(
+        "--no-color",
+        action="store_true",
+        default=default,
+        help="disable color (doctor output is currently plain text)",
+    )
+    parser.add_argument(
+        "--no-progress",
+        action="store_true",
+        default=default,
+        help="disable progress output (doctor is currently non-interactive)",
+    )
+
+
+def _add_doctor_diagnose_flags(parser, *, suppress_defaults: bool = False) -> None:
+    default = argparse.SUPPRESS if suppress_defaults else False
+    append_default = argparse.SUPPRESS if suppress_defaults else None
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        default=default,
+        help="with --fix, show proposed actions without changing vault state",
+    )
+    parser.add_argument(
+        "--only",
+        action="append",
+        default=append_default,
+        metavar="CHECK",
+        help="run/report only this check or finding id (repeatable or comma-separated)",
+    )
+    parser.add_argument(
+        "--skip",
+        action="append",
+        default=append_default,
+        metavar="CHECK",
+        help="skip this check or finding id (repeatable or comma-separated)",
+    )
+    parser.add_argument(
+        "--since", default=argparse.SUPPRESS if suppress_defaults else None
+    )
+    parser.add_argument(
+        "--online",
+        action="store_true",
+        default=default,
+        help="request online checks (none are currently supported)",
+    )
+    parser.add_argument(
+        "--explain",
+        action="store_true",
+        default=default,
+        help="include evidence details in human output",
+    )
+    parser.add_argument(
+        "--severity",
+        choices=("info", "warning", "error", "critical"),
+        default=argparse.SUPPRESS if suppress_defaults else None,
+        help="minimum reported severity",
+    )
+    parser.add_argument(
+        "--budget",
+        type=_positive_float,
+        default=argparse.SUPPRESS if suppress_defaults else None,
+        metavar="SECONDS",
+        help="stop the initial scan after this many seconds",
+    )
+    parser.add_argument(
+        "--quick",
+        action="store_true",
+        default=default,
+        help="skip payload hashes and generated README comparison",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        default=default,
+        help="reserved for explicitly forceable future fixers",
+    )
+    parser.add_argument(
+        "-y",
+        "--yes",
+        action="store_true",
+        default=default,
+        help="accept prompts (current low-risk fixers do not prompt)",
+    )
+    parser.add_argument(
+        "--robot-triage",
+        action="store_true",
+        default=default,
+        help="emit one machine-readable diagnosis and repair plan; never fix",
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     """The whole CLI — every subcommand and flag — without parsing anything.
 
@@ -1449,6 +1581,61 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="machine-readable settings")
     p.set_defaults(func=cmd_config)
 
+    p = add_cmd(
+        "doctor",
+        help="offline vault diagnostics with locked, reversible low-risk repairs",
+        description=(
+            "Diagnose a darsay vault offline. By default only private evidence is written "
+            "under <vault>/.doctor; --fix enables journaled, undoable low-risk repairs."
+        ),
+    )
+    _add_doctor_output_flags(p)
+    _add_doctor_diagnose_flags(p)
+    p.add_argument(
+        "--fix",
+        action="store_true",
+        help="apply allowlisted low-risk repairs and then diagnose again",
+    )
+    p.set_defaults(func=cmd_doctor, doctor_command="diagnose")
+    doctor_sub = p.add_subparsers(dest="doctor_command", required=False)
+
+    def add_doctor_action(name, **kwargs):
+        kwargs.setdefault("parents", [vault_after])
+        action = doctor_sub.add_parser(name, **kwargs)
+        _add_doctor_output_flags(action, suppress_defaults=True)
+        action.set_defaults(func=cmd_doctor)
+        return action
+
+    d = add_doctor_action("diagnose", help="run diagnostics (the default action)")
+    _add_doctor_diagnose_flags(d, suppress_defaults=True)
+    d.add_argument("--fix", action="store_true", default=argparse.SUPPRESS)
+
+    d = add_doctor_action("fix", help="apply low-risk repairs and diagnose again")
+    _add_doctor_diagnose_flags(d, suppress_defaults=True)
+
+    d = add_doctor_action("undo", help="reverse one doctor run safely")
+    d.add_argument("run_ref", nargs="?", default="latest", help="run id or latest")
+    d.add_argument(
+        "--strict",
+        action="store_true",
+        help="refuse any post-repair drift (the default safety policy)",
+    )
+
+    d = add_doctor_action("explain", help="explain checks and repair policy")
+    d.add_argument("check_id", nargs="?", help="one check id (default: all)")
+
+    add_doctor_action("capabilities", help="describe checks, fixers, scope, and exits")
+    add_doctor_action("health", help="fast shallow health probe with no artifacts")
+    add_doctor_action("robot-docs", help="print the automation contract")
+    add_doctor_action("ls", help="list local doctor runs")
+
+    d = add_doctor_action("diff", help="compare latest findings to a prior run")
+    d.add_argument("run_ref", nargs="?", help="prior run id (default: previous)")
+
+    d = add_doctor_action("gc", help="delete old evidence runs, retaining latest")
+    d.add_argument("--before", required=True, help="remove runs older than ISO date")
+    d.add_argument("-y", "--yes", action="store_true", help="confirm evidence deletion")
+
     p = add_cmd("complete", help="print a bash/zsh/fish completion script")
     p.add_argument("shell", choices=("bash", "zsh", "fish"))
     p.set_defaults(func=cmd_complete)
@@ -1635,7 +1822,15 @@ def flags_by_command(parser: argparse.ArgumentParser | None = None) -> dict:
 
 def main(argv=None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    parse_argv = list(sys.argv[1:] if argv is None else argv)
+    try:
+        args = parser.parse_args(parse_argv)
+    except SystemExit as exc:
+        # `doctor` has a documented sysexits-style contract. Keep the legacy
+        # argparse exit for every other command, but map doctor usage errors.
+        if exc.code == 2 and "doctor" in parse_argv:
+            return 64
+        raise
     if not getattr(args, "command", None):
         parser.print_help()
         return 0
