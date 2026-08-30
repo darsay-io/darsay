@@ -127,9 +127,7 @@ def test_prepare_only_reuses_writers_without_owning_git(release, monkeypatch):
     assert calls == ["tooling", "docs", "flags", "1.2.3", ("1.2.3", True)]
 
 
-def test_prepare_only_converges_when_source_is_already_prepared(
-    release, monkeypatch
-):
+def test_prepare_only_converges_when_source_is_already_prepared(release, monkeypatch):
     calls = []
     monkeypatch.setattr(release, "read_current_version", lambda: "1.2.3")
     monkeypatch.setattr(
