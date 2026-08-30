@@ -9,15 +9,20 @@ from darsay.catalog import (
     CATALOG_KIND,
     CATALOG_SCHEMA_VERSION,
     DIGEST_KEYS,
+    HINTS,
+    LARGE_PAYLOAD_BYTES,
     adopt_entries,
     adopt_resolved_source,
+    derive_hints,
     drop_entry,
+    entry_hints,
     entry_key,
     estimate_digest,
     estimate_is_stale,
     filter_want,
     fold_slug,
     format_archive_command,
+    hints_for,
     include_key,
     load_catalog,
     new_catalog,
@@ -268,9 +273,217 @@ def test_estimate_digest_allowlist():
     assert set(digest) == DIGEST_KEYS
     assert digest["parameters"] == 16
     assert digest["dominant_dtype"] == "F32"
+    assert digest["hints"] == []
     dumped = json.dumps(digest)
     assert "checked_path" not in dumped
     assert "precision" not in digest
+
+
+def _live(**over):
+    est = {
+        "as_of": "2026-08-20T11:00:00+00:00",
+        "artifact_type": "model",
+        "source": {
+            "revision": "aaa",
+            "revision_ref": "main",
+            "license": "apache-2.0",
+            "gated": False,
+        },
+        "subset": None,
+        "payload": {
+            "total_size_bytes": 100,
+            "file_count": 2,
+            "unknown_size_count": 0,
+            "dominant_format": "safetensors",
+        },
+        "parameters": {"total": 16, "by_dtype": {"BF16": 16}, "dominant_dtype": "BF16"},
+    }
+    for key, value in over.items():
+        section, _, leaf = key.partition(".")
+        if leaf:
+            est[section][leaf] = value
+        else:
+            est[section] = value
+    return est
+
+
+def test_hints_for_closed_set():
+    assert HINTS == ("gated", "large", "quant", "subset")
+    assert hints_for(_live()) == []
+    assert hints_for(_live(**{"source.gated": True})) == ["gated"]
+    assert hints_for(_live(**{"payload.total_size_bytes": LARGE_PAYLOAD_BYTES})) == [
+        "large"
+    ]
+    assert (
+        hints_for(_live(**{"payload.total_size_bytes": LARGE_PAYLOAD_BYTES - 1})) == []
+    )
+    assert hints_for(_live(subset={"include": ["*Q4_K_M*"]})) == ["subset"]
+    assert hints_for(_live(**{"payload.dominant_format": "gguf"})) == ["quant"]
+    assert hints_for(_live(**{"parameters.dominant_dtype": "F8_E4M3"})) == ["quant"]
+    assert hints_for(_live(**{"parameters.dominant_dtype": "I32"})) == ["quant"]
+    for master in ("F64", "F32", "F16", "BF16", "bf16"):
+        assert hints_for(_live(**{"parameters.dominant_dtype": master})) == []
+    everything = _live(
+        subset={"include": ["*Q4_K_M*"]},
+        **{
+            "source.gated": True,
+            "payload.total_size_bytes": 3 * LARGE_PAYLOAD_BYTES,
+            "payload.dominant_format": "gguf",
+        },
+    )
+    assert hints_for(everything) == ["gated", "large", "quant", "subset"]
+    assert estimate_digest(everything)["hints"] == ["gated", "large", "quant", "subset"]
+
+
+def test_hints_for_never_guesses():
+    # Unknown size is not large; unknown dtype and format is not quant.
+    unknown = _live(
+        parameters=None,
+        **{"payload.total_size_bytes": None, "payload.dominant_format": None},
+    )
+    assert hints_for(unknown) == []
+    # A name that screams GGUF is not evidence on its own.
+    assert hints_for(_live(**{"source.repo_id": "unsloth/Qwen3-GGUF"})) == []
+    # Bools are not sizes.
+    assert hints_for(_live(**{"payload.total_size_bytes": True})) == []
+    assert hints_for({}) == []
+
+
+def test_derive_hints_from_a_1_0_digest_and_stored_hints_win():
+    old = {
+        "payload_bytes": LARGE_PAYLOAD_BYTES,
+        "gated": True,
+        "dominant_dtype": "BF16",
+    }
+    assert derive_hints(old) == ["gated", "large"]
+    assert derive_hints(old, {"include": ["*Q4_K_M*"]}) == ["gated", "large", "subset"]
+    assert derive_hints({"dominant_dtype": "U8"}) == ["quant"]
+    # Without the live estimate, a GGUF pack cannot be told from its digest.
+    assert derive_hints({"payload_bytes": 10, "dominant_dtype": None}) == []
+    stored = {**old, "hints": ["subset", "zzz-future", "gated", "gated"]}
+    assert derive_hints(stored) == ["gated", "subset"]
+    assert derive_hints(None) == []
+    assert derive_hints("x") == []
+    assert entry_hints(_entry("huggingface:acme/toy", estimate=stored)) == [
+        "gated",
+        "subset",
+    ]
+    assert entry_hints(_entry("huggingface:acme/toy")) == []
+    assert entry_hints(_entry("huggingface:acme/toy", include=["*.gguf"])) == []
+
+
+def test_project_stored_estimate_cleans_hints():
+    assert project_stored_estimate(
+        {"payload_bytes": 1, "hints": ["large", "nope"]}
+    ) == {
+        "payload_bytes": 1,
+        "hints": ["large"],
+    }
+    assert project_stored_estimate({"payload_bytes": 1, "hints": "large"}) == {
+        "payload_bytes": 1,
+        "hints": [],
+    }
+    assert "hints" not in (project_stored_estimate({"payload_bytes": 1}) or {})
+
+
+def test_save_writes_the_current_schema_version(tmp_path):
+    path = tmp_path / "catalog.json"
+    raw = _catalog([_entry("huggingface:acme/toy")], catalog_schema_version="1.0.0")
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    loaded = load_catalog(path)
+    assert loaded["catalog_schema_version"] == "1.0.0"
+    save_catalog(path, loaded)
+    again = json.loads(path.read_text(encoding="utf-8"))
+    assert again["catalog_schema_version"] == CATALOG_SCHEMA_VERSION == "1.1.0"
+
+
+def test_a_1_1_file_loads_in_a_1_0_reader(tmp_path, monkeypatch):
+    import darsay.catalog as catalog_mod
+
+    path = tmp_path / "catalog.json"
+    digest = {
+        "as_of": "2026-08-20T11:00:00+00:00",
+        "artifact_type": "model",
+        "revision": "aaa",
+        "revision_ref": "main",
+        "payload_bytes": LARGE_PAYLOAD_BYTES,
+        "file_count": 2,
+        "license": "apache-2.0",
+        "gated": True,
+        "parameters": 16,
+        "dominant_dtype": "BF16",
+        "unknown_size_count": 0,
+        "hints": ["gated", "large"],
+    }
+    raw = _catalog([_entry("huggingface:acme/toy", estimate=digest)])
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    assert load_catalog(path)["entries"][0]["estimate"]["hints"] == ["gated", "large"]
+    # A 1.0.0 darsay knows no ``hints`` key: it drops the field and derives.
+    monkeypatch.setattr(catalog_mod, "DIGEST_KEYS", DIGEST_KEYS - {"hints"})
+    loaded = load_catalog(path)
+    est = loaded["entries"][0]["estimate"]
+    assert "hints" not in est
+    assert est["payload_bytes"] == LARGE_PAYLOAD_BYTES
+    assert entry_hints(loaded["entries"][0]) == ["gated", "large"]
+
+
+def test_adopt_preserves_hints():
+    digest = {"payload_bytes": 5, "hints": ["gated", "quant"]}
+    dest = _catalog([])
+    other = _catalog([_entry("huggingface:acme/toy", estimate=digest)], id="theirs")
+    assert adopt_entries(dest, other) == (1, 0)
+    assert dest["entries"][0]["estimate"]["hints"] == ["gated", "quant"]
+
+
+def test_overlay_rows_carry_hints():
+    digest = {
+        "payload_bytes": LARGE_PAYLOAD_BYTES,
+        "gated": True,
+        "hints": ["gated", "large"],
+    }
+    cat = _catalog(
+        [
+            _entry("huggingface:acme/toy", estimate=digest),
+            _entry("huggingface:acme/plain"),
+            _entry("nope:acme/x"),
+        ]
+    )
+    rows = overlay(cat, [], progress=lambda *a, **k: None)
+    assert [r["hints"] for r in rows] == [["gated", "large"], [], []]
+
+
+def test_print_catalog_table_hints_column(capsys):
+    base = {
+        "status": "want",
+        "desire": None,
+        "revision": None,
+        "include": None,
+        "note": None,
+        "bundle_id": None,
+        "payload_bytes": None,
+        "estimate_stale": False,
+        "gated": False,
+    }
+    print_catalog_table([{**base, "source": "huggingface:acme/toy", "hints": []}])
+    out = capsys.readouterr().out
+    assert "HINTS" not in out
+    assert "GATED" not in out
+    print_catalog_table(
+        [
+            {**base, "source": "huggingface:acme/toy", "hints": ["gated", "large"]},
+            {
+                **base,
+                "source": "huggingface:acme/old",
+                "include": ["*Q4_K_M*"],
+                "estimate": {"payload_bytes": 1, "dominant_dtype": "U8"},
+            },
+        ]
+    )
+    out = capsys.readouterr().out
+    assert "HINTS" in out
+    assert "gated, large" in out
+    assert "quant, subset" in out
+    assert "GATED" not in out
 
 
 def test_estimate_is_stale():
@@ -511,6 +724,9 @@ def test_write_catalog_readme_includes_include_cached_size_and_overlay_hints(tmp
     assert "1.0 KiB" in text
     assert "apache-2.0" in text
     assert "the quant" in text
+    assert "| Hints |" in text
+    assert "| subset |" in text
+    assert "(gated)" not in text
     assert "darsay list ./catalog.json" in text
     assert "darsay archive --next ./catalog.json" in text
 

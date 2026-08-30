@@ -6,7 +6,7 @@
   <a href="../README.md">README</a>
 </p>
 
-# catalog.json — schema reference (v1.0.0)
+# catalog.json — schema reference (v1.1.0)
 
 > **In one sentence.** A catalog is a curated list of sources. The vault is
 > that list, realized. Possession is a view, not a rewrite of this file.
@@ -25,7 +25,9 @@ Conventions match the [manifest](MANIFEST.md):
   stripped).
 - Major schema version is breaking. Additive minor/patch: readers ignore
   unknown fields; this tool preserves unknown *top-level* keys on
-  round-trip. A 2.x file is a hard error for a 1.x tool.
+  round-trip. A 2.x file is a hard error for a 1.x tool. The tool writes
+  the version it conforms to, so a 1.0.0 file becomes 1.1.0 the first
+  time this darsay saves it (1.0.0 readers still load it).
 
 The catalog schema is independent of bundle `schema_version`. Catalogs
 are not inside `.mvb.tar`.
@@ -52,7 +54,7 @@ writable.
 
 | Field | Meaning |
 |---|---|
-| `catalog_schema_version` | `"1.0.0"`. Major = breaking. |
+| `catalog_schema_version` | `"1.1.0"`. Major = breaking; 1.1 added `estimate.hints`. |
 | `kind` | Always `"darsay.catalog"`. |
 | `id` | Slug. Matches the directory name when stored at `catalogs/<id>/`. Lowercase letter, then letters, digits, `.`, `_`, `-` (max 64). |
 | `title` | Human title. Defaults to `id`. |
@@ -94,9 +96,32 @@ Stale after 7 days (`*` on SIZE in `list`).
 | `parameters` | `est["parameters"]["total"]` if dict, else `null` |
 | `dominant_dtype` | `est["parameters"]["dominant_dtype"]` if dict, else `null` |
 | `unknown_size_count` | `est["payload"]["unknown_size_count"]` |
+| `hints` | Derived once, by `hints_for(est)` — see [Hints](#hints). Since 1.1.0. |
 
 Never stored: `disk.*`, `bundle.dir`, engines, completeness, variants,
 vault status, bundle ids.
+
+### Hints
+
+`hints` is a **sorted list from a closed set**, decided by the CLI at
+estimate time so every reader — `list`, the generated `README.md`, a
+darsay.io board — agrees on what the words mean without re-deriving them.
+Empty (`[]`) means *nothing notable*; a missing digest still means
+*unknown*. Nothing is guessed from a repo name.
+
+| Hint | When |
+|---|---|
+| `gated` | Upstream is gated (`source.gated`). Archiving needs an accepted license and `hf auth login`. |
+| `large` | The priced payload is ≥ 20 GiB (`LARGE_PAYLOAD_BYTES`) — more than one sitting, often more than one disk. With `--include`, the priced payload is the subset. An unknown size is never large. |
+| `quant` | A published quantized artifact ([Quantization](QUANTIZATION.md)): the weight bytes are mostly GGUF, or the dominant safetensors dtype is not F64 / F32 / F16 / BF16. |
+| `subset` | The entry was priced with `--include`. |
+
+A 1.0.0 file carries no `hints`. Readers derive `large`, `gated`, and
+`subset` from the digest and the entry's `include` on the fly; `quant`
+needs the live estimate's weight formats, so a GGUF row shows it only
+after `darsay estimate CATALOG` refreshes the digest (a quantized
+safetensors dtype is derived either way). Refresh is the only thing that
+writes `hints`; `catalog adopt` copies it verbatim.
 
 ## Overlay (not in the file)
 
@@ -149,7 +174,9 @@ darsay catalog adopt MINE ./friend
 ```
 
 `catalog add` is offline unless `--estimate`. Bare `darsay list` is the
-vault as the same table; DESIRE and NOTE hide when every cell is empty.
+vault as the same table; DESIRE, HINTS, and NOTE hide when every cell is
+empty. HINTS is the entry's [hints](#hints) (`large, gated`), the same
+words `estimate CATALOG` prints per row.
 `list --next` prints a copy-pasteable `darsay archive` line (source +
 `--revision` + `--include`). Cookbook:
 [Share a catalog](../examples/README.md#share-a-catalog).

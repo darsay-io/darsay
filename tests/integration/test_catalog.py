@@ -497,3 +497,125 @@ def test_path_catalog_write_hint_and_bundle_miss(
     with pytest.raises(SystemExit, match="is a bundle") as bundle_exc:
         main(["--vault", str(vault), "list", "test--acme--toy"])
     assert "darsay info" in str(bundle_exc.value)
+
+
+def test_estimate_catalog_writes_hints_and_list_shows_them(
+    vault, test_provider, capsys
+):
+    test_provider.add_repo("acme/toy", model_files())
+    test_provider.add_repo("acme/locked", model_files(), gated=True)
+    test_provider.add_repo(
+        "acme/fp8",
+        model_files(),
+        parameters={
+            "total": 16,
+            "by_dtype": {"F8_E4M3": 16},
+            "dominant_dtype": "F8_E4M3",
+        },
+    )
+    pack = model_files()
+    del pack["model.safetensors"]
+    pack["toy-Q4_K_M.gguf"] = b"g" * 64
+    pack["toy-Q8_0.gguf"] = b"g" * 128
+    test_provider.add_repo("acme/pack", pack)
+    v = ["--vault", str(vault)]
+    assert main([*v, "catalog", "new", "summer"]) == 0
+    assert main([*v, "catalog", "add", "summer", "test:acme/toy"]) == 0
+    assert main([*v, "catalog", "add", "summer", "test:acme/locked"]) == 0
+    assert main([*v, "catalog", "add", "summer", "test:acme/fp8"]) == 0
+    assert main([*v, "catalog", "add", "summer", "test:acme/pack"]) == 0
+    assert (
+        main(
+            [*v, "catalog", "add", "summer", "test:acme/pack", "--include", "*Q4_K_M*"]
+        )
+        == 0
+    )
+    capsys.readouterr()
+    cat_path = vault / "catalogs" / "summer" / "catalog.json"
+    assert json.loads(cat_path.read_text())["catalog_schema_version"] == "1.1.0"
+
+    assert main([*v, "list", "summer"]) == 0
+    out = capsys.readouterr().out
+    assert "HINTS" not in out  # nothing estimated yet: nothing to say
+
+    assert main([*v, "estimate", "summer"]) == 0
+    out = capsys.readouterr().out
+    assert "test:acme/locked  " in out and "gated" in out
+    assert "GATED" not in out
+    catalog = json.loads(cat_path.read_text())
+    by_key = {
+        (e["source"], tuple(e["include"] or ())): e["estimate"]["hints"]
+        for e in catalog["entries"]
+    }
+    assert by_key[("test:acme/toy", ())] == []
+    assert by_key[("test:acme/locked", ())] == ["gated"]
+    assert by_key[("test:acme/fp8", ())] == ["quant"]
+    assert by_key[("test:acme/pack", ())] == ["quant"]
+    assert by_key[("test:acme/pack", ("*Q4_K_M*",))] == ["quant", "subset"]
+
+    assert main([*v, "list", "summer"]) == 0
+    out = capsys.readouterr().out
+    assert "HINTS" in out
+    assert "quant, subset" in out
+    assert "GATED" not in out
+    readme = (vault / "catalogs" / "summer" / "README.md").read_text()
+    assert "| Hints |" in readme
+    assert "| quant, subset |" in readme
+
+    assert main([*v, "list", "summer", "--json"]) == 0
+    rows = json.loads(capsys.readouterr().out)["entries"]
+    assert sorted(h for r in rows for h in r["hints"]) == [
+        "gated",
+        "quant",
+        "quant",
+        "quant",
+        "subset",
+    ]
+
+
+def test_list_derives_hints_for_a_1_0_catalog(vault, test_provider, tmp_path, capsys):
+    friend = tmp_path / "friend" / "catalog.json"
+    friend.parent.mkdir()
+    friend.write_text(
+        json.dumps(
+            {
+                "catalog_schema_version": "1.0.0",
+                "kind": "darsay.catalog",
+                "id": "theirs",
+                "title": "Theirs",
+                "curator": None,
+                "note": None,
+                "created": "2026-01-01T00:00:00+00:00",
+                "updated": "2026-01-01T00:00:00+00:00",
+                "entries": [
+                    {
+                        "source": "test:acme/big",
+                        "revision": None,
+                        "include": ["*Q4_K_M*"],
+                        "desire": 8,
+                        "note": None,
+                        "added": "2026-01-01T00:00:00+00:00",
+                        "estimate": {
+                            "as_of": "2026-01-01T00:00:00+00:00",
+                            "artifact_type": "model",
+                            "revision": "a" * 40,
+                            "revision_ref": "main",
+                            "payload_bytes": 40 * 1024**3,
+                            "file_count": 3,
+                            "license": "apache-2.0",
+                            "gated": True,
+                            "parameters": None,
+                            "dominant_dtype": None,
+                            "unknown_size_count": 0,
+                        },
+                    }
+                ],
+            }
+        )
+    )
+    assert main(["--vault", str(vault), "list", str(friend)]) == 0
+    out = capsys.readouterr().out
+    assert "HINTS" in out
+    assert "gated, large, subset" in out
+    # Read-only: listing never rewrote the file or its version.
+    assert json.loads(friend.read_text())["catalog_schema_version"] == "1.0.0"

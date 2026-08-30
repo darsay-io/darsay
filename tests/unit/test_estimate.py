@@ -172,3 +172,31 @@ def test_download_lines_color_uses_panel_styling():
     assert "\033[1m" in lines[0]  # bold percent / total
     plain = _download_lines(_est(), color=False)
     assert "\033[" not in plain[0]
+
+
+def test_dominant_format_by_bytes_then_count():
+    from darsay.estimate import _dominant_format
+
+    assert _dominant_format([]) is None
+    assert (
+        _dominant_format(
+            [
+                {"path": "a.safetensors", "size": 10},
+                {"path": "b-Q4_K_M.gguf", "size": 100},
+                {"path": "c-Q8_0.gguf", "size": 100},
+            ]
+        )
+        == "gguf"
+    )
+    # All sizes unknown: count decides.
+    assert (
+        _dominant_format(
+            [
+                {"path": "a.bin", "size": None},
+                {"path": "b.gguf", "size": None},
+                {"path": "c.gguf", "size": None},
+            ]
+        )
+        == "gguf"
+    )
+    assert _dominant_format([{"path": "weights", "size": 1}]) == "(none)"

@@ -52,6 +52,22 @@ def _format_breakdown(files: list[dict]) -> dict:
     )
 
 
+def _dominant_format(primary: list[dict]) -> str | None:
+    """Extension carrying most of the primary (weight / data) bytes, e.g. ``gguf``.
+
+    Ties and all-unknown sizes fall back to file count. ``None`` when there
+    are no primary files. Feeds the catalog ``quant`` hint.
+    """
+    by_ext: dict[str, tuple[int, int]] = {}
+    for f in primary:
+        ext = Path(f["path"]).suffix.lower().lstrip(".") or "(none)"
+        size, count = by_ext.get(ext, (0, 0))
+        by_ext[ext] = (size + (f["size"] or 0), count + 1)
+    if not by_ext:
+        return None
+    return max(by_ext, key=lambda k: by_ext[k])
+
+
 def _existing_transfer(
     ref: SourceRef,
     revision: str | None,
@@ -218,6 +234,7 @@ def estimate(
     total = sum(f["size"] or 0 for f in files)
     primary_bytes = sum(f["size"] or 0 for f in primary)
     largest = max(files, key=lambda f: f["size"] or 0, default=None)
+    dominant_format = _dominant_format(primary)
 
     root = payload_root_for(repo_type)
     prospective_paths = [f"{root}/{f['path']}" for f in files]
@@ -278,6 +295,7 @@ def estimate(
             "support": {"count": len(support), "bytes": total - primary_bytes},
             "largest_file": largest,
             "unknown_size_count": sum(1 for f in files if f["size"] is None),
+            "dominant_format": dominant_format,
         },
         "transfer": transfer,
         "engines": engines,

@@ -11,6 +11,34 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Added
 
+- **`hints` on the catalog estimate digest — catalog schema 1.1.0.** The
+  CLI now decides, once, at estimate time, which of a closed set of words
+  describe a priced source — `gated`, `large` (≥ 20 GiB of priced payload),
+  `quant` (a published quantized artifact: mostly-GGUF weights, or a dominant
+  safetensors dtype that is not F64/F32/F16/BF16), `subset` (priced with
+  `--include`) — and stores them as `estimate.hints`, a sorted list, in
+  `catalog.json`. `darsay list CATALOG` grows a HINTS column (hidden when
+  every cell is empty, like DESIRE and NOTE), `estimate CATALOG` and
+  `catalog add --estimate` print the same words per row, the generated
+  catalog `README.md` gets a Hints column, and `list --json` rows carry
+  `hints`. Readers of a 1.0.0 file derive `large` / `gated` / `subset` from
+  the digest they have; `quant` from a GGUF pack needs one
+  `darsay estimate CATALOG`. The schema bump is additive: a 1.0.0 reader
+  still loads a 1.1.0 file. One function, `catalog.hints_for`, owns the
+  vocabulary and the 20 GiB line; the darsay.io board draws the same line.
+- `darsay estimate` records `payload.dominant_format` — the extension
+  carrying most of the weight (or data) bytes, e.g. `gguf` — in the live
+  estimate. It feeds the `quant` hint and is not stored in the digest.
+
+### Changed
+
+- The SIZE cell of `darsay list CATALOG` no longer carries a `GATED`
+  suffix; gating is the `gated` hint in the HINTS column. The catalog
+  `README.md` license column likewise drops `(gated)`.
+- `save_catalog` writes the schema version this darsay conforms to
+  (`1.1.0`) instead of echoing the loaded file's, so a file that carries
+  `hints` says so.
+
 - **Archive one pin across two disks that never meet — `assemble --move` and
   skeletons.** When the disk with the bandwidth and the disk with the room
   are never mounted together (a laptop at the café, the big drive at home),

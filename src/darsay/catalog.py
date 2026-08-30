@@ -18,7 +18,7 @@ from .archiver import utc_now
 from .readme_gen import _curation_body, human_size
 from .sources import parse_source
 
-CATALOG_SCHEMA_VERSION = "1.0.0"
+CATALOG_SCHEMA_VERSION = "1.1.0"
 CATALOG_KIND = "darsay.catalog"
 STALE_AFTER_DAYS = 7
 CATALOGS_DIRNAME = "catalogs"
@@ -39,8 +39,17 @@ DIGEST_KEYS = frozenset(
         "parameters",
         "dominant_dtype",
         "unknown_size_count",
+        "hints",
     }
 )
+# ``large``: the priced payload is at least this big — more than one sitting,
+# and often more than one disk. darsay.io's board draws the same line.
+LARGE_PAYLOAD_BYTES = 20 * 1024**3
+# The closed vocabulary of ``estimate.hints``. Sorted on write; readers ignore
+# names they do not know.
+HINTS = ("gated", "large", "quant", "subset")
+_FULL_FIDELITY_DTYPES = frozenset({"F64", "F32", "F16", "BF16"})
+_QUANT_FORMATS = frozenset({"gguf"})
 _CATALOG_TOP_KEYS = (
     "catalog_schema_version",
     "kind",
@@ -52,7 +61,7 @@ _CATALOG_TOP_KEYS = (
     "updated",
     "entries",
 )
-_HIDE_IF_EMPTY = frozenset({"DESIRE", "NOTE"})
+_HIDE_IF_EMPTY = frozenset({"DESIRE", "NOTE", "HINTS"})
 
 
 def catalogs_dir(vault: Path) -> Path:
@@ -120,6 +129,102 @@ def revisions_match(got: str, want: str) -> bool:
     return g == w or g.startswith(w) or w.startswith(g)
 
 
+def _hints(
+    *,
+    payload_bytes,
+    gated,
+    subset: bool,
+    dominant_dtype,
+    dominant_format,
+) -> list[str]:
+    out: set[str] = set()
+    if gated:
+        out.add("gated")
+    if (
+        isinstance(payload_bytes, int)
+        and not isinstance(payload_bytes, bool)
+        and payload_bytes >= LARGE_PAYLOAD_BYTES
+    ):
+        out.add("large")
+    if subset:
+        out.add("subset")
+    if (
+        isinstance(dominant_format, str) and dominant_format.lower() in _QUANT_FORMATS
+    ) or (
+        isinstance(dominant_dtype, str)
+        and dominant_dtype.upper() not in _FULL_FIDELITY_DTYPES
+    ):
+        out.add("quant")
+    return sorted(out)
+
+
+def _clean_hints(raw) -> list[str]:
+    """Keep only names in HINTS, deduplicated and sorted. Unknown names are ignored."""
+    if not isinstance(raw, list):
+        return []
+    return sorted({h for h in raw if isinstance(h, str) and h in HINTS})
+
+
+def hints_for(est: dict) -> list[str]:
+    """Closed-vocabulary facts about a priced source, from a live ``estimate()`` dict.
+
+    Returns a sorted list drawn from ``HINTS`` — ``gated``, ``large``,
+    ``quant``, ``subset`` — possibly empty. Empty means "nothing notable";
+    it is not the same as a missing digest (``estimate: null``), which
+    means unknown. Nothing here is guessed from a repo name.
+
+    - ``gated``  — ``source.gated`` is truthy.
+    - ``large``  — ``payload.total_size_bytes`` ≥ ``LARGE_PAYLOAD_BYTES``
+      (20 GiB). The priced payload is the subset when ``--include``
+      applied. An unknown size is never large.
+    - ``quant``  — a published quantized artifact in the sense of
+      QUANTIZATION.md: the weight bytes are mostly GGUF
+      (``payload.dominant_format``), or the dominant safetensors dtype is
+      not a full-fidelity float (F64 / F32 / F16 / BF16). Unknown dtype and
+      format ⇒ no hint.
+    - ``subset`` — the estimate was priced with ``--include`` (``est["subset"]``).
+    """
+    payload = est.get("payload") if isinstance(est.get("payload"), dict) else {}
+    source = est.get("source") if isinstance(est.get("source"), dict) else {}
+    params = est.get("parameters") if isinstance(est.get("parameters"), dict) else {}
+    return _hints(
+        payload_bytes=payload.get("total_size_bytes"),
+        gated=source.get("gated"),
+        subset=est.get("subset") is not None,
+        dominant_dtype=params.get("dominant_dtype"),
+        dominant_format=payload.get("dominant_format"),
+    )
+
+
+def derive_hints(digest, entry: dict | None = None) -> list[str]:
+    """Hints for a stored digest. Stored ``hints`` win; older digests are derived.
+
+    A 1.0.0 digest has no ``hints``: ``large`` and ``gated`` come out exactly,
+    ``subset`` from the entry's include globs, and ``quant`` only from
+    ``dominant_dtype`` — the GGUF signal lives in the live estimate, so a
+    GGUF row shows ``quant`` after ``darsay estimate CATALOG`` refreshes it.
+    """
+    if not isinstance(digest, dict):
+        return []
+    if isinstance(digest.get("hints"), list):
+        return _clean_hints(digest["hints"])
+    include = entry.get("include") if isinstance(entry, dict) else None
+    return _hints(
+        payload_bytes=digest.get("payload_bytes"),
+        gated=digest.get("gated"),
+        subset=bool(include),
+        dominant_dtype=digest.get("dominant_dtype"),
+        dominant_format=None,
+    )
+
+
+def entry_hints(entry: dict) -> list[str]:
+    """Stored hints when the digest carries them, else derived from what it has."""
+    if not isinstance(entry, dict):
+        return []
+    return derive_hints(entry.get("estimate"), entry)
+
+
 def estimate_digest(est: dict) -> dict:
     """Projection of estimate() onto DIGEST_KEYS. Not a subset of the live dict."""
     params = est.get("parameters") or {}
@@ -137,6 +242,7 @@ def estimate_digest(est: dict) -> dict:
         if isinstance(params, dict)
         else None,
         "unknown_size_count": est["payload"]["unknown_size_count"],
+        "hints": hints_for(est),
     }
     assert set(digest) == DIGEST_KEYS
     return digest
@@ -151,7 +257,10 @@ def project_stored_estimate(est) -> dict | None:
             return estimate_digest(est)
         except (AssertionError, KeyError, TypeError):
             pass
-    return {k: est[k] for k in DIGEST_KEYS if k in est}
+    out = {k: est[k] for k in DIGEST_KEYS if k in est}
+    if "hints" in out:
+        out["hints"] = _clean_hints(out["hints"])
+    return out
 
 
 def _looks_like_catalog(data) -> bool:
@@ -366,8 +475,9 @@ def load_catalog(path: Path) -> dict:
 def save_catalog(path: Path, catalog: dict) -> None:
     """Write catalog.json. Does not touch curation.md."""
     payload = {
-        "catalog_schema_version": catalog.get("catalog_schema_version")
-        or CATALOG_SCHEMA_VERSION,
+        # The tool writes the schema it conforms to; 1.x is additive, so a
+        # 1.0.0 file re-saved here is a valid 1.1.0 file.
+        "catalog_schema_version": CATALOG_SCHEMA_VERSION,
         "kind": CATALOG_KIND,
         "id": catalog["id"],
         "title": catalog.get("title") or catalog["id"],
@@ -668,6 +778,7 @@ def _best_possession(entry: dict, matches: list[dict]) -> dict:
         payload = est.get("payload_bytes") if isinstance(est, dict) else None
         return {
             **entry,
+            "hints": entry_hints(entry),
             "status": "want",
             "bundle_id": None,
             "path": None,
@@ -694,6 +805,7 @@ def _best_possession(entry: dict, matches: list[dict]) -> dict:
     remaining = 0 if status == "have" else best.get("remaining_bytes")
     return {
         **entry,
+        "hints": entry_hints(entry),
         "status": status,
         "bundle_id": best.get("bundle_id"),
         "path": best.get("path"),
@@ -727,6 +839,7 @@ def overlay(catalog: dict, records: list[dict], *, progress=None) -> list[dict]:
             rows.append(
                 {
                     **entry,
+                    "hints": entry_hints(entry),
                     "status": "unknown",
                     "bundle_id": None,
                     "path": None,
@@ -781,6 +894,7 @@ def vault_as_rows(records: list[dict]) -> list[dict]:
                 "matched_include": rec.get("include"),
                 "estimate_stale": False,
                 "estimate": None,
+                "hints": [],
                 "artifact_type": rec.get("artifact_type"),
             }
         )
@@ -1029,9 +1143,14 @@ def format_size_cell(row: dict) -> str:
         size = human_size(payload)
         if row.get("estimate_stale"):
             size += "*"
-    if row.get("gated"):
-        size += "  GATED"
     return size
+
+
+def format_hints_cell(row: dict) -> str:
+    hints = row.get("hints")
+    if hints is None:
+        hints = entry_hints(row)
+    return ", ".join(hints) if hints else "—"
 
 
 def format_desire_cell(row: dict) -> str:
@@ -1063,6 +1182,7 @@ def print_catalog_table(rows: list[dict], *, header_line: str | None = None) -> 
         ("TYPE", format_type_cell),
         ("HAVE", format_have_cell),
         ("SIZE", format_size_cell),
+        ("HINTS", format_hints_cell),
         ("NOTE", format_note_cell),
     )
     raw = [[fmt(r) for _, fmt in specs] for r in rows]
@@ -1157,8 +1277,8 @@ def write_catalog_readme(catalog_dir: Path, catalog: dict) -> None:
     if catalog.get("note"):
         lines += [f"> {catalog['note']}", ""]
     lines += [
-        "| Desire | Source | Type | Size (cached) | License | Note |",
-        "|---|---|---|---|---|---|",
+        "| Desire | Source | Type | Size (cached) | Hints | License | Note |",
+        "|---|---|---|---|---|---|---|",
     ]
     for entry in catalog.get("entries") or []:
         est = entry.get("estimate") if isinstance(entry.get("estimate"), dict) else {}
@@ -1185,11 +1305,10 @@ def write_catalog_readme(catalog_dir: Path, catalog: dict) -> None:
                 f" (as of {as_of})" if as_of else ""
             )
         license_s = est.get("license") or "?"
-        if est.get("gated"):
-            license_s = f"{license_s} (gated)" if license_s != "?" else "? (gated)"
+        hints = ", ".join(entry_hints(entry)) or "—"
         note = entry.get("note") or ""
         lines.append(
-            f"| {desire_s} | {href} | {artifact} | {size} | {license_s} | {note} |"
+            f"| {desire_s} | {href} | {artifact} | {size} | {hints} | {license_s} | {note} |"
         )
     lines += [
         "",

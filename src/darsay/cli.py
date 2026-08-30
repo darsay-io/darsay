@@ -279,7 +279,7 @@ def _estimate_catalog(args, vault, cat_path) -> int:
         if quiet:
             continue
         extra = f"  [{', '.join(entry['include'])}]" if entry.get("include") else ""
-        gated = "  GATED" if digest.get("gated") else ""
+        hints = f"  {', '.join(digest['hints'])}" if digest.get("hints") else ""
         params = ""
         if digest.get("parameters"):
             dtype = (
@@ -288,7 +288,7 @@ def _estimate_catalog(args, vault, cat_path) -> int:
             params = f"  {human_params(digest['parameters'])}{dtype}"
         print(
             f"  {entry['source']}{extra}  {human_size(digest['payload_bytes'])}  "
-            f"{digest.get('license') or '?'}{gated}{params}"
+            f"{digest.get('license') or '?'}{hints}{params}"
         )
     catalog["updated"] = utc_now()
     save_catalog(cat_path, catalog)
@@ -707,8 +707,8 @@ def cmd_catalog_add(args) -> int:
         )
         source = est["source"]["address"]
         digest = estimate_digest(est)
-        gated = "  GATED" if digest.get("gated") else ""
-        extra = f"  {human_size(digest['payload_bytes'])}{gated}  (as of {digest['as_of'][:10]})"
+        hints = f"  {', '.join(digest['hints'])}" if digest.get("hints") else ""
+        extra = f"  {human_size(digest['payload_bytes'])}{hints}  (as of {digest['as_of'][:10]})"
     entry, action = upsert_entry(
         catalog,
         source,
