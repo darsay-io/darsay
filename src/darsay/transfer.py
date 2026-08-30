@@ -40,30 +40,6 @@ RECONNECT_WAITS_S = (2.0, 4.0, 8.0, 15.0, 30.0)
 # Pacing and reconnect sleeps run in slices this long so Ctrl-C, budgets,
 # and the floor land promptly even mid-wait.
 PACE_SLICE_S = 0.2
-# Filesystems where hashing dest is a full payload read over the wire.
-# Assemble --rehash on these is the "pull 400 GiB back" trap; default
-# assemble trusts dest ledger + size instead (same as archive after rsync).
-_NETWORK_FS = frozenset(
-    {
-        "smbfs",
-        "smb",
-        "cifs",
-        "nfs",
-        "nfs4",
-        "afpfs",
-        "afp",
-        "fuse.sshfs",
-        "fuse.rclone",
-        "fuse.s3fs",
-        "davfs",
-        "fuse.davfs",
-        "webdav",
-        "9p",
-        "afs",
-        "ceph",
-        "glusterfs",
-    }
-)
 
 
 class LedgerError(ValueError):
@@ -1991,9 +1967,9 @@ def release_moved(
     For each file the *destination* now holds as ``verified``, delete the
     matching bytes at the source and rewrite the source record as ``moved``
     (keeping every hash, adding ``moved_at``). This is ``mv`` with rsync's
-    ``--remove-source-files`` guarantee: the destination's re-hash against
-    the pinned upstream digest is the gate, so a copy that failed to verify
-    leaves its source bytes untouched.
+    ``--remove-source-files`` guarantee: the gate is dest's own ``verified``
+    record (ledger + size after an rsync, or its hash under ``--rehash``),
+    so a file dest cannot vouch for keeps its source bytes.
 
     The source ledger is saved after every file, so a crash mid-loop leaves
     a consistent skeleton. Returns ``(moved_files, moved_bytes)``.
@@ -2033,14 +2009,15 @@ def _release_sources(
 ) -> None:
     """Skeletonize each source once its bytes are verified in the destination.
 
-    Deletion of a source file only ever follows the destination hashing that
-    same file against the pinned upstream digest, so an interrupted or rotted
-    copy never costs the source its only copy. A source with every file moved
-    out is dissolved (it holds no payload byte by construction); any other
-    source is kept as a skeleton and what it still holds or owes is reported.
+    A source file is deleted only when the destination holds that same file
+    as ``verified`` (see :func:`release_moved`), so an interrupted copy never
+    costs the source its only copy. A source with every file moved out is
+    dissolved (it holds no payload byte by construction); any other source
+    is kept as a skeleton and what it still holds or owes is reported.
     """
     from .readme_gen import human_size
 
+    progress("Releasing source payload files dest already holds as verified...")
     dest_real = destination.resolve()
     dest_vault = destination.parent.parent.name
     host = socket.gethostname()
@@ -2104,41 +2081,87 @@ def _release_sources(
                     )
 
 
-def filesystem_type(path: Path) -> str | None:
-    """Best-effort local filesystem type (``smbfs``, ``apfs``, ``ext4``, …)."""
-    probe = path if path.exists() else path.parent
-    if not probe.exists():
-        return None
-    if sys.platform == "darwin":
-        cmd = ["stat", "-f", "%T", str(probe)]
-    else:
-        cmd = ["stat", "-f", "-c", "%T", str(probe)]
+# Filesystem types GNU ``df -l`` treats as remote even though their mount
+# source has no ``host:`` or ``//host`` prefix (gnulib's ME_REMOTE).
+_REMOTE_FS_TYPES = frozenset(
+    {"acfs", "afs", "auristorfs", "coda", "fhgfs", "gpfs", "ibrix", "ocfs2", "vxfs"}
+)
+_MOUNTINFO_ESCAPES = {"\\040": " ", "\\011": "\t", "\\012": "\n", "\\134": "\\"}
+
+
+def _parse_linux_mountinfo(text: str) -> list[tuple[str, bool]]:
+    """``/proc/self/mountinfo`` → ``[(mount point, is_network), …]``.
+
+    Remote is decided the way ``df -l`` decides it: an ``nfs``/``sshfs``/
+    ``rclone`` source is ``host:path``, a ``cifs`` source is ``//host/share``,
+    and a few cluster filesystems are remote by type.
+    """
+    mounts = []
+    for line in text.splitlines():
+        head, sep, tail = line.partition(" - ")
+        fields = head.split()
+        rest = tail.split()
+        if not sep or len(fields) < 5 or len(rest) < 2:
+            continue
+        mount_point = fields[4]
+        for escape, char in _MOUNTINFO_ESCAPES.items():
+            mount_point = mount_point.replace(escape, char)
+        fstype, source = rest[0], rest[1]
+        network = ":" in source or source.startswith("//") or fstype in _REMOTE_FS_TYPES
+        mounts.append((mount_point, network))
+    return mounts
+
+
+def _parse_darwin_mounts(text: str) -> list[tuple[str, bool]]:
+    """``mount(8)`` output → ``[(mount point, is_network), …]``.
+
+    Each line is ``<source> on <point> (<type>, <flag>, …)``; the kernel's
+    ``MNT_LOCAL`` flag prints as ``local`` and is absent on ``smbfs``,
+    ``nfs``, ``afpfs``, ``webdav``, and FUSE mounts.
+    """
+    mounts = []
+    for line in text.splitlines():
+        head, sep, flags = line.rpartition(" (")
+        _source, on, mount_point = head.partition(" on ")
+        if not sep or not on:
+            continue
+        mounts.append((mount_point, "local" not in flags.rstrip(")").split(", ")))
+    return mounts
+
+
+def _deepest_mount(target: str, mounts: list[tuple[str, bool]]) -> bool | None:
+    """The ``is_network`` of the longest mount point containing ``target``."""
+    best: tuple[int, bool] | None = None
+    for mount_point, network in mounts:
+        root = mount_point.rstrip("/")
+        if root and target != root and not target.startswith(root + "/"):
+            continue
+        if best is None or len(root) > best[0]:
+            best = (len(root), network)
+    return None if best is None else best[1]
+
+
+def is_network_filesystem(path: Path) -> bool | None:
+    """Whether ``path`` lives on a network mount; ``None`` when unknowable.
+
+    Reading a payload on such a mount to hash it is a second full transfer
+    over the wire — the thing a follow-up to ``rsync`` must not do silently.
+    """
     try:
-        result = subprocess.run(
-            cmd,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
-    except OSError:
+        if sys.platform == "darwin":
+            out = subprocess.run(
+                ["mount"], check=True, capture_output=True, text=True
+            ).stdout
+            mounts = _parse_darwin_mounts(out)
+        elif sys.platform.startswith("linux"):
+            mounts = _parse_linux_mountinfo(
+                Path("/proc/self/mountinfo").read_text(encoding="utf-8")
+            )
+        else:
+            return None
+    except (OSError, subprocess.CalledProcessError):
         return None
-    if result.returncode != 0:
-        return None
-    kind = (result.stdout or "").strip().lower()
-    return kind or None
-
-
-def _warn_if_network_rehash(path: Path, progress) -> None:
-    """``--rehash`` of an SMB/NFS dest reads every payload byte over the wire."""
-    kind = filesystem_type(path)
-    if kind is None or kind not in _NETWORK_FS:
-        return
-    progress(
-        f"warning: destination is on {kind}; --rehash will read every dest "
-        "byte over the network. Hash dest on the machine where this vault is "
-        "a local disk, or omit --rehash to trust dest's ledger and file sizes "
-        "(the same gate archive uses after rsync)."
-    )
+    return _deepest_mount(os.path.realpath(path), mounts)
 
 
 def _files_to_hash(
@@ -2206,6 +2229,17 @@ def _reconcile_visible(
             f"Hashing {len(targets)} files already at the destination "
             f"({human_size(total)}) against the pin — not downloading."
         )
+        if is_network_filesystem(destination):
+            emit(
+                "warning: the destination is on a network mount, so that hashing "
+                "reads every byte back over the wire. Run this where the vault "
+                "is a local disk"
+                + (
+                    ", or omit --rehash to trust dest's ledger and file sizes."
+                    if rehash
+                    else "."
+                )
+            )
         return reconcile(
             destination,
             destination_payload,
@@ -2236,15 +2270,15 @@ def assemble_partials(
 
     An out-of-band copy (``rsync``, ``cp -a``) of the partial into the
     destination is the same as this function's copy step: files dest already
-    holds and dest's ledger already marks ``verified`` (size match) are
-    trusted, not re-read — the same gate ``archive`` uses after rsync.
-    Hashing dest is ``--rehash`` (or ``darsay verify``) and must run where
-    dest is a local disk; hashing an SMB dest from the laptop pulls the
-    whole payload back over the wire. Present dest files with no verified
-    record are still hashed (adoption). ``move=True`` then skeletonizes
-    the source for dest-verified files. A destination that is already
-    *registered* is frozen — without ``--move`` that is an error; with
-    ``--move`` dest is not rewritten and the source is skeletonized.
+    holds are not recopied. Dest files its ledger marks ``verified`` (size
+    match) are trusted, not re-read — the gate ``archive`` uses after rsync;
+    hashing dest over a network mount would pull the payload back over the
+    wire. ``rehash=True`` hashes them anyway (run it where dest is a local
+    disk); present files with no verified record are always hashed
+    (adoption). ``move=True`` then skeletonizes the source for every file
+    dest holds as ``verified``. A destination that is already *registered*
+    is frozen — without ``--move`` that is an error; with ``--move`` dest is
+    not rewritten and the source is skeletonized.
     """
     import copy
 
@@ -2286,9 +2320,13 @@ def assemble_partials(
     if move:
         _refuse_move_of_registered_sources(sources, destination)
 
+    trust_note = (
+        "re-hashed dest against the pin"
+        if rehash
+        else "trusted dest ledger + size; --rehash re-hashes dest, best run where "
+        "it is a local disk"
+    )
     progress(f"Assembling into {destination}")
-    if rehash:
-        _warn_if_network_rehash(destination, progress)
     with transfer_lock(destination, progress=progress):
         if dest_registered and not move:
             raise SystemExit(
@@ -2319,11 +2357,11 @@ def assemble_partials(
 
         if dest_registered:
             # rsync (or archive) already produced the museum copy. Payload is
-            # frozen: trust dest ledger + size unless --rehash, copy nothing,
-            # then skeletonize sources. Dest metadata is not rewritten.
+            # frozen: reconcile read-only, copy nothing, skeletonize sources.
+            # Dest metadata is not rewritten.
             progress(
-                "Destination is already registered; payload is frozen. "
-                "Source files dest already holds as verified will be released."
+                "Destination is already registered; payload is frozen "
+                "(no copy, no download)."
             )
             session = {"files_completed": 0, "bytes_adopted": 0, "bytes_network": 0}
             work = copy.deepcopy(ledger)
@@ -2336,7 +2374,6 @@ def assemble_partials(
                 apply=False,
                 rehash=rehash,
             )
-            progress("Releasing source payload files dest already holds as verified...")
             _release_sources(sources, destination, work, root, progress)
             plan = add_disk_preflight(
                 destination,
@@ -2344,10 +2381,7 @@ def assemble_partials(
                 min_free=free_space_floor(vault),
             )
             progress(
-                "Destination already registered; copied 0 payload files "
-                "(trusted dest ledger + size"
-                + (", hashed dest" if rehash else "")
-                + ")"
+                f"Destination already registered; copied 0 payload files ({trust_note})"
             )
             print_plan(plan, progress=progress)
             return destination, plan
@@ -2359,9 +2393,9 @@ def assemble_partials(
         copied_cache_files = 0
         copied_partial_bytes = 0
         try:
-            # Dest files the ledger already marks verified (size match) are
-            # trusted — the rsync/cp -a path must not pull dest back over
-            # SMB to re-hash. --rehash opts into a dest-local read.
+            # What dest already holds (an rsync/cp -a lands here): verified
+            # ledger entries are trusted by size, unrecorded bytes are hashed,
+            # --rehash hashes everything.
             plan = _reconcile_visible(
                 destination,
                 destination_payload,
@@ -2410,9 +2444,6 @@ def assemble_partials(
             )
 
             if move:
-                progress(
-                    "Releasing source payload files dest already holds as verified..."
-                )
                 _release_sources(sources, destination, ledger, root, progress)
 
             finish_session(destination, ledger, session, "assemble")
@@ -2428,17 +2459,8 @@ def assemble_partials(
             min_free=free_space_floor(vault),
         )
         if copied_payload_files == 0 and copied_cache_files == 0:
-            still_to_hash = _files_to_hash(destination_payload, ledger, rehash=False)
-            trusted_n = len(ledger.get("expected") or []) - len(still_to_hash)
-            if not rehash and trusted_n:
-                progress(
-                    f"Destination already held {trusted_n} verified files "
-                    "(ledger + size); not re-hashing dest. Pass --rehash to "
-                    "hash dest where it is a local disk."
-                )
             progress(
-                "Destination already held the payload; copied 0 files"
-                + (" (hashed dest)" if rehash else " (trusted dest ledger + size)")
+                f"Destination already held the payload; copied 0 files ({trust_note})"
             )
         else:
             progress(

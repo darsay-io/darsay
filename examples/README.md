@@ -439,7 +439,8 @@ darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
 
 Hash dest where it is a local disk — `assemble --rehash` or `darsay
 verify` on the NAS, not from a laptop over SMB (that reads the whole
-payload back over the wire). `--rehash` on a network mount warns.
+payload back over the wire). `assemble` warns before it hashes a dest
+that sits on a network mount.
 A registered payload is frozen: rsync it, verify dest on the dest host,
 then `darsay rm` the source. `--move` is the verb for partials.
 

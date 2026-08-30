@@ -19,9 +19,12 @@ from darsay.transfer import (
     NetworkCounter,
     StopController,
     Throttle,
+    _deepest_mount,
     _digest_matches,
     _fetch_with_reconnect,
     _lock_was_copied,
+    _parse_darwin_mounts,
+    _parse_linux_mountinfo,
     _payload_path,
     _same_transfer_set,
     _wait_for_link,
@@ -1081,3 +1084,40 @@ def test_begin_session_records_the_tool_version(tmp_path):
     session = begin_session(tmp_path, ledger)
     assert session["tool"] == f"darsay {__version__}"
     assert (tmp_path / "transfer.json").is_file()
+
+
+def test_network_mount_detection_from_mount_tables():
+    """Deepest mount wins; remote is decided the way ``df -l`` decides it."""
+    darwin = _parse_darwin_mounts(
+        "/dev/disk3s1s1 on / (apfs, sealed, local, read-only, journaled)\n"
+        "/dev/disk3s5 on /System/Volumes/Data (apfs, local, journaled, nobrowse)\n"
+        "//jeremy@nas._smb._tcp.local/vault on /Volumes/vault "
+        "(smbfs, nodev, nosuid, mounted by jeremy)\n"
+        "nas:/export on /Volumes/nfs (nfs, nodev, nosuid)\n"
+        "afp_0TQ3xx on /Volumes/afp (afpfs, nodev, nosuid, mounted by jeremy)\n"
+        "not a mount line\n"
+    )
+    assert _deepest_mount("/Volumes/vault/acme--big/abc", darwin) is True
+    assert _deepest_mount("/Volumes/nfs", darwin) is True
+    assert _deepest_mount("/Volumes/afp/x", darwin) is True
+    assert _deepest_mount("/Volumes/vaultier/x", darwin) is False
+    assert _deepest_mount("/System/Volumes/Data/vault", darwin) is False
+    assert _deepest_mount("/", darwin) is False
+    assert _deepest_mount("/x", []) is None
+
+    linux = _parse_linux_mountinfo(
+        "22 1 8:1 / / rw,relatime - ext4 /dev/sda1 rw\n"
+        "40 22 0:45 / /mnt/nas rw,relatime shared:1 - nfs4 nas:/export rw\n"
+        "41 22 0:50 / /mnt/share rw - cifs //nas/share rw\n"
+        "42 22 0:51 / /mnt/ssh rw - fuse.sshfs jeremy@host:/vault rw\n"
+        "43 22 0:52 / /mnt/cluster rw - gpfs gpfs_vault rw\n"
+        "44 22 8:2 / /mnt/my\\040disk rw - xfs /dev/sdb1 rw\n"
+        "garbage line without separator\n"
+    )
+    assert _deepest_mount("/mnt/nas/acme--big/abc", linux) is True
+    assert _deepest_mount("/mnt/share", linux) is True
+    assert _deepest_mount("/mnt/ssh/x", linux) is True
+    assert _deepest_mount("/mnt/cluster/x", linux) is True
+    assert _deepest_mount("/mnt/my disk/vault", linux) is False
+    assert _deepest_mount("/mnt/nasty", linux) is False
+    assert _deepest_mount("/home/jeremy/vault", linux) is False

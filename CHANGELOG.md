@@ -57,9 +57,10 @@ Tool version (`darsay.__version__`) is independent of
   the laptop would pull the payload back over the wire).
 - **`assemble` hashes dest only under `--rehash`** (same flag as `archive`)
   or when dest has bytes with no verified ledger record (adoption). The
-  live panel still covers that hashing pass. `--rehash` on a network
-  filesystem (`smbfs`, `nfs`, …) warns: run it on the dest host. Default
-  `--move` after rsync is metadata + source delete, not a dest-wide read.
+  live panel still covers that hashing pass, and when it would read a dest
+  on a network mount (SMB, NFS, sshfs, …) it warns first: run assemble where
+  the vault is a local disk. Default `--move` after rsync is metadata +
+  source delete, not a dest-wide read.
 - **`assemble --move` into a registered destination** trusts dest ledger +
   size (payload stays frozen) and skeletonizes the source. `--move` of a
   registered source is refused: rsync the finished bundle, then

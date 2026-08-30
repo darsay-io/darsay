@@ -652,9 +652,9 @@ def test_assemble_move_after_rsync_copies_nothing_and_skeletonizes_source(
 
     ``rsync srcvault/<slug>/<rev>/ dstvault/<slug>/<rev>/`` then
     ``darsay --vault dstvault assemble src --move`` must not recopy payload
-    bytes the destination already holds. It re-hashes them against the pin,
-    deletes the source files, and keeps the source ledger as a skeleton.
-    A second ``--move`` is a no-op for those files.
+    bytes the destination already holds. It trusts dest's rsync'd ledger
+    (size match), deletes the source files, and keeps the source ledger as a
+    skeleton. A second ``--move`` is a no-op for those files.
     """
     import darsay.transfer as transfer_mod
     from darsay.cli import main
@@ -715,12 +715,30 @@ def test_assemble_move_after_rsync_copies_nothing_and_skeletonizes_source(
         assert (dest / "model" / path).read_bytes() == dest_bytes_before[path]
 
 
+def _track_hashes(monkeypatch) -> list[Path]:
+    """Record every path ``hash_file`` reads during the test."""
+    import darsay.hashing as hashing_mod
+
+    hashed: list[Path] = []
+    real_hash = hashing_mod.hash_file
+
+    def tracking_hash(path, *args, **kwargs):
+        hashed.append(Path(path))
+        return real_hash(path, *args, **kwargs)
+
+    monkeypatch.setattr(hashing_mod, "hash_file", tracking_hash)
+    monkeypatch.setattr("darsay.transfer.hash_file", tracking_hash)
+    return hashed
+
+
+def _hashed_under(hashed: list[Path], payload_dir: Path) -> list[Path]:
+    return [p for p in hashed if payload_dir in p.parents]
+
+
 def test_assemble_after_rsync_does_not_rehash_verified_dest(
     vault, test_provider, tmp_path, monkeypatch
 ):
     """After rsync, dest ledger + size is enough: do not read dest to re-hash."""
-    import darsay.hashing as hashing_mod
-
     files = model_files(param_shape=[64, 64])
     test_provider.add_repo("acme/big", files)
     laptop = tmp_path / "laptop"
@@ -732,25 +750,15 @@ def test_assemble_after_rsync_does_not_rehash_verified_dest(
         for path, state in load_ledger(source)["files"].items()
         if state.get("status") == "verified"
     }
-    hashed_paths = []
-    real_hash = hashing_mod.hash_file
-
-    def tracking_hash(path, *args, **kwargs):
-        hashed_paths.append(Path(path))
-        return real_hash(path, *args, **kwargs)
-
-    monkeypatch.setattr(hashing_mod, "hash_file", tracking_hash)
-    monkeypatch.setattr("darsay.transfer.hash_file", tracking_hash)
+    hashed = _track_hashes(monkeypatch)
 
     logs: list[str] = []
     assemble_partials([source], vault, progress=logs.append, move=True)
-    dest_payload = dest / "model"
-    dest_hashed = [
-        p for p in hashed_paths if dest_payload in p.parents or p.parent == dest_payload
-    ]
-    assert dest_hashed == [], "rsync'd verified dest files must not be re-hashed"
+    assert _hashed_under(hashed, dest / "model") == [], (
+        "rsync'd verified dest files must not be re-hashed"
+    )
     text = "\n".join(str(item) for item in logs)
-    assert "not re-hashing dest" in text
+    assert "trusted dest ledger + size" in text
     assert "Releasing source payload files" in text
     src_ledger = load_ledger(source)
     for path in verified:
@@ -763,51 +771,67 @@ def test_assemble_rehash_after_rsync_hashes_dest(
     vault, test_provider, tmp_path, monkeypatch
 ):
     """``--rehash`` is the dest-local integrity pass; it does read dest."""
-    import darsay.hashing as hashing_mod
-
     files = model_files(param_shape=[64, 64])
     test_provider.add_repo("acme/big", files)
     laptop = tmp_path / "laptop"
     laptop.mkdir()
     source = _archive_half("test:acme/big", vault=laptop)
     dest = _plant_bundle_in_vault(source, vault)
-    hashed_paths = []
-    real_hash = hashing_mod.hash_file
+    hashed = _track_hashes(monkeypatch)
 
-    def tracking_hash(path, *args, **kwargs):
-        hashed_paths.append(Path(path))
-        return real_hash(path, *args, **kwargs)
-
-    monkeypatch.setattr(hashing_mod, "hash_file", tracking_hash)
-    monkeypatch.setattr("darsay.transfer.hash_file", tracking_hash)
-
-    assemble_partials([source], vault, progress=silent, move=True, rehash=True)
-    dest_payload = dest / "model"
-    dest_hashed = [
-        p for p in hashed_paths if dest_payload in p.parents or p.parent == dest_payload
-    ]
-    assert dest_hashed, "--rehash must hash dest files"
+    logs: list[str] = []
+    assemble_partials([source], vault, progress=logs.append, move=True, rehash=True)
+    assert _hashed_under(hashed, dest / "model"), "--rehash must hash dest files"
+    assert "re-hashed dest against the pin" in "\n".join(str(item) for item in logs)
 
 
-def test_assemble_rehash_warns_on_network_filesystem(
+def test_assemble_warns_before_hashing_dest_on_a_network_mount(
     vault, test_provider, tmp_path, monkeypatch
 ):
-    from darsay.transfer import _warn_if_network_rehash
+    """The warning is tied to reading dest over the wire, not to a flag.
 
-    monkeypatch.setattr("darsay.transfer.filesystem_type", lambda path: "smbfs")
+    Trusting an rsync'd ledger reads nothing, so it is silent. Adopting
+    unrecorded bytes (rsync of ``model/`` alone) and ``--rehash`` both read
+    dest, so both warn; only the latter can be avoided by omitting a flag.
+    """
+    files = model_files(param_shape=[64, 64])
+    test_provider.add_repo("acme/big", files)
+    laptop = tmp_path / "laptop"
+    laptop.mkdir()
+    source = _archive_half("test:acme/big", vault=laptop)
+    dest = _plant_bundle_in_vault(source, vault)
+    monkeypatch.setattr("darsay.transfer.is_network_filesystem", lambda path: True)
+    hashed = _track_hashes(monkeypatch)
+    warning = "warning: the destination is on a network mount"
+
     logs: list[str] = []
-    _warn_if_network_rehash(vault, logs.append)
-    text = "\n".join(logs)
-    assert "smbfs" in text
-    assert "--rehash will read every dest byte over the network" in text
+    assemble_partials([source], vault, progress=logs.append)
+    assert _hashed_under(hashed, dest / "model") == []
+    assert warning not in "\n".join(str(item) for item in logs)
+
+    (dest / "transfer.json").unlink()
     logs.clear()
-    monkeypatch.setattr("darsay.transfer.filesystem_type", lambda path: "apfs")
-    _warn_if_network_rehash(vault, logs.append)
-    assert logs == []
+    assemble_partials([source], vault, progress=logs.append)
+    text = "\n".join(str(item) for item in logs)
+    assert _hashed_under(hashed, dest / "model")
+    assert "Hashing" in text and "already at the destination" in text
+    assert warning in text
+    assert "omit --rehash" not in text
+
+    logs.clear()
+    assemble_partials([source], vault, progress=logs.append, rehash=True)
+    text = "\n".join(str(item) for item in logs)
+    assert warning in text
+    assert "omit --rehash" in text
+
+    monkeypatch.setattr("darsay.transfer.is_network_filesystem", lambda path: False)
+    logs.clear()
+    assemble_partials([source], vault, progress=logs.append, rehash=True)
+    assert warning not in "\n".join(str(item) for item in logs)
 
 
 def test_assemble_move_into_registered_dest_does_not_mutate_payload(
-    vault, test_provider, tmp_path
+    vault, test_provider, tmp_path, monkeypatch
 ):
     """rsync a half, dest finishes and registers, then --move skeletonizes source."""
     files = model_files(param_shape=[64, 64])
@@ -827,9 +851,13 @@ def test_assemble_move_into_registered_dest_does_not_mutate_payload(
     registered = archive_quiet("test:acme/big", vault=vault)
     assert (registered / "manifest.json").is_file()
     downloads_after_register = list(test_provider.downloads)
+    hashed = _track_hashes(monkeypatch)
 
     dest, _plan = assemble_partials([source], vault, progress=silent, move=True)
     assert (dest / "manifest.json").is_file()
+    assert _hashed_under(hashed, dest / "model") == [], (
+        "a registered dest is trusted by ledger + size, not re-read"
+    )
     for path in verified:
         assert (dest / "model" / path).read_bytes() == dest_bytes[path]
         assert load_ledger(source)["files"][path]["status"] == "moved"
