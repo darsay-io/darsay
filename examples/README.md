@@ -381,6 +381,15 @@ darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
 darsay --vault /Volumes/big archive Qwen/Qwen3.8-27B     # registers, zero network
 ```
 
+Already rsync'd the partial onto the big drive? Same command — it copies
+nothing already there, re-hashes dest against the pin, then skeletonizes
+the laptop copy:
+
+```bash
+rsync -a ~/darsay/qwen--qwen3.8-27b/<rev>/ /Volumes/big/qwen--qwen3.8-27b/<rev>/
+darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
+```
+
 `--move` only ever deletes a file the destination has re-hashed against the
 pin, so a bad copy never costs the laptop its only copy. On the laptop,
 `darsay list` shows the skeleton — `archiving: 52% (…, 27.8 GB moved out)` —

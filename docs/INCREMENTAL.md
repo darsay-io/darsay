@@ -413,6 +413,19 @@ darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
 darsay --vault /Volumes/big archive Qwen/Qwen3.8-27B          # registers, zero network bytes
 ```
 
+Already `rsync`'d or `cp -a`'d the partial into the destination vault? Same
+command. `assemble --move` copies nothing for files the destination already
+holds, re-hashes them against the pin, then deletes the source bytes and
+leaves a skeleton. A second `--move` is a no-op for files already `moved`.
+The destination path is the usual two-level layout
+(`<vault>/<repo-slug>/<revision12>/`); rsync the bundle there, not into the
+vault root:
+
+```bash
+rsync -a ~/darsay/qwen--qwen3.8-27b/<rev>/ /Volumes/big/qwen--qwen3.8-27b/<rev>/
+darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
+```
+
 The move is **verify-then-delete, per file**: the destination's hash against
 the pinned upstream digest — the same gate that admits a file to a manifest —
 is what permits the source deletion, so an interrupted or rotted copy leaves

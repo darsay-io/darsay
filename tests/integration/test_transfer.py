@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+from pathlib import Path
 
 import pytest
 
@@ -627,3 +628,81 @@ def test_assemble_move_via_cli_reports_the_skeleton(vault, test_provider, tmp_pa
     # The moved half is gone from the skeleton; its ledger records the move.
     src_ledger = load_ledger(skeleton)
     assert any(s.get("status") == "moved" for s in src_ledger["files"].values())
+
+
+def _plant_bundle_in_vault(source, dest_vault):
+    """``rsync`` / ``cp -a`` a bundle into another vault at the same slug/rev."""
+    dest = dest_vault / source.parent.name / source.name
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source, dest)
+    return dest
+
+
+def test_assemble_move_after_rsync_copies_nothing_and_skeletonizes_source(
+    vault, test_provider, tmp_path, monkeypatch
+):
+    """An out-of-band copy into the dest vault is the same as assemble.
+
+    ``rsync srcvault/<slug>/<rev>/ dstvault/<slug>/<rev>/`` then
+    ``darsay --vault dstvault assemble src --move`` must not recopy payload
+    bytes the destination already holds. It re-hashes them against the pin,
+    deletes the source files, and keeps the source ledger as a skeleton.
+    A second ``--move`` is a no-op for those files.
+    """
+    import darsay.transfer as transfer_mod
+    from darsay.cli import main
+
+    files = model_files(param_shape=[64, 64])
+    test_provider.add_repo("acme/big", files)
+    laptop = tmp_path / "laptop"
+    laptop.mkdir()
+    source = _archive_half("test:acme/big", vault=laptop)
+    dest = _plant_bundle_in_vault(source, vault)
+
+    verified_before = {
+        path
+        for path, state in load_ledger(source)["files"].items()
+        if state.get("status") == "verified"
+    }
+    assert verified_before, "expected the partial to hold at least one file"
+    dest_bytes_before = {
+        path: (dest / "model" / path).read_bytes() for path in verified_before
+    }
+
+    copied_payload = []
+    real_copy = transfer_mod._copy_local_file
+
+    def tracking_copy(src, dst):
+        dest_path = Path(dst)
+        if ".cache" not in dest_path.parts:
+            copied_payload.append(dest_path)
+        return real_copy(src, dst)
+
+    monkeypatch.setattr(transfer_mod, "_copy_local_file", tracking_copy)
+
+    rc = main(["--vault", str(vault), "assemble", str(source), "--move"])
+    assert rc == 0
+    assert copied_payload == [], "destination already held the payload; recopy is waste"
+
+    src_ledger = load_ledger(source)
+    assert (source / "transfer.json").is_file(), "source metadata must stay"
+    for path in verified_before:
+        assert src_ledger["files"][path]["status"] == "moved"
+        assert "moved_at" in src_ledger["files"][path]
+        assert not (source / "model" / path).exists(), "source payload should be gone"
+        assert (dest / "model" / path).read_bytes() == dest_bytes_before[path]
+
+    dest_ledger = load_ledger(dest)
+    for path in verified_before:
+        assert dest_ledger["files"][path]["status"] == "verified"
+
+    # Same command again: dest still holds the bytes, source already moved.
+    copied_payload.clear()
+    rc = main(["--vault", str(vault), "assemble", str(source), "--move"])
+    assert rc == 0
+    assert copied_payload == []
+    src_ledger = load_ledger(source)
+    for path in verified_before:
+        assert src_ledger["files"][path]["status"] == "moved"
+        assert not (source / "model" / path).exists()
+        assert (dest / "model" / path).read_bytes() == dest_bytes_before[path]
