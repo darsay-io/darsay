@@ -135,6 +135,26 @@ This distinction is the whole design.
 If a number is not in the payload and not returned by upstream, it is
 not in the manifest. Curators fill gaps in `curation.md`.
 
+## Dry run
+
+Every command that writes takes `-n` / `--dry-run`. It runs the same checks
+(and gives the same refusals), prints the same report in the conditional —
+`Would remove:`, `Would import …`, `Would assemble into …` — writes nothing,
+and ends with the real command to paste:
+
+```
+$ darsay rm qwen--qwen3-0.6b -n
+Would remove:
+     1.5 GiB  ~/darsay/qwen--qwen3-0.6b/c1899de289a0
+Dry run: nothing removed. To remove:
+  darsay rm qwen--qwen3-0.6b
+```
+
+`archive --dry-run` is the one preview that records something: a new source
+is pinned (`transfer.json`, no payload bytes) so the plan it printed is the
+plan the real run continues. `estimate` is the preflight that writes nothing
+at all.
+
 ## The loop
 
 ```mermaid

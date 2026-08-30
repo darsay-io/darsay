@@ -230,3 +230,65 @@ def test_source_error_is_a_clean_message(capsys):
 
     assert _run(unreachable, None) == 1
     assert "cannot reach Hugging Face" in capsys.readouterr().err
+
+
+def test_dry_run_is_offered_by_every_writing_command():
+    from darsay.cli import flags_by_command
+
+    flags = flags_by_command()
+    writing = (
+        "estimate",
+        "archive",
+        "rm",
+        "regen",
+        "hydrate",
+        "run",
+        "dehydrate",
+        "envs",
+        "export",
+        "import",
+        "assemble",
+        "catalog new",
+        "catalog add",
+        "catalog drop",
+        "catalog adopt",
+        "catalog regen",
+        "doctor",
+    )
+    for command in writing:
+        assert "--dry-run" in flags[command], command
+    # Read-only commands do not pretend to have anything to skip.
+    for command in ("list", "du", "config", "info", "verify", "smoke", "complete"):
+        assert "--dry-run" not in flags[command], command
+
+
+def test_dry_run_short_flag_parses_alone_and_clustered(capsys):
+    from darsay.cli import build_parser
+
+    parser = build_parser()
+    assert parser.parse_args(["rm", "toy", "-n"]).dry_run is True
+    clustered = parser.parse_args(["rm", "toy", "-yn"])
+    assert clustered.yes is True and clustered.dry_run is True
+    run = parser.parse_args(["run", "toy", "Say", "hello", "-n"])
+    assert run.prompt == ["Say", "hello"] and run.dry_run is True
+    with pytest.raises(SystemExit):
+        parser.parse_args(["list", "-n"])
+    capsys.readouterr()
+
+
+def test_real_command_drops_only_the_dry_run_flag():
+    from darsay.cli import _real_command
+
+    assert (
+        _real_command(["--vault", "v", "rm", "toy", "--dry-run"])
+        == "darsay --vault v rm toy"
+    )
+    assert _real_command(["rm", "toy", "-yn"]) == "darsay rm toy -y"
+    assert _real_command(["rm", "toy", "-ny", "-n"]) == "darsay rm toy -y"
+    assert (
+        _real_command(["run", "toy", "Say hello", "-n"]) == "darsay run toy 'Say hello'"
+    )
+    assert (
+        _real_command(["archive", "--next", "summer", "--dry-run", "--max-gb", "10"])
+        == "darsay archive --next summer --max-gb 10"
+    )

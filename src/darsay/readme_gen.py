@@ -565,7 +565,32 @@ def _render_dataset_readme(bundle_dir: Path, m: dict) -> str:
     return "\n".join(lines)
 
 
-def write_bundle_readme(bundle_dir: Path, manifest: dict) -> None:
-    (bundle_dir / "README.md").write_text(
-        render_bundle_readme(bundle_dir, manifest), encoding="utf-8"
-    )
+def changed_lines(old: str | None, new: str) -> tuple[int, int]:
+    """Lines a rewrite would add and remove, against what is on disk (``None`` = no file)."""
+    import difflib
+
+    if old is None:
+        return len(new.splitlines()), 0
+    added = removed = 0
+    for line in difflib.ndiff(old.splitlines(), new.splitlines()):
+        if line.startswith("+ "):
+            added += 1
+        elif line.startswith("- "):
+            removed += 1
+    return added, removed
+
+
+def write_bundle_readme(
+    bundle_dir: Path, manifest: dict, *, dry_run: bool = False
+) -> tuple[int, int]:
+    """Rewrite README.md from manifest + curation.md; returns (added, removed) lines.
+
+    ``dry_run`` reports the delta and leaves the file alone.
+    """
+    path = bundle_dir / "README.md"
+    text = render_bundle_readme(bundle_dir, manifest)
+    old = path.read_text(encoding="utf-8") if path.is_file() else None
+    delta = changed_lines(old, text)
+    if not dry_run:
+        path.write_text(text, encoding="utf-8")
+    return delta

@@ -92,7 +92,10 @@ non-zero — a broken env is never registered.
 - `darsay dehydrate <bundle>` drops the bundle's `hydration.json`
   (its run history included); manifest `tested_hardware` entries survive.
 - `darsay hydrate --dry-run` prints the full plan without touching
-  anything; `--force` rebuilds an existing env in place.
+  anything; `--force` rebuilds an existing env in place. `run --dry-run`
+  shows that plan when a hydrate would come first, then the engine, prompt,
+  and settings it would generate with; `dehydrate --dry-run` and
+  `envs --prune --dry-run` list what they would delete and delete nothing.
 
 ## Runner contract
 

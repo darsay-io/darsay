@@ -9,6 +9,29 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Added
+
+- **`-n` / `--dry-run` on every command that writes.** `rm`, `export`,
+  `import`, `assemble`, `regen`, `run`, `dehydrate`, `envs --prune`, the
+  `catalog` verbs, and `estimate CATALOG` join `archive`, `hydrate`, and
+  `doctor --fix`. A dry run performs the same checks (and gives the same
+  refusals), prints the same report in the conditional — `Would remove:`,
+  `Would import …`, `Would assemble into …` — writes nothing, and ends with
+  the real command to paste. `assemble --dry-run` prices the copy (files,
+  bytes, disk), says what would be hashed at dest, how far along the pin
+  would be afterwards, and which source files `--move` would release, and
+  creates nothing — not even the destination directory. `archive --dry-run`
+  now says when it recorded a pin.
+- `rm` lists sizes before asking; `regen` and `catalog regen` report whether
+  README.md actually changed (`+3 -1 lines` / `unchanged`); `catalog adopt`
+  lists the entries it took.
+
+### Fixed
+
+- `archive --force --dry-run` no longer deletes the existing bundle's
+  `manifest.json` or rewrites its ledger; a forced dry run plans from a fresh
+  pin on paper only.
+
 ## [0.14.1] - 2026-08-30
 
 A follow-up to the 0.14.0 rsync work. The warning that was supposed to stop

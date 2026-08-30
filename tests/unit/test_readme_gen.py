@@ -17,3 +17,11 @@ def test_human_params():
     assert human_params(1_500_000) == "1.5M"
     assert human_params(600_000_000) == "600.0M"
     assert human_params(1_200_000_000) == "1.20B"
+
+
+def test_changed_lines_counts_a_rewrite_against_disk():
+    from darsay.readme_gen import changed_lines
+
+    assert changed_lines("a\nb\nc\n", "a\nb\nc\n") == (0, 0)
+    assert changed_lines("a\nb\nc\n", "a\nB\nc\nd\n") == (2, 1)
+    assert changed_lines(None, "one\ntwo\n") == (2, 0)

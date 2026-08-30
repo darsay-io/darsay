@@ -516,7 +516,9 @@ def new_catalog(
     title: str | None = None,
     curator: str | None = None,
     note: str | None = None,
+    dry_run: bool = False,
 ) -> dict:
+    """Create ``<vault>/catalogs/<slug>/``; ``dry_run`` validates and writes nothing."""
     slug = fold_slug(name)
     if not SLUG_RE.fullmatch(slug):
         raise SystemExit(
@@ -542,10 +544,11 @@ def new_catalog(
         "updated": now,
         "entries": [],
     }
-    dest.mkdir(parents=True, exist_ok=True)
-    save_catalog(path, catalog)
-    _write_catalog_curation_template(dest, catalog)
-    write_catalog_readme(dest, catalog)
+    if not dry_run:
+        dest.mkdir(parents=True, exist_ok=True)
+        save_catalog(path, catalog)
+        _write_catalog_curation_template(dest, catalog)
+        write_catalog_readme(dest, catalog)
     catalog["_path"] = str(path)
     return catalog
 
@@ -697,13 +700,16 @@ def drop_entry(
     return removed
 
 
-def adopt_entries(dest: dict, other: dict) -> tuple[int, int]:
-    """Copy missing entries from other into dest. Returns (adopted, skipped)."""
+def adoptable_entries(dest: dict, other: dict) -> tuple[list[dict], int]:
+    """Entries of ``other`` that ``dest`` lacks, and how many it already has.
+
+    The entries come back as fresh copies ready to append; nothing is changed.
+    """
     existing = {
         entry_key(e["source"], e.get("revision"), e.get("include"))
         for e in dest["entries"]
     }
-    adopted = 0
+    new_entries: list[dict] = []
     skipped = 0
     for entry in other["entries"]:
         parsed = try_parse_source(entry["source"])
@@ -711,7 +717,7 @@ def adopt_entries(dest: dict, other: dict) -> tuple[int, int]:
         if key in existing:
             skipped += 1
             continue
-        dest["entries"].append(
+        new_entries.append(
             {
                 "source": parsed.canonical if parsed is not None else entry["source"],
                 "revision": entry.get("revision"),
@@ -723,10 +729,16 @@ def adopt_entries(dest: dict, other: dict) -> tuple[int, int]:
             }
         )
         existing.add(key)
-        adopted += 1
-    if adopted:
+    return new_entries, skipped
+
+
+def adopt_entries(dest: dict, other: dict) -> tuple[int, int]:
+    """Copy missing entries from other into dest. Returns (adopted, skipped)."""
+    new_entries, skipped = adoptable_entries(dest, other)
+    dest["entries"].extend(new_entries)
+    if new_entries:
         dest["updated"] = utc_now()
-    return adopted, skipped
+    return len(new_entries), skipped
 
 
 def row_matches_entry(row: dict, entry: dict) -> bool:
@@ -1262,7 +1274,7 @@ def overlay_envelope(catalog: dict, vault: Path, rows: list[dict]) -> dict:
     }
 
 
-def write_catalog_readme(catalog_dir: Path, catalog: dict) -> None:
+def render_catalog_readme(catalog_dir: Path, catalog: dict) -> str:
     """Generated view of intent + cached estimates. Never overlay."""
     title = catalog.get("title") or catalog["id"]
     n = len(catalog.get("entries") or [])
@@ -1321,4 +1333,22 @@ def write_catalog_readme(catalog_dir: Path, catalog: dict) -> None:
     body = _curation_body(catalog_dir)
     if body:
         lines += ["## Curation", "", body, ""]
-    (catalog_dir / "README.md").write_text("\n".join(lines), encoding="utf-8")
+    return "\n".join(lines)
+
+
+def write_catalog_readme(
+    catalog_dir: Path, catalog: dict, *, dry_run: bool = False
+) -> tuple[int, int]:
+    """Rewrite the catalog README.md; returns (added, removed) lines versus disk.
+
+    ``dry_run`` reports the delta and leaves the file alone.
+    """
+    from .readme_gen import changed_lines
+
+    path = catalog_dir / "README.md"
+    text = render_catalog_readme(catalog_dir, catalog)
+    old = path.read_text(encoding="utf-8") if path.is_file() else None
+    delta = changed_lines(old, text)
+    if not dry_run:
+        path.write_text(text, encoding="utf-8")
+    return delta

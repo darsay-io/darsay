@@ -894,3 +894,26 @@ def test_warning_detail_strips_error_prefix():
 def test_project_stored_estimate_none():
     assert project_stored_estimate(None) is None
     assert project_stored_estimate("x") is None
+
+
+def test_adoptable_entries_previews_without_changing_either_catalog():
+    from darsay.catalog import adopt_entries, adoptable_entries
+
+    dest = {
+        "entries": [
+            {"source": "huggingface:acme/toy", "revision": None, "include": None}
+        ]
+    }
+    other = {
+        "entries": [
+            {"source": "huggingface:acme/toy", "desire": 9},
+            {"source": "huggingface:acme/big", "desire": 5, "include": ["*.gguf"]},
+        ]
+    }
+    new, skipped = adoptable_entries(dest, other)
+    assert [e["source"] for e in new] == ["huggingface:acme/big"]
+    assert new[0]["include"] == ["*.gguf"]
+    assert skipped == 1
+    assert len(dest["entries"]) == 1 and "updated" not in dest
+    assert adopt_entries(dest, other) == (1, 1)
+    assert len(dest["entries"]) == 2 and dest["updated"]

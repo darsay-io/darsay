@@ -35,6 +35,9 @@ immutable payload, recorded facts, still loadable as-is.
 
 <bundle> is a path, a bundle id from `list` (name@revision12), or a unique prefix.
 
+Every command that writes takes -n / --dry-run: the same checks, the same
+report in the conditional, nothing written, and the real command to paste.
+
 Source refs are provider-qualified (`huggingface:Qwen/Qwen3-0.6B`,
 `huggingface:datasets/<owner>/<name>`). Unprefixed `owner/name`,
 `datasets/owner/name`, and huggingface.co URLs are Hugging Face shorthand.
@@ -172,6 +175,54 @@ def _desire(value: str) -> int:
     return parsed
 
 
+DRY_RUN_FLAGS = ("-n", "--dry-run")
+
+
+def _add_dry_run(parser, what: str) -> None:
+    """``-n`` / ``--dry-run`` on a command that writes: same checks, same report."""
+    parser.add_argument("-n", "--dry-run", action="store_true", help=what)
+
+
+def _real_command(argv: list[str]) -> str:
+    """The invocation that was typed, minus its dry-run flag — ready to paste."""
+    tokens = []
+    for token in argv:
+        if token in DRY_RUN_FLAGS:
+            continue
+        if re.fullmatch(r"-[yn]{2,}", token):  # clustered short flags: -yn, -ny
+            rest = token[1:].replace("n", "")
+            if rest:
+                tokens.append("-" + rest)
+            continue
+        tokens.append(token)
+    return shlex.join(["darsay", *tokens])
+
+
+def _dry_run_done(args, skipped: str, verb: str) -> None:
+    """The two lines every dry run ends with: what did not happen, then the real command."""
+    print(f"Dry run: {skipped}. To {verb}:")
+    print(f"  {_real_command(getattr(args, 'argv', None) or [])}")
+
+
+def _delta_note(added: int, removed: int) -> str:
+    """How a regenerated file differs from the one on disk."""
+    if not added and not removed:
+        return "  (unchanged)"
+    return f"  (+{added} -{removed} lines)"
+
+
+def _entry_label(entry: dict) -> str:
+    """One catalog entry the way ``catalog add`` echoes it."""
+    label = entry["source"]
+    if entry.get("revision"):
+        label += f" @ {str(entry['revision'])[:12]}"
+    if entry.get("include"):
+        label += f"  include={','.join(entry['include'])}"
+    if entry.get("desire") is not None:
+        label += f"  desire={entry['desire']}"
+    return label
+
+
 def cmd_estimate(args) -> int:
     from .catalog import try_resolve_catalog
     from .estimate import estimate, print_estimate
@@ -291,17 +342,21 @@ def _estimate_catalog(args, vault, cat_path) -> int:
             f"  {entry['source']}{extra}  {human_size(digest['payload_bytes'])}  "
             f"{digest.get('license') or '?'}{hints}{params}"
         )
-    catalog["updated"] = utc_now()
-    save_catalog(cat_path, catalog)
-    write_catalog_readme(cat_path.parent, catalog)
+    dry_run = bool(getattr(args, "dry_run", False))
+    if not dry_run:
+        catalog["updated"] = utc_now()
+        save_catalog(cat_path, catalog)
+        write_catalog_readme(cat_path.parent, catalog)
     if args.json:
         print(json.dumps(digests, indent=2, ensure_ascii=False))
         return 1 if failed else 0
     records = bundle_records(vault)
     stats = overlay_stats(overlay(catalog, records))
-    print(f"Updated {cat_path}")
+    print(f"{'Would update' if dry_run else 'Updated'} {cat_path}")
     unknown = " + ?" if stats["remaining_unknown"] else ""
     print(f"  remaining (this vault): {human_size(stats['remaining_bytes'])}{unknown}")
+    if dry_run:
+        _dry_run_done(args, "catalog not written", "refresh")
     return 1 if failed else 0
 
 
@@ -394,6 +449,7 @@ def cmd_archive(args) -> int:
         print("\nInterrupted.", file=sys.stderr)
         return 130
     if bundle is None:  # --dry-run printed the plan and intentionally did not register
+        _dry_run_done(args, "no payload bytes moved", "archive")
         return 0
     bundle_id = f"{bundle.parent.name}@{bundle.name}"
     from .archiver import load_manifest
@@ -663,15 +719,19 @@ def cmd_catalog_new(args) -> int:
         title=args.title,
         curator=args.curator,
         note=args.note,
+        dry_run=args.dry_run,
     )
     dest = Path(catalog["_path"]).parent
-    print(f"Catalog ready: {dest}")
+    print(f"{'Would create catalog' if args.dry_run else 'Catalog ready'}: {dest}")
     print(f"  id:       {catalog['id']}")
     print(f"  catalog:  {dest / 'catalog.json'}")
     print(f"  readme:   {dest / 'README.md'}")
     print(
         f"  curation: {dest / 'curation.md'}  <- edit this, then `darsay catalog regen`"
     )
+    if args.dry_run:
+        _dry_run_done(args, "nothing written", "create")
+        return 0
     print(
         f"  next:     darsay catalog add {catalog['id']} huggingface:owner/name --desire 8"
     )
@@ -725,16 +785,20 @@ def cmd_catalog_add(args) -> int:
         inc = f"  include={','.join(entry['include'])}" if entry.get("include") else ""
         print(f"Unchanged {entry['source']}{inc}")
         return 0
-    save_catalog(path, catalog)
-    write_catalog_readme(path.parent, catalog)
+    if not args.dry_run:
+        save_catalog(path, catalog)
+        write_catalog_readme(path.parent, catalog)
     inc = f"  include={','.join(entry['include'])}" if entry.get("include") else ""
     desire = f"  desire={entry['desire']}" if entry.get("desire") is not None else ""
-    verb = "Added" if action == "added" else "Updated"
     if action == "added":
+        verb = "Would add" if args.dry_run else "Added"
         hint = extra or "  (no estimate yet; darsay estimate " + catalog["id"] + ")"
         print(f"{verb} {entry['source']}{inc}{desire}{hint}")
     else:
+        verb = "Would update" if args.dry_run else "Updated"
         print(f"{verb} {entry['source']}{inc}{desire}{extra}")
+    if args.dry_run:
+        _dry_run_done(args, "nothing written", "add" if action == "added" else "update")
     return 0
 
 
@@ -762,6 +826,10 @@ def cmd_catalog_drop(args) -> int:
         include_given=bool(args.include) or bool(args.full),
         revision_given=bool(args.revision),
     )
+    if args.dry_run:
+        print(f"Would drop {removed['source']} from {catalog['id']}")
+        _dry_run_done(args, "nothing written", "drop")
+        return 0
     save_catalog(path, catalog)
     write_catalog_readme(path.parent, catalog)
     print(f"Dropped {removed['source']} from {catalog['id']}")
@@ -771,6 +839,7 @@ def cmd_catalog_drop(args) -> int:
 def cmd_catalog_adopt(args) -> int:
     from .catalog import (
         adopt_entries,
+        adoptable_entries,
         load_catalog,
         require_writable,
         resolve_catalog,
@@ -789,13 +858,22 @@ def cmd_catalog_adopt(args) -> int:
     src_path = resolve_catalog(vault, args.other)
     dest = load_catalog(dest_path)
     other = load_catalog(src_path)
-    adopted, skipped = adopt_entries(dest, other)
-    save_catalog(dest_path, dest)
-    write_catalog_readme(dest_path.parent, dest)
+    new_entries, skipped = adoptable_entries(dest, other)
+    if not args.dry_run:
+        adopt_entries(dest, other)
+        save_catalog(dest_path, dest)
+        write_catalog_readme(dest_path.parent, dest)
+    n = len(new_entries)
     print(
-        f"Adopted {adopted} entries from {other['id']} → {dest['id']} "
+        f"{'Would adopt' if args.dry_run else 'Adopted'} {n} "
+        f"entr{'y' if n == 1 else 'ies'} from {other['id']} → {dest['id']} "
         f"({skipped} already present)"
     )
+    for entry in new_entries:
+        print(f"  {_entry_label(entry)}")
+    if args.dry_run:
+        _dry_run_done(args, "nothing written", "adopt")
+        return 0
     print(f"  next: darsay list {dest['id']}")
     return 0
 
@@ -814,15 +892,24 @@ def cmd_catalog_regen(args) -> int:
     path = resolve_catalog(vault, args.catalog)
     require_writable(vault, path, bool(args.write))
     catalog = load_catalog(path)
+    readme = path.parent / "README.md"
+    if args.dry_run:
+        added, removed = write_catalog_readme(path.parent, catalog, dry_run=True)
+        print(f"Would regenerate {readme}{_delta_note(added, removed)}")
+        _dry_run_done(args, "nothing written", "regenerate")
+        return 0
     catalog["updated"] = utc_now()
     save_catalog(path, catalog)
-    write_catalog_readme(path.parent, catalog)
-    print(f"Regenerated {path.parent / 'README.md'}")
+    added, removed = write_catalog_readme(path.parent, catalog)
+    print(f"Regenerated {readme}{_delta_note(added, removed)}")
     return 0
 
 
 def cmd_rm(args) -> int:
     import shutil
+
+    from .readme_gen import human_size
+    from .vault import dir_size
 
     bundles = []
     for spec in args.bundles:
@@ -845,10 +932,21 @@ def cmd_rm(args) -> int:
             ) from None
         if bundle.resolve() == vault:
             raise SystemExit("error: refusing to delete the vault root")
+    sizes = [dir_size(bundle) for bundle in unique]
+
+    def listing(heading: str) -> None:
+        print(heading)
+        for bundle, size in zip(unique, sizes, strict=True):
+            print(f"  {human_size(size):>10}  {bundle}")
+        if len(unique) > 1:
+            print(f"  {human_size(sum(sizes)):>10}  total ({len(unique)} bundles)")
+
+    if args.dry_run:
+        listing("Would remove:")
+        _dry_run_done(args, "nothing removed", "remove")
+        return 0
     if not args.yes:
-        print("Will remove:")
-        for bundle in unique:
-            print(f"  {bundle}")
+        listing("Will remove:")
         try:
             answer = input("Type yes to confirm: ")
         except EOFError:
@@ -1039,7 +1137,10 @@ def cmd_info(args) -> int:
 def cmd_export(args) -> int:
     from .export import export_bundle
 
-    out = export_bundle(_bundle_dir(args), Path(args.output_dir))
+    out = export_bundle(_bundle_dir(args), Path(args.output_dir), dry_run=args.dry_run)
+    if args.dry_run:
+        _dry_run_done(args, "nothing written", "export")
+        return 0
     print(f"Export ready: {out}")
     return 0
 
@@ -1047,13 +1148,33 @@ def cmd_export(args) -> int:
 def cmd_import(args) -> int:
     from .export import import_bundle
 
-    import_bundle(Path(args.file), _vault_path(args, announce=True), force=args.force)
+    import_bundle(
+        Path(args.file),
+        _vault_path(args, announce=True),
+        force=args.force,
+        dry_run=args.dry_run,
+    )
+    if args.dry_run:
+        _dry_run_done(args, "nothing unpacked", "import")
     return 0
 
 
 def cmd_assemble(args) -> int:
     from .transfer import assemble_partials
 
+    if args.dry_run:
+        from .transfer import assemble_plan, print_assemble_plan
+
+        plan = assemble_plan(
+            [Path(path) for path in args.partials],
+            _vault_path(args, announce=True),
+            move=args.move,
+            rehash=args.rehash,
+        )
+        print_assemble_plan(plan)
+        skipped = "nothing copied, nothing released" if args.move else "nothing copied"
+        _dry_run_done(args, skipped, "assemble")
+        return 0
     bundle, plan = assemble_partials(
         [Path(path) for path in args.partials],
         _vault_path(args, announce=True),
@@ -1099,6 +1220,7 @@ def cmd_hydrate(args) -> int:
         ignore_preflight=args.ignore_preflight,
     )
     if record.get("dry_run"):
+        _dry_run_done(args, "nothing built", "hydrate")
         return 0
     return 0 if record["probe"].get("status") == "pass" else 1
 
@@ -1122,14 +1244,20 @@ def cmd_run(args) -> int:
         weights=args.weights,
         ignore_preflight=args.ignore_preflight,
         repl=args.repl,
+        dry_run=args.dry_run,
     )
+    if record.get("dry_run"):
+        _dry_run_done(args, "nothing run", "run")
+        return 0
     return 0 if record["status"] == "pass" else 1
 
 
 def cmd_dehydrate(args) -> int:
     from .hydrate import dehydrate_bundle
 
-    dehydrate_bundle(_bundle_dir(args))
+    hydrated = dehydrate_bundle(_bundle_dir(args), dry_run=args.dry_run)
+    if args.dry_run and hydrated:
+        _dry_run_done(args, "nothing removed", "dehydrate")
     return 0
 
 
@@ -1139,7 +1267,9 @@ def cmd_envs(args) -> int:
 
     vault = _vault_path(args)
     if args.prune:
-        prune_envs(vault)
+        freed = prune_envs(vault, dry_run=args.dry_run)
+        if args.dry_run and freed:
+            _dry_run_done(args, "nothing removed", "prune")
         return 0
     envs = list_envs(vault)
     if not envs:
@@ -1160,8 +1290,15 @@ def cmd_regen(args) -> int:
     from .readme_gen import write_bundle_readme
 
     bundle = _bundle_dir(args)
-    write_bundle_readme(bundle, load_manifest(bundle))
-    print(f"Regenerated {bundle / 'README.md'}")
+    readme = bundle / "README.md"
+    added, removed = write_bundle_readme(
+        bundle, load_manifest(bundle), dry_run=args.dry_run
+    )
+    if args.dry_run:
+        print(f"Would regenerate {readme}{_delta_note(added, removed)}")
+        _dry_run_done(args, "nothing written", "regenerate")
+        return 0
+    print(f"Regenerated {readme}{_delta_note(added, removed)}")
     return 0
 
 
@@ -1222,6 +1359,7 @@ def _add_doctor_diagnose_flags(parser, *, suppress_defaults: bool = False) -> No
     default = argparse.SUPPRESS if suppress_defaults else False
     append_default = argparse.SUPPRESS if suppress_defaults else None
     parser.add_argument(
+        "-n",
         "--dry-run",
         action="store_true",
         default=default,
@@ -1347,6 +1485,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="allow writing a path-addressed catalog (vault-named catalogs are always writable)",
     )
+    _add_dry_run(p, "with a catalog, print the refreshed sizes; save nothing")
     p.set_defaults(func=cmd_estimate)
 
     p = add_cmd("archive", help="download and archive a model or dataset as a bundle")
@@ -1369,10 +1508,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--force", action="store_true", help="re-archive over an existing bundle"
     )
-    p.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="pin, reconcile, and print the transfer plan without moving payload bytes",
+    _add_dry_run(
+        p, "pin, reconcile, and print the transfer plan; move no payload bytes"
     )
     budget = p.add_mutually_exclusive_group()
     budget.add_argument(
@@ -1513,6 +1650,7 @@ def build_parser() -> argparse.ArgumentParser:
     n.add_argument("--title", help="human title (default: the slug)")
     n.add_argument("--curator", help="curator name")
     n.add_argument("--note", help="catalog-level note")
+    _add_dry_run(n, "print the files that would be created; write nothing")
     n.set_defaults(func=cmd_catalog_new)
 
     a = add_cat(
@@ -1532,6 +1670,7 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument(
         "--write", action="store_true", help="allow writing a path-addressed catalog"
     )
+    _add_dry_run(a, "print the add or update; write nothing")
     a.set_defaults(func=cmd_catalog_add)
 
     d = add_cat("drop", help="remove a source from a catalog")
@@ -1545,6 +1684,7 @@ def build_parser() -> argparse.ArgumentParser:
     d.add_argument(
         "--write", action="store_true", help="allow writing a path-addressed catalog"
     )
+    _add_dry_run(d, "print the entry that would be dropped; write nothing")
     d.set_defaults(func=cmd_catalog_drop)
 
     o = add_cat("adopt", help="copy missing entries from another catalog")
@@ -1555,6 +1695,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="allow writing a path-addressed destination",
     )
+    _add_dry_run(o, "list the entries that would be adopted; write nothing")
     o.set_defaults(func=cmd_catalog_adopt)
 
     g = add_cat(
@@ -1564,6 +1705,7 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument(
         "--write", action="store_true", help="allow writing a path-addressed catalog"
     )
+    _add_dry_run(g, "report whether README.md would change; write nothing")
     g.set_defaults(func=cmd_catalog_regen)
 
     p = add_cmd("rm", help="delete one or more bundles from the vault")
@@ -1571,6 +1713,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "-y", "--yes", action="store_true", help="do not prompt for confirmation"
     )
+    _add_dry_run(p, "list what would be removed, with sizes; remove nothing")
     p.set_defaults(func=cmd_rm)
 
     p = add_cmd("du", help="disk usage of bundles and the shared runtime")
@@ -1648,6 +1791,7 @@ def build_parser() -> argparse.ArgumentParser:
         "regen", help="rebuild a bundle's README.md from manifest + curation.md"
     )
     p.add_argument("bundle", help=bundle_help)
+    _add_dry_run(p, "report whether README.md would change; write nothing")
     p.set_defaults(func=cmd_regen)
 
     p = add_cmd("hydrate", help="build (or reuse) a runnable local env for a bundle")
@@ -1666,9 +1810,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--force", action="store_true", help="rebuild the env even if it exists"
     )
-    p.add_argument(
-        "--dry-run", action="store_true", help="show the plan without touching anything"
-    )
+    _add_dry_run(p, "print the plan — engine, env, packages; build nothing")
     p.add_argument(
         "--ignore-preflight",
         action="store_true",
@@ -1726,6 +1868,11 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="try anyway if the architecture or RAM check fails",
     )
+    _add_dry_run(
+        p,
+        "print what run would do — hydrate first if needed, then the engine, "
+        "prompt, and device; run nothing",
+    )
     p.set_defaults(func=cmd_run)
 
     p = add_cmd(
@@ -1733,12 +1880,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="remove a bundle's hydration record (envs are shared; prune via `envs --prune`)",
     )
     p.add_argument("bundle", help=bundle_help)
+    _add_dry_run(p, "print the record that would be removed; remove nothing")
     p.set_defaults(func=cmd_dehydrate)
 
     p = add_cmd("envs", help="list shared runtime envs and which bundles use them")
     p.add_argument(
         "--prune", action="store_true", help="delete envs no hydrated bundle references"
     )
+    _add_dry_run(p, "with --prune, list the envs that would be deleted; delete nothing")
     p.set_defaults(func=cmd_envs)
 
     p = add_cmd(
@@ -1751,6 +1900,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=".",
         help="directory for the .mvb.tar (default: cwd)",
     )
+    _add_dry_run(p, "print what would be packed and where; write nothing")
     p.set_defaults(func=cmd_export)
 
     p = add_cmd(
@@ -1762,6 +1912,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="replace an existing bundle at the destination",
     )
+    _add_dry_run(p, "read the marker and print what would land where; unpack nothing")
     p.set_defaults(func=cmd_import)
 
     p = add_cmd(
@@ -1790,6 +1941,7 @@ def build_parser() -> argparse.ArgumentParser:
             "this reads the whole dest over the wire; run it on the dest host"
         ),
     )
+    _add_dry_run(p, "print what would be copied, hashed, and released; change nothing")
     p.set_defaults(func=cmd_assemble)
 
     return parser
@@ -1834,6 +1986,7 @@ def main(argv=None) -> int:
     if not getattr(args, "command", None):
         parser.print_help()
         return 0
+    args.argv = parse_argv  # a dry run ends by echoing this, minus the flag
     return _run(args.func, args)
 
 

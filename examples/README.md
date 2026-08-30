@@ -31,6 +31,7 @@ This page is the cookbook you return to.
 | Write curator notes | [Curation](#write-curator-notes) |
 | Curate a want-list and share it | [Share a catalog](#share-a-catalog) |
 | Prove the bytes have not drifted | [Verify](#verify-on-a-schedule) |
+| See what a command would do first | [Dry run](#dry-run-anything-that-writes) |
 
 ---
 
@@ -486,6 +487,51 @@ read-only — it does not write `verification.json`.
 
 `darsay list` is the inventory; `darsay info <bundle>` is the index
 card.
+
+---
+
+## Dry run anything that writes
+
+Every command that changes the vault takes `-n` / `--dry-run`. It runs the
+same checks, prints the same report in the conditional, writes nothing, and
+ends with the real command to paste.
+
+```bash
+darsay rm qwen--qwen3-0.6b -n
+darsay import /Volumes/USB/backups/qwen--qwen3-0.6b@<rev>.mvb.tar -n
+darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move -n
+darsay run qwen--qwen3-0.6b -n                  # will it install torch first?
+darsay envs --prune -n
+```
+
+What `rm -n` prints:
+
+```
+Would remove:
+     1.5 GiB  ~/darsay/qwen--qwen3-0.6b/c1899de289a0
+Dry run: nothing removed. To remove:
+  darsay rm qwen--qwen3-0.6b
+```
+
+And `assemble --move -n`, before a laptop hands its half to the big drive:
+
+```
+Would assemble into /Volumes/big/qwen--qwen3.8-27b/<rev>  (existing partial)
+  from:     ~/darsay/qwen--qwen3.8-27b/<rev>  — copy 4 files, 12.1 GiB  (3 already at dest)
+  verify:   4 files against the pin (4 copied)
+  disk:     needs 12.1 GiB, free 400.2 GiB (2.0 GiB floor) at /Volumes/big — OK
+  after:    7/9 files verified; 2 files (4.4 GiB) still to fetch — continue with `darsay archive`
+  --move:   ~/darsay/qwen--qwen3.8-27b/<rev>  — release 7 files (26.2 GiB) once verified at dest → skeleton (pin + hashes stay)
+Dry run: nothing copied, nothing released. To assemble:
+  darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
+```
+
+A refusal is the same refusal: `import -n` of a bundle the vault already
+holds exits with `already exists (use --force to replace)`, exactly as the
+real command would. `archive --dry-run` is the one preview that records
+something — a new source is pinned in `transfer.json`, no payload bytes —
+so the plan it shows is the plan the real run continues; `estimate` is the
+preflight that writes nothing at all.
 
 ---
 

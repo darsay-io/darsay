@@ -178,6 +178,7 @@ If a later source is gated, set `$HF_TOKEN` or run
 | You wrote curator notes | edit `curation.md`, then `darsay regen <bundle>` |
 | You want shell completion | `eval "$(darsay complete zsh)"` (or `bash` / `fish`) |
 | You want disk usage | `darsay du` |
+| You want to see it before it happens | add `-n` / `--dry-run` to any command that writes — `darsay rm <bundle> -n`, `darsay import file.mvb.tar -n`, `darsay run <bundle> -n`. Same checks, nothing written, and the real command to paste at the end |
 
 Copy-paste for each of those: [Examples](../examples/README.md).
 

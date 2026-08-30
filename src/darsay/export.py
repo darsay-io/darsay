@@ -75,7 +75,14 @@ def _tarinfo(name: str, size: int, mtime: int) -> tarfile.TarInfo:
     return ti
 
 
-def export_bundle(bundle_dir: Path, output_dir: Path, progress=print) -> Path:
+def export_bundle(
+    bundle_dir: Path, output_dir: Path, progress=print, *, dry_run: bool = False
+) -> Path:
+    """Pack one bundle into ``<output_dir>/<bundle_id>.mvb.tar``.
+
+    ``dry_run`` runs the same checks, prints what would be packed and where,
+    and writes nothing — not the tar, not ``exports.json``.
+    """
     from .archiver import load_manifest, utc_now
 
     manifest = load_manifest(bundle_dir)
@@ -96,7 +103,6 @@ def export_bundle(bundle_dir: Path, output_dir: Path, progress=print) -> Path:
     }
     marker_bytes = (json.dumps(marker, indent=2, sort_keys=True) + "\n").encode("utf-8")
 
-    output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"{bundle_id}.mvb.tar"
     if out_path.exists():
         raise SystemExit(f"error: {out_path} already exists")
@@ -108,6 +114,29 @@ def export_bundle(bundle_dir: Path, output_dir: Path, progress=print) -> Path:
         *((rel, abs_path, None) for rel, abs_path in files),
     ]
     members.sort(key=lambda t: t[0])
+    exports_path = bundle_dir / "exports.json"
+    if dry_run:
+        from .readme_gen import human_size
+
+        total = (
+            len(marker_bytes)
+            + len(verifier)
+            + sum(abs_path.stat().st_size for _rel, abs_path in files)
+        )
+        excluded = sorted(
+            name for name in EXPORT_EXCLUDE if (bundle_dir / name).exists()
+        )
+        progress(
+            f"Would export {bundle_id}: {len(members)} files, {human_size(total)} "
+            f"-> {out_path}"
+        )
+        if excluded:
+            progress(
+                f"  excluded:  {', '.join(excluded)}  (machine-local; never exported)"
+            )
+        progress(f"  then:      record the tar's sha256 and size in {exports_path}")
+        return out_path
+    output_dir.mkdir(parents=True, exist_ok=True)
     progress(f"Exporting {bundle_id}: {len(members)} files -> {out_path}")
     with tarfile.open(out_path, "w", format=tarfile.GNU_FORMAT) as tar:
         tar.addfile(
@@ -138,7 +167,6 @@ def export_bundle(bundle_dir: Path, output_dir: Path, progress=print) -> Path:
         "mvb_format_version": MVB_FORMAT_VERSION,
         "written_by": {"tool": "darsay", "version": __version__},
     }
-    exports_path = bundle_dir / "exports.json"
     data = (
         json.loads(exports_path.read_text(encoding="utf-8"))
         if exports_path.exists()
@@ -184,8 +212,18 @@ def _read_marker(tar_path: Path) -> dict:
 
 
 def import_bundle(
-    tar_path: Path, vault: Path, force: bool = False, progress=print
+    tar_path: Path,
+    vault: Path,
+    force: bool = False,
+    progress=print,
+    *,
+    dry_run: bool = False,
 ) -> Path:
+    """Unpack, re-hash, and only then register an export in ``vault``.
+
+    ``dry_run`` reads the marker, runs the same refusals, prints what would
+    land where, and unpacks nothing.
+    """
     from .archiver import load_manifest, utc_now, write_manifest
     from .verify import verify_bundle
 
@@ -197,6 +235,28 @@ def import_bundle(
     dest = vault / name / rev
     if dest.exists() and not force:
         raise SystemExit(f"error: {dest} already exists (use --force to replace)")
+    if dry_run:
+        from .readme_gen import human_size
+
+        count = marker.get("payload_file_count")
+        progress(
+            f"Would import {bundle_id} ({marker.get('artifact_type') or 'bundle'}, "
+            f"format {marker['mvb_format_version']}) from {tar_path} "
+            f"({human_size(tar_path.stat().st_size)})"
+        )
+        progress(
+            f"  destination: {dest}  "
+            + ("(exists — --force replaces it)" if dest.exists() else "(new)")
+        )
+        progress(
+            f"  payload:     {'?' if count is None else count} files, "
+            f"{human_size(marker.get('payload_size_bytes'))} — every file re-hashed "
+            "against the embedded manifest before it registers"
+        )
+        progress(
+            "  then:        stamp archive.imported, move into the vault, verify there"
+        )
+        return dest
 
     file_sha256 = hash_file(tar_path, with_blake3=False)["sha256"]
     progress(

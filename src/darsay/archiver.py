@@ -272,6 +272,7 @@ def archive(
         bundle_dir = bundle_dir_for(vault, ref, snapshot.revision)
 
     payload_dir = bundle_dir / root
+    pin_recorded = False
     with transfer_lock(bundle_dir, progress=progress):
         manifest_path = bundle_dir / "manifest.json"
         if manifest_path.exists() and not force and not dry_run:
@@ -306,7 +307,8 @@ def archive(
             elif force:
                 assert snapshot is not None
                 ledger = new_ledger(snapshot, include=include)
-                save_ledger(bundle_dir, ledger)
+                if not dry_run:  # a dry run re-plans from a fresh pin on paper only
+                    save_ledger(bundle_dir, ledger)
             else:
                 try:
                     ledger = load_ledger(bundle_dir)
@@ -314,13 +316,22 @@ def archive(
                 except LedgerError:
                     assert snapshot is not None
                     ledger = new_ledger(snapshot, include=include)
+                    # A dry run of a new source records the pin — and only
+                    # the pin — so the plan it prints is the plan the real
+                    # run continues (docs/INCREMENTAL.md §6).
                     save_ledger(bundle_dir, ledger)
-            if force and manifest_path.exists():
+                    pin_recorded = True
+            if force and manifest_path.exists() and not dry_run:
                 manifest_path.unlink()
 
         if dry_run:
             import copy
 
+            if pin_recorded:
+                progress(
+                    f"Pinned {ref.canonical} @ {ledger['revision'][:12]} — recorded "
+                    f"in {bundle_dir / 'transfer.json'} (no payload bytes)."
+                )
             dry_ledger = copy.deepcopy(ledger)
             dry_session = {"bytes_adopted": 0, "files_completed": 0}
             plan = reconcile(

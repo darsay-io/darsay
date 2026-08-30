@@ -398,7 +398,11 @@ them against the pin, merges portable cache metadata, keeps only the longest
 copy of each matching `.incomplete`, and records an `assemble` session without
 embedding source-machine paths in the ledger. The final `archive` invocation
 continues any remainder—or, when assembly reached 100%, performs registration
-with zero payload network bytes.
+with zero payload network bytes. `assemble --dry-run` prints that plan first —
+what each partial would contribute, what would be hashed at dest, the disk
+verdict for the copy, how far along the pin would be afterwards, and (with
+`--move`) which source files would be released — and creates nothing, not
+even the destination directory.
 
 #### Across disks: `assemble --move` and skeletons
 
@@ -497,7 +501,7 @@ recorded hashes for bytes this pin handed to a named vault.
 | `--max-rate SIZE` | cap network transfer at SIZE per second across every worker (`5M`, `500K`; default unlimited via config; `0` lifts a configured cap) |
 | `--max-offline DURATION` | keep waiting for a lost network up to DURATION before pausing cleanly (`30m`, `2h`; default 1 h via config; `0` pauses at the first failure) |
 | `--revision REF` | pin a branch, tag, or commit instead of `main`; the resolved commit is frozen for every later run |
-| `--dry-run` | pin (if new) + reconcile + plan report; move no payload bytes |
+| `-n` / `--dry-run` | pin (if new) + reconcile + plan report; move no payload bytes. Every writing command takes the same flag |
 | `--rehash` | re-verify every present file by digest instead of trusting the ledger (periodic paranoia for months-long archives) |
 | `--jobs N` | small-file worker pool width (default 4; large files always sequential) |
 | `--shard N/T` | advisory cooperative order: byte-balance files into T lanes and fetch lane N first; the expected set is unchanged |

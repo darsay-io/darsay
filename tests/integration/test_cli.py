@@ -666,3 +666,396 @@ def test_cli_dry_run_prints_the_disk_outlook(vault, test_provider, capsys, monke
         f"  after about {smallest} B more (1 of {len(files)} remaining files)." in out
     )
     assert "then re-run to continue" in out
+
+
+# --- dry runs -----------------------------------------------------------------
+#
+# Every command that writes takes -n / --dry-run. Each test proves the same
+# three things: the report names what would happen, the tree is byte-for-byte
+# unchanged, and the last line is the real command minus the flag.
+
+
+def _tree(root):
+    """Every file under root with its bytes — to prove a dry run wrote nothing."""
+    return {p.relative_to(root): p.read_bytes() for p in root.rglob("*") if p.is_file()}
+
+
+def _real(*argv) -> str:
+    import shlex
+
+    return shlex.join(["darsay", *argv])
+
+
+def test_cli_rm_dry_run_lists_sizes_removes_nothing_and_asks_nothing(
+    vault, test_provider, capsys, monkeypatch
+):
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    before = _tree(vault)
+    monkeypatch.setattr("builtins.input", lambda *_: pytest.fail("dry run asked"))
+    capsys.readouterr()
+    assert main(["--vault", str(vault), "rm", "acme--toy", "-yn"]) == 0
+    out = capsys.readouterr().out
+    lines = out.splitlines()
+    assert lines[0] == "Would remove:"
+    assert lines[1].endswith(f"  {bundle}") and "KiB" in lines[1]
+    assert lines[-2] == "Dry run: nothing removed. To remove:"
+    assert lines[-1] == "  " + _real("--vault", str(vault), "rm", "acme--toy", "-y")
+    assert _tree(vault) == before
+
+
+def test_cli_export_and_import_dry_runs_write_nothing(
+    vault, test_provider, tmp_path, capsys
+):
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    out_dir = tmp_path / "backups"
+    before = _tree(vault)
+    capsys.readouterr()
+    assert (
+        main(["--vault", str(vault), "export", "acme--toy", "-o", str(out_dir), "-n"])
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert out.startswith("Would export test--acme--toy@")
+    assert "excluded:  transfer.json  (machine-local; never exported)" in out
+    assert "Dry run: nothing written. To export:" in out
+    assert not out_dir.exists()
+    assert not (bundle / "exports.json").exists()
+    assert _tree(vault) == before
+
+    assert main(["--vault", str(vault), "export", "acme--toy", "-o", str(out_dir)]) == 0
+    tar = next(out_dir.glob("*.mvb.tar"))
+    other = tmp_path / "other"
+    other.mkdir()
+    capsys.readouterr()
+    assert main(["--vault", str(other), "import", str(tar), "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("Would import test--acme--toy@")
+    assert f"destination: {other / 'test--acme--toy'}" in out and "(new)" in out
+    assert "payload:     7 files" in out
+    assert "Dry run: nothing unpacked. To import:" in out
+    assert list(other.rglob("*")) == []
+
+    # The same refusal the real command gives, and the same --force answer.
+    with pytest.raises(SystemExit, match="already exists"):
+        main(["--vault", str(vault), "import", str(tar), "--dry-run"])
+    capsys.readouterr()
+    assert main(["--vault", str(vault), "import", str(tar), "--force", "-n"]) == 0
+    assert "(exists — --force replaces it)" in capsys.readouterr().out
+    assert _tree(vault) == {
+        **before,
+        **{k: v for k, v in _tree(vault).items() if k.name == "exports.json"},
+    }
+
+
+def test_cli_assemble_dry_run_creates_nothing_and_move_releases_nothing(
+    vault, test_provider, tmp_path, capsys
+):
+    from darsay.transfer import PartialTransfer
+
+    test_provider.add_repo("acme/toy", model_files())
+    partials = []
+    for shard in ((1, 2), (2, 2)):
+        sub = tmp_path / f"lane{shard[0]}"
+        sub.mkdir()
+        try:
+            archive_quiet("test:acme/toy", vault=sub, shard=shard, max_bytes=1)
+        except PartialTransfer as stop:
+            partials.append(stop.bundle_dir)
+        else:
+            partials.append(next(sub.glob("*/*")))
+    sources_before = [_tree(p) for p in partials]
+    capsys.readouterr()
+    argv = ["--vault", str(vault), "assemble", *map(str, partials)]
+    assert main([*argv, "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith(f"Would assemble into {vault / 'test--acme--toy'}")
+    assert "(new partial)" in out
+    assert "copy 1 file" in out
+    assert "verify:   2 files against the pin (2 copied)" in out
+    assert "disk:     needs" in out
+    assert "after:    2/7 files verified; 5 files" in out
+    assert "--move:" not in out
+    assert out.rstrip().endswith("  " + _real(*argv))
+    assert list(vault.rglob("*")) == []
+
+    assert main([*argv, "--move", "-n"]) == 0
+    out = capsys.readouterr().out
+    assert "--move:" in out and "once verified at dest → skeleton" in out
+    assert "Dry run: nothing copied, nothing released. To assemble:" in out
+    assert list(vault.rglob("*")) == []
+    assert [_tree(p) for p in partials] == sources_before
+
+    # Against an existing partial the plan says so and copies nothing.
+    assert main(argv) == 0
+    capsys.readouterr()
+    assert main([*argv, "-n"]) == 0
+    out = capsys.readouterr().out
+    assert "(existing partial)" in out
+    assert "nothing to copy  (1 already at dest)" in out
+
+
+def test_cli_regen_dry_run_reports_the_delta_and_writes_nothing(
+    vault, test_provider, capsys
+):
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    readme = bundle / "README.md"
+    capsys.readouterr()
+    assert main(["--vault", str(vault), "regen", "acme--toy", "-n"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith(f"Would regenerate {readme}  (unchanged)")
+    assert "Dry run: nothing written. To regenerate:" in out
+
+    original = readme.read_bytes()
+    (bundle / "curation.md").write_text(
+        "# notes\n\n## Why\n\nA fine toy.\n", encoding="utf-8"
+    )
+    assert main(["--vault", str(vault), "regen", "acme--toy", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert f"Would regenerate {readme}  (+" in out
+    assert readme.read_bytes() == original
+
+    assert main(["--vault", str(vault), "regen", "acme--toy"]) == 0
+    assert f"Regenerated {readme}  (+" in capsys.readouterr().out
+    assert "A fine toy." in readme.read_text(encoding="utf-8")
+
+
+def test_cli_catalog_dry_runs_write_nothing(vault, test_provider, tmp_path, capsys):
+    test_provider.add_repo("acme/toy", model_files())
+    v = ["--vault", str(vault)]
+    assert main([*v, "catalog", "new", "summer", "--title", "Summer", "-n"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith(f"Would create catalog: {vault / 'catalogs' / 'summer'}")
+    assert "Dry run: nothing written. To create:" in out
+    assert not (vault / "catalogs").exists()
+
+    assert main([*v, "catalog", "new", "summer", "--title", "Summer"]) == 0
+    cat_dir = vault / "catalogs" / "summer"
+    capsys.readouterr()
+    assert (
+        main([*v, "catalog", "add", "summer", "test:acme/toy", "--desire", "8", "-n"])
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert out.startswith("Would add test:acme/toy  desire=8")
+    assert "Dry run: nothing written. To add:" in out
+    assert json.loads((cat_dir / "catalog.json").read_text())["entries"] == []
+
+    assert main([*v, "catalog", "add", "summer", "test:acme/toy", "--desire", "8"]) == 0
+    before = _tree(cat_dir)
+    capsys.readouterr()
+    assert (
+        main([*v, "catalog", "add", "summer", "test:acme/toy", "--desire", "8", "-n"])
+        == 0
+    )
+    assert capsys.readouterr().out.startswith("Unchanged test:acme/toy")
+    assert (
+        main([*v, "catalog", "add", "summer", "test:acme/toy", "--desire", "9", "-n"])
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert out.startswith("Would update test:acme/toy  desire=9")
+    assert "To update:" in out
+
+    assert main([*v, "catalog", "drop", "summer", "test:acme/toy", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith("Would drop test:acme/toy from summer")
+
+    friend = tmp_path / "friend"
+    friend.mkdir()
+    (friend / "catalog.json").write_text(
+        json.dumps(
+            {
+                "catalog_schema_version": "1.0.0",
+                "kind": "darsay.catalog",
+                "id": "friend",
+                "title": "Friend",
+                "created": "2026-01-01T00:00:00+00:00",
+                "updated": "2026-01-01T00:00:00+00:00",
+                "entries": [
+                    {
+                        "source": "test:acme/toy",
+                        "desire": 9,
+                        "added": "2026-01-01T00:00:00+00:00",
+                    },
+                    {
+                        "source": "test:acme/other",
+                        "include": ["*.gguf"],
+                        "desire": 5,
+                        "added": "2026-01-01T00:00:00+00:00",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert main([*v, "catalog", "adopt", "summer", str(friend), "-n"]) == 0
+    out = capsys.readouterr().out
+    assert "Would adopt 1 entry from friend → summer (1 already present)" in out
+    assert "  test:acme/other  include=*.gguf  desire=5" in out
+
+    assert main([*v, "catalog", "regen", "summer", "-n"]) == 0
+    assert "(unchanged)" in capsys.readouterr().out
+
+    assert main([*v, "estimate", "summer", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert f"Would update {cat_dir / 'catalog.json'}" in out
+    assert "Dry run: catalog not written. To refresh:" in out
+    entries = json.loads((cat_dir / "catalog.json").read_text())["entries"]
+    assert entries[0]["estimate"] is None
+    assert _tree(cat_dir) == before
+
+
+def test_cli_run_dry_run_plans_the_hydrate_and_runs_nothing(
+    vault, test_provider, tmp_path, monkeypatch, capsys
+):
+    import sys
+
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    runtime = tmp_path / "runtime"
+    monkeypatch.setenv("DARSAY_RUNTIME", str(runtime))
+    monkeypatch.setattr(
+        "darsay.hydrate.ensure_env", lambda *a, **k: pytest.fail("dry run built an env")
+    )
+    monkeypatch.setattr(
+        "darsay.hydrate._invoke_runner", lambda *a, **k: pytest.fail("dry run ran")
+    )
+    capsys.readouterr()
+    assert main(["--vault", str(vault), "run", "acme--toy", "Hello", "-n"]) == 0
+    out = capsys.readouterr().out
+    assert "run would hydrate first:" in out
+    assert "Plan for test--acme--toy@" in out
+    assert "Would run transformers inference (offline, HF_HUB_OFFLINE=1):" in out
+    assert '  prompt:       "Hello"  (chat template)' in out
+    assert (
+        "  generation:   greedy; up to 256 new tokens, device auto, dtype auto" in out
+    )
+    assert out.rstrip().endswith(
+        "Dry run: nothing run. To run:\n  "
+        + _real("--vault", str(vault), "run", "acme--toy", "Hello")
+    )
+    assert not runtime.exists()
+    assert not (bundle / "hydration.json").exists()
+
+    assert main(["--vault", str(vault), "hydrate", "acme--toy", "--dry-run"]) == 0
+    assert "Dry run: nothing built. To hydrate:" in capsys.readouterr().out
+
+    (bundle / "hydration.json").write_text(
+        json.dumps(
+            {
+                "hydration_schema": 1,
+                "bundle_id": "x",
+                "engine": "transformers",
+                "weights": None,
+                "env": {
+                    "key": "transformers-py3.14-deadbeef",
+                    "path": str(runtime / "envs" / "transformers-py3.14-deadbeef"),
+                    "python": "3.14.0",
+                    "python_executable": sys.executable,
+                },
+                "runs": [{"status": "pass"}, {"status": "pass"}],
+            }
+        )
+        + "\n"
+    )
+    assert (
+        main(
+            [
+                "--vault",
+                str(vault),
+                "run",
+                "acme--toy",
+                "--repl",
+                "--sample",
+                "--seed",
+                "7",
+                "-n",
+            ]
+        )
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert "would hydrate first" not in out
+    assert "  prompt:       interactive (--repl; /quit to exit)" in out
+    assert "sampled with the model's generation defaults, seed 7" in out
+
+
+def test_cli_dehydrate_and_prune_dry_runs_remove_nothing(
+    vault, test_provider, tmp_path, monkeypatch, capsys
+):
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    runtime = tmp_path / "runtime"
+    monkeypatch.setenv("DARSAY_RUNTIME", str(runtime))
+    capsys.readouterr()
+    assert main(["--vault", str(vault), "dehydrate", "acme--toy", "-n"]) == 0
+    out = capsys.readouterr().out
+    assert "is not hydrated — nothing to do." in out
+    assert "Dry run" not in out
+
+    record = bundle / "hydration.json"
+    record.write_text(
+        json.dumps(
+            {"engine": "transformers", "env": {"key": "k"}, "runs": [{}, {}, {}]}
+        )
+        + "\n"
+    )
+    assert main(["--vault", str(vault), "dehydrate", "acme--toy", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith(f"Would remove {record} (transformers; 3 runs recorded).")
+    assert "Dry run: nothing removed. To dehydrate:" in out
+    assert record.exists()
+
+    env_dir = runtime / "envs" / "transformers-py3.14-cafebabe"
+    env_dir.mkdir(parents=True)
+    (env_dir / "env.json").write_text(
+        json.dumps(
+            {
+                "key": "transformers-py3.14-cafebabe",
+                "python": "3.14.0",
+                "created_at": "2026-01-01T00:00:00+00:00",
+            }
+        )
+    )
+    (env_dir / "blob").write_bytes(b"x" * 4096)
+    assert main(["--vault", str(vault), "envs", "--prune", "-n"]) == 0
+    out = capsys.readouterr().out
+    assert "Would remove unreferenced env transformers-py3.14-cafebabe (4.1 KiB)" in out
+    assert "Would free 4.1 KiB" in out
+    assert "Dry run: nothing removed. To prune:" in out
+    assert env_dir.exists()
+
+
+def test_cli_archive_dry_run_records_only_the_pin_and_force_keeps_the_manifest(
+    vault, test_provider, capsys
+):
+    test_provider.add_repo("acme/toy", model_files())
+    v = ["--vault", str(vault)]
+    assert main([*v, "archive", "test:acme/toy", "--dry-run"]) == 0
+    out = capsys.readouterr().out
+    bundle = vault / "test--acme--toy" / ("a" * 12)
+    assert (
+        f"Pinned test:acme/toy @ {'a' * 12} — recorded in {bundle / 'transfer.json'}"
+        in out
+    )
+    assert "Transfer plan:" in out
+    assert out.rstrip().endswith(
+        "Dry run: no payload bytes moved. To archive:\n  "
+        + _real(*v, "archive", "test:acme/toy")
+    )
+    assert [p.name for p in bundle.rglob("*") if p.is_file()] == ["transfer.json"]
+
+    assert main([*v, "archive", "test:acme/toy", "--jobs", "1"]) == 0
+    before = _tree(bundle)
+    capsys.readouterr()
+    assert main([*v, "archive", "test:acme/toy", "--force", "-n"]) == 0
+    out = capsys.readouterr().out
+    assert "Pinned" not in out  # nothing recorded: the forced pin stayed on paper
+    assert "verified: 7/7 files" in out
+    assert out.rstrip().endswith(
+        "  " + _real(*v, "archive", "test:acme/toy", "--force")
+    )
+    assert _tree(bundle) == before

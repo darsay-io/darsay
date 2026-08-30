@@ -296,7 +296,13 @@ darsay regen    <bundle>                              # rebuild README after edi
 darsay hydrate  <bundle> [--dry-run]
 darsay envs [--prune]
 darsay dehydrate <bundle>
+darsay rm       <bundle> -n                           # -n / --dry-run: same checks, nothing written
 ```
+
+Every command that writes — `archive`, `assemble`, `import`, `export`, `rm`,
+`regen`, `hydrate`, `run`, `dehydrate`, `envs --prune`, the `catalog` verbs,
+`estimate CATALOG` — takes `-n` / `--dry-run`: the same checks, the same
+report in the conditional, nothing written, and the real command to paste.
 
 Adding another host is a source provider, not a new CLI:
 [docs/SOURCES.md](docs/SOURCES.md).

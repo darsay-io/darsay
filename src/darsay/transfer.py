@@ -1905,8 +1905,13 @@ def _same_transfer_set(left: dict, right: dict) -> bool:
 def _merge_transfer_caches(
     source_payloads: list[Path],
     destination_payload: Path,
+    *,
+    apply: bool = True,
 ) -> tuple[int, int]:
-    """Merge portable provider caches with one copy of each longest byte partial."""
+    """Merge portable provider caches with one copy of each longest byte partial.
+
+    ``apply=False`` only counts what would be copied.
+    """
     destination_cache = destination_payload / ".cache"
     copied_files = 0
     copied_partial_bytes = 0
@@ -1936,11 +1941,13 @@ def _merge_transfer_caches(
             source_size = source.stat().st_size
             if destination.is_file() and destination.stat().st_size >= source_size:
                 continue
-            _copy_local_file(source, destination)
+            if apply:
+                _copy_local_file(source, destination)
             copied_files += 1
             copied_partial_bytes += source_size
         elif not destination.exists():
-            _copy_local_file(source, destination)
+            if apply:
+                _copy_local_file(source, destination)
             copied_files += 1
     return copied_files, copied_partial_bytes
 
@@ -2520,3 +2527,286 @@ def local_mirrors(ledger: dict) -> list[str]:
             if str(state.get("source") or "").startswith("local:")
         }
     )
+
+
+def assemble_plan(
+    partials: list[Path],
+    vault: Path,
+    *,
+    move: bool = False,
+    rehash: bool = False,
+) -> dict:
+    """What :func:`assemble_partials` would do — the same refusals, no lock, no write.
+
+    Counts assume every file copied or adopted hashes clean at dest; the real
+    run verifies each one before it trusts it, and ``--move`` releases a source
+    file only once dest holds it as ``verified``.
+    """
+    import copy
+
+    from .archiver import bundle_dir_for
+    from .config import free_space_floor
+    from .schema import payload_root_for
+    from .sources import source_from_ledger
+
+    if not partials:
+        raise SystemExit("error: assemble needs at least one partial bundle")
+    sources = []
+    for source_dir in partials:
+        try:
+            source_ledger = load_ledger(source_dir)
+        except LedgerError as exc:
+            raise SystemExit(f"error: cannot assemble {source_dir}: {exc}") from exc
+        sources.append((source_dir, source_ledger))
+    seed = sources[0][1]
+    for source_dir, source_ledger in sources[1:]:
+        if not _same_transfer_set(seed, source_ledger):
+            raise SystemExit(
+                f"error: {source_dir} does not have the same pinned repository, "
+                "revision, and expected inventory as the first partial"
+            )
+
+    destination = bundle_dir_for(vault, source_from_ledger(seed), seed["revision"])
+    root = payload_root_for(seed["repo_type"])
+    destination_payload = destination / root
+    dest_registered = (destination / "manifest.json").is_file()
+    if move:
+        _refuse_move_of_registered_sources(sources, destination)
+    if dest_registered and not move:
+        raise SystemExit(
+            f"error: destination is already a registered bundle: {destination}"
+        )
+    if ledger_path(destination).is_file():
+        ledger = load_ledger(destination)
+        if not _same_transfer_set(seed, ledger):
+            raise SystemExit(
+                f"error: destination partial has a different transfer set: {destination}"
+            )
+    else:
+        if dest_registered and not _registered_pin_matches(destination, seed):
+            raise SystemExit(
+                f"error: destination is a registered bundle of a different "
+                f"pin: {destination}"
+            )
+        ledger = copy.deepcopy(seed)
+        ledger["files"] = {}
+    if dest_registered:
+        state = "registered"
+    elif ledger_path(destination).is_file():
+        state = "partial"
+    else:
+        state = "new"
+
+    expected = {item["path"]: int(item.get("size") or 0) for item in seed["expected"]}
+    dest_verified = {
+        rel for rel, st in ledger["files"].items() if st.get("status") == "verified"
+    }
+    present: set[str] = set()
+    to_hash: list[tuple[str, int]] = []
+    if destination_payload.is_dir():
+        present = {
+            rel for rel, _ in iter_payload_files(destination_payload) if rel in expected
+        }
+        to_hash = _files_to_hash(destination_payload, ledger, rehash=rehash)
+
+    dest_real = destination.resolve()
+    planned: dict[str, int] = {}
+    rows = []
+    for source_dir, source_ledger in sources:
+        is_dest = source_dir.resolve() == dest_real
+        row = {
+            "path": source_dir,
+            "is_destination": is_dest,
+            "copy_files": 0,
+            "copy_bytes": 0,
+            "already_at_dest": 0,
+            "in_earlier_partial": 0,
+        }
+        if not dest_registered and not is_dest:
+            for relative, source_file in iter_payload_files(source_dir / root):
+                if relative not in expected:
+                    continue
+                if relative in present:
+                    row["already_at_dest"] += 1
+                elif relative in planned:
+                    row["in_earlier_partial"] += 1
+                else:
+                    size = source_file.stat().st_size
+                    planned[relative] = size
+                    row["copy_files"] += 1
+                    row["copy_bytes"] += size
+        rows.append((row, source_ledger))
+
+    verified_after = dest_verified | {rel for rel, _ in to_hash} | set(planned)
+    missing = [rel for rel in expected if rel not in verified_after]
+    cache_files = cache_bytes = 0
+    if not dest_registered:
+        cache_files, cache_bytes = _merge_transfer_caches(
+            [source_dir / root for source_dir, _ledger in sources],
+            destination_payload,
+            apply=False,
+        )
+
+    for row, source_ledger in rows:
+        row["release_files"] = 0
+        row["release_bytes"] = 0
+        row["dissolves"] = False
+        if not move or row["is_destination"]:
+            continue
+        source_payload = row["path"] / root
+        left = 0  # expected files the source would still hold or still owe
+        for relative, size in expected.items():
+            src_state = source_ledger["files"].get(relative) or {}
+            status = src_state.get("status")
+            if status == "moved":
+                continue
+            if (
+                status == "verified"
+                and relative in verified_after
+                and _payload_path(source_payload, relative).is_file()
+            ):
+                row["release_files"] += 1
+                row["release_bytes"] += int(src_state.get("size") or size)
+                continue
+            left += 1
+        row["dissolves"] = bool(row["release_files"]) and left == 0
+
+    probe = dest_real
+    while not probe.exists():
+        probe = probe.parent
+    free = shutil.disk_usage(probe).free
+    needed = sum(planned.values()) + cache_bytes
+    floor = free_space_floor(vault)
+    return {
+        "destination": destination,
+        "state": state,
+        "move": move,
+        "rehash": rehash,
+        "sources": [row for row, _ledger in rows],
+        "copy": {"files": len(planned), "bytes": sum(planned.values())},
+        "caches": {"files": cache_files, "partial_bytes": cache_bytes},
+        "hash": {
+            "files": len(to_hash),
+            "bytes": sum(size for _rel, size in to_hash),
+            "network_mount": bool(to_hash) and bool(is_network_filesystem(destination)),
+        },
+        "disk": {
+            "checked_path": str(probe),
+            "free_bytes": free,
+            "needed_bytes": needed,
+            "min_free_bytes": floor,
+            "verdict": disk_verdict(free, needed, floor),
+        },
+        "after": {
+            "verified_files": len(verified_after),
+            "total_files": len(expected),
+            "missing_files": len(missing),
+            "missing_bytes": sum(expected[rel] for rel in missing),
+            "complete": not missing,
+        },
+    }
+
+
+def print_assemble_plan(plan: dict, progress=print) -> None:
+    """Render :func:`assemble_plan` in the shape of :func:`print_plan`."""
+    from .readme_gen import human_size
+
+    def files(n: int) -> str:
+        return f"{n} file{'s' if n != 1 else ''}"
+
+    state = {
+        "new": "new partial",
+        "partial": "existing partial",
+        "registered": "registered — payload frozen, nothing is copied",
+    }[plan["state"]]
+    progress(f"Would assemble into {plan['destination']}  ({state})")
+    label = "from:"
+    for row in plan["sources"]:
+        notes = []
+        if row["already_at_dest"]:
+            notes.append(f"{row['already_at_dest']} already at dest")
+        if row["in_earlier_partial"]:
+            notes.append(f"{row['in_earlier_partial']} in an earlier partial")
+        note = f"  ({', '.join(notes)})" if notes else ""
+        if row["is_destination"]:
+            what = "is the destination — nothing to hand to itself"
+        elif plan["state"] == "registered":
+            what = "dest already holds the payload"
+        elif row["copy_files"]:
+            what = f"copy {files(row['copy_files'])}, {human_size(row['copy_bytes'])}{note}"
+        else:
+            what = f"nothing to copy{note}"
+        progress(f"  {label:<10}{row['path']}  — {what}")
+        label = ""
+    caches = plan["caches"]
+    if caches["files"]:
+        progress(
+            f"  {'caches:':<10}{files(caches['files'])}, "
+            f"{human_size(caches['partial_bytes'])} of resumable partial bytes "
+            "(the longest copy of each)"
+        )
+    copied = plan["copy"]["files"]
+    hashed = plan["hash"]
+    if copied or hashed["files"]:
+        parts = []
+        if copied:
+            parts.append(f"{copied} copied")
+        if hashed["files"]:
+            parts.append(
+                f"{hashed['files']} already at dest, {human_size(hashed['bytes'])}"
+                + (" (--rehash)" if plan["rehash"] else " (no verified record yet)")
+            )
+        progress(
+            f"  {'verify:':<10}{files(copied + hashed['files'])} against the pin "
+            f"({'; '.join(parts)})"
+        )
+        if hashed["network_mount"]:
+            progress(
+                "            warning: dest is on a network mount, so that hashing "
+                "reads every byte back over the wire — run assemble where the "
+                "vault is a local disk"
+            )
+    disk = plan["disk"]
+    if disk["needed_bytes"]:
+        floor = disk.get("min_free_bytes")
+        floor_note = f" ({human_size(floor)} floor)" if floor else ""
+        progress(
+            f"  {'disk:':<10}needs {human_size(disk['needed_bytes'])}, "
+            f"free {human_size(disk['free_bytes'])}{floor_note} at "
+            f"{disk['checked_path']} — {disk['verdict'].upper()}"
+        )
+    after = plan["after"]
+    have = f"{after['verified_files']}/{after['total_files']} files verified"
+    if plan["state"] == "registered":
+        progress(f"  {'after:':<10}{have} — already registered; dest is unchanged")
+    elif after["complete"]:
+        progress(
+            f"  {'after:':<10}{have} — complete; `darsay archive` there registers "
+            "it with zero network"
+        )
+    else:
+        progress(
+            f"  {'after:':<10}{have}; {files(after['missing_files'])} "
+            f"({human_size(after['missing_bytes'])}) still to fetch — continue "
+            "with `darsay archive`"
+        )
+    if plan["move"]:
+        label = "--move:"
+        for row in plan["sources"]:
+            if row["is_destination"]:
+                continue
+            if row["release_files"]:
+                fate = (
+                    "removed (nothing left to fetch there)"
+                    if row["dissolves"]
+                    else "skeleton (pin + hashes stay)"
+                )
+                what = (
+                    f"release {files(row['release_files'])} "
+                    f"({human_size(row['release_bytes'])}) once verified at dest "
+                    f"→ {fate}"
+                )
+            else:
+                what = "nothing to release yet"
+            progress(f"  {label:<10}{row['path']}  — {what}")
+            label = ""

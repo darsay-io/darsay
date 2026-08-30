@@ -622,6 +622,7 @@ def hydrate_bundle(
         return {
             "dry_run": True,
             "engine": chosen,
+            "weights": weights_path,
             "env_key": key,
             "env_exists": env_exists,
             "requirements": requirements,
@@ -722,8 +723,14 @@ def run_bundle(
     weights: str | None = None,
     ignore_preflight: bool = False,
     repl: bool = False,
+    dry_run: bool = False,
     progress=print,
 ) -> dict:
+    """Generate against the bundle offline, hydrating first when needed.
+
+    ``dry_run`` prints what would happen — the hydration plan if one is
+    needed, then engine, prompt, and settings — and runs nothing.
+    """
     from .archiver import load_manifest, utc_now, write_manifest
 
     hydration = load_hydration(bundle_dir)
@@ -734,13 +741,19 @@ def run_bundle(
         or not Path(hydration["env"]["python_executable"]).is_file()
     )
     if stale:
-        progress("Bundle not hydrated for this configuration — hydrating first ...")
+        if dry_run:
+            progress(
+                "Bundle not hydrated for this configuration — run would hydrate first:"
+            )
+        else:
+            progress("Bundle not hydrated for this configuration — hydrating first ...")
         hydration = hydrate_bundle(
             bundle_dir,
             engine=engine,
             python=python,
             weights=weights,
             ignore_preflight=ignore_preflight,
+            dry_run=dry_run,
             progress=progress,
         )
     else:
@@ -753,10 +766,25 @@ def run_bundle(
 
     from .schema import payload_root as manifest_payload_root
 
-    env_record = {"python_executable": hydration["env"]["python_executable"]}
     chosen = hydration["engine"]
     if not repl:
         prompt = prompt if prompt is not None else DEFAULT_PROMPT
+    if dry_run:
+        return _print_run_plan(
+            hydration,
+            chosen,
+            prompt=prompt,
+            repl=repl,
+            raw=raw,
+            sample=sample,
+            seed=seed,
+            device=device,
+            dtype=dtype,
+            max_new_tokens=max_new_tokens,
+            progress=progress,
+        )
+
+    env_record = {"python_executable": hydration["env"]["python_executable"]}
 
     payload_dir = bundle_dir / manifest_payload_root(load_manifest(bundle_dir))
     runner_args = [
@@ -851,6 +879,52 @@ def run_bundle(
     return run_record
 
 
+def _print_run_plan(
+    hydration: dict,
+    engine: str,
+    *,
+    prompt: str | None,
+    repl: bool,
+    raw: bool,
+    sample: bool,
+    seed: int | None,
+    device: str,
+    dtype: str,
+    max_new_tokens: int,
+    progress,
+) -> dict:
+    """What ``run`` would do once the env is ready; the dry-run record."""
+    if repl:
+        prompt_line = "interactive (--repl; /quit to exit)"
+    else:
+        mode = "raw completion, no chat template" if raw else "chat template"
+        prompt_line = f"{json.dumps(prompt)}  ({mode})"
+    decoding = "greedy"
+    if sample:
+        decoding = "sampled with the model's generation defaults"
+        if seed is not None:
+            decoding += f", seed {seed}"
+    settings = [f"up to {max_new_tokens} new tokens", f"device {device}"]
+    if engine == "transformers":
+        settings.append(f"dtype {dtype}")
+    progress(f"Would run {engine} inference (offline, HF_HUB_OFFLINE=1):")
+    progress(f"  prompt:       {prompt_line}")
+    progress(f"  generation:   {decoding}; {', '.join(settings)}")
+    if hydration.get("weights"):
+        progress(f"  weights:      {hydration['weights']}")
+    progress(
+        "  records:      hydration.json runs[] and, on a pass, "
+        "manifest runtime.tested_hardware"
+    )
+    return {
+        "dry_run": True,
+        "engine": engine,
+        "hydrate_first": bool(hydration.get("dry_run")),
+        "prompt": prompt,
+        "repl": repl,
+    }
+
+
 def _chip() -> str | None:
     try:
         if sys.platform == "darwin":
@@ -897,14 +971,31 @@ def _record_tested_hardware(
 # ------------------------------------------------------------- env lifecycle
 
 
-def dehydrate_bundle(bundle_dir: Path, progress=print) -> None:
+def dehydrate_bundle(
+    bundle_dir: Path, progress=print, *, dry_run: bool = False
+) -> bool:
+    """Drop the bundle's hydration record. Returns whether there was one."""
     path = bundle_dir / HYDRATION_FILE
     if not path.is_file():
         progress(f"{bundle_dir} is not hydrated — nothing to do.")
-        return
-    path.unlink()
-    progress(f"Removed {path} (run history included).")
+        return False
+    detail = "run history included"
+    try:
+        record = json.loads(path.read_text(encoding="utf-8"))
+        runs = len(record.get("runs") or [])
+        detail = (
+            f"{record.get('engine') or 'unknown engine'}; "
+            f"{runs} run{'s' if runs != 1 else ''} recorded"
+        )
+    except (OSError, ValueError, AttributeError):
+        pass
+    if dry_run:
+        progress(f"Would remove {path} ({detail}).")
+    else:
+        path.unlink()
+        progress(f"Removed {path} ({detail}).")
     progress("Shared envs are untouched; reclaim disk with: darsay envs --prune")
+    return True
 
 
 def _dir_size(path: Path) -> int:
@@ -936,19 +1027,25 @@ def list_envs(vault: Path, progress=print) -> list[dict]:
     return envs
 
 
-def prune_envs(vault: Path, progress=print) -> int:
+def prune_envs(vault: Path, progress=print, *, dry_run: bool = False) -> int:
+    """Delete envs no hydrated bundle references; returns the bytes freed.
+
+    ``dry_run`` lists them and deletes nothing (the return is what would be freed).
+    """
     from .readme_gen import human_size
 
     freed = 0
     for env in list_envs(vault):
         if not env["used_by"]:
             progress(
-                f"Removing unreferenced env {env['key']} ({human_size(env['size_bytes'])})"
+                f"{'Would remove' if dry_run else 'Removing'} unreferenced env "
+                f"{env['key']} ({human_size(env['size_bytes'])})"
             )
-            shutil.rmtree(env["path"])
+            if not dry_run:
+                shutil.rmtree(env["path"])
             freed += env["size_bytes"]
     if freed:
-        progress(f"Freed {human_size(freed)}")
+        progress(f"{'Would free' if dry_run else 'Freed'} {human_size(freed)}")
     else:
         progress("Nothing to prune — every env is referenced by a hydrated bundle.")
     return freed

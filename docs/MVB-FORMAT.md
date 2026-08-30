@@ -107,6 +107,13 @@ Three independent layers:
 A corrupted archive — even a single flipped byte anywhere in the weights — is
 therefore refused at import time, before the bundle can enter the vault.
 
+`darsay import FILE --dry-run` stops after step 1: it reads the marker,
+applies the same refusals (container major, schema major, an existing
+destination without `--force`), prints the bundle id, destination, and
+payload size, and unpacks nothing. `darsay export BUNDLE --dry-run` likewise
+lists what would be packed and where — and which machine-local files are
+left out — without writing the tar or `exports.json`.
+
 ## Manual recovery without darsay
 
 ```bash

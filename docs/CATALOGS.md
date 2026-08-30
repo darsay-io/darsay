@@ -173,7 +173,9 @@ darsay archive --next CATALOG
 darsay catalog adopt MINE ./friend
 ```
 
-`catalog add` is offline unless `--estimate`. Bare `darsay list` is the
+`catalog add` is offline unless `--estimate`. Every `catalog` verb and
+`estimate CATALOG` take `-n` / `--dry-run`: the change is printed, the file
+is not written. Bare `darsay list` is the
 vault as the same table; DESIRE, HINTS, and NOTE hide when every cell is
 empty. HINTS is the entry's [hints](#hints) (`large, gated`), the same
 words `estimate CATALOG` prints per row.
