@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-30
+
+
 ### Added
 
 - **A full disk is a pause, never a traceback** — `ENOSPC` while writing a
