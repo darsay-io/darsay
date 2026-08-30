@@ -386,7 +386,7 @@ pin, so a bad copy never costs the laptop its only copy. On the laptop,
 `darsay list` shows the skeleton — `archiving: 52% (…, 27.8 GB moved out)` —
 and an `archive` run there stops cleanly with `assemble to register` once
 everything left is either verified locally or already moved away. A skeleton
-with nothing left to fetch is removed, leaving exactly what a plain `mv`
+with every file moved out is removed, leaving exactly what a plain `mv`
 would have. Full design: [Incremental transfer](../docs/INCREMENTAL.md#across-disks-assemble---move-and-skeletons).
 
 ---

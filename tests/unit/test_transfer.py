@@ -433,6 +433,40 @@ def test_reconcile_adopts_a_moved_file_that_reappears(tmp_path):
     assert plan["complete"] is True
 
 
+def test_reconcile_keeps_the_moved_record_when_returned_bytes_are_wrong(tmp_path):
+    """Bad bytes at a moved path are removed, but the move is not unsaid:
+    the verified copy lives in another vault, so nothing re-fetches it."""
+    payload = tmp_path / "model"
+    payload.mkdir()
+    bad_digest = b"thirteen-byte"  # right size, wrong digest
+    (payload / "w.bin").write_bytes(bad_digest)
+    (payload / "v.bin").write_bytes(b"way-too-long")  # wrong size outright
+    moved = {
+        "status": "moved",
+        "size": len(bad_digest),
+        "sha256": "0" * 64,
+        "moved_at": "2026-08-30T00:00:00+00:00",
+    }
+    ledger = {
+        "provider": "huggingface",
+        "expected": [
+            {"path": "w.bin", "size": len(bad_digest), "lfs_sha256": "0" * 64},
+            {"path": "v.bin", "size": 4, "lfs_sha256": "1" * 64},
+        ],
+        "files": {"w.bin": dict(moved), "v.bin": {**moved, "size": 4}},
+        "events": [],
+    }
+    session = {"files_completed": 0, "bytes_adopted": 0}
+    plan = reconcile(tmp_path, payload, ledger, session, progress=silent)
+    for name in ("w.bin", "v.bin"):
+        assert ledger["files"][name]["status"] == "moved"
+        assert not (payload / name).exists(), "failing bytes were not removed"
+    assert plan["files"]["moved"] == 2
+    assert plan["fetched"] is True
+    events = {e["event"] for e in ledger["events"]}
+    assert events == {"digest_mismatch", "size_mismatch"}
+
+
 def test_release_moved_only_releases_destination_verified_bytes(tmp_path):
     """Verify-then-delete: a file the destination did not verify stays put."""
     source_dir = tmp_path / "src"

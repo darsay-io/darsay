@@ -553,6 +553,66 @@ def test_archive_on_a_fully_moved_skeleton_pauses_moved(vault, test_provider, tm
     assert load_ledger(skel)["sessions"][-1]["end_reason"] == "moved"
 
 
+def test_assemble_move_keeps_skeleton_when_a_copy_fails_to_verify(
+    vault, test_provider, tmp_path, monkeypatch
+):
+    """A copy that corrupts in transit must not cost the source its only
+    copy: the destination discards it, the file stays verified at the
+    source, and the skeleton is kept even with nothing left to fetch."""
+    import darsay.transfer as transfer_mod
+
+    files = model_files(param_shape=[64, 64])
+    test_provider.add_repo("acme/big", files)
+    laptop = tmp_path / "laptop"
+    laptop.mkdir()
+    big = vault
+
+    # First half over, then fetch the rest: the skeleton now holds only
+    # verified files (the second half) beside its moved records.
+    skeleton = _archive_half("test:acme/big", vault=laptop)
+    assemble_partials([skeleton], big, progress=silent, move=True)
+    with pytest.raises(PartialTransfer) as paused:
+        archive_quiet("test:acme/big", vault=laptop)
+    assert paused.value.reason == "moved"
+
+    src_ledger = load_ledger(skeleton)
+    victim = next(
+        path
+        for path, state in sorted(src_ledger["files"].items())
+        if state.get("status") == "verified"
+    )
+    real_copy = transfer_mod._copy_local_file
+
+    def corrupting_copy(source, destination):
+        method = real_copy(source, destination)
+        if str(destination).endswith(victim):
+            destination.write_bytes(b"corrupted-in-transit")
+        return method
+
+    monkeypatch.setattr(transfer_mod, "_copy_local_file", corrupting_copy)
+    dest, _plan = assemble_partials([skeleton], big, progress=silent, move=True)
+
+    # The skeleton survives and still holds the one good copy.
+    assert skeleton.exists()
+    src_ledger = load_ledger(skeleton)
+    assert src_ledger["files"][victim]["status"] == "verified"
+    assert (skeleton / "model" / victim).is_file()
+    # Everything else moved; the destination never verified the bad copy.
+    others = set(src_ledger["files"]) - {victim}
+    assert all(src_ledger["files"][path]["status"] == "moved" for path in others)
+    assert load_ledger(dest)["files"].get(victim, {}).get("status") != "verified"
+
+    # A clean re-run hands the file over, drains the skeleton, and the big
+    # vault registers without a single payload byte from the network.
+    monkeypatch.undo()
+    assemble_partials([skeleton], big, progress=silent, move=True)
+    assert not skeleton.exists()
+    test_provider.downloads.clear()
+    bundle = archive_quiet("test:acme/big", vault=big)
+    assert (bundle / "manifest.json").is_file()
+    assert test_provider.downloads == []
+
+
 def test_assemble_move_via_cli_reports_the_skeleton(vault, test_provider, tmp_path):
     from darsay.cli import main
 

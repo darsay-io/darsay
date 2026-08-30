@@ -121,7 +121,7 @@ ledger; classify each file:
 | Ledger says verified, size matches on stat | `verified` | trust (or re-hash under `--rehash`) |
 | Present, size matches, no ledger entry | `unverified` | hash now; matching digest → **adopt** (zero network); mismatch → demote |
 | Ledger says moved, absent | `moved` | trust — the bytes are verified in another vault (§5); never fetch, never demote |
-| Ledger says moved, present | `unverified` | the bytes came back: hash and adopt as `verified` (bytes always win over the hint) |
+| Ledger says moved, present | `unverified` | the bytes came back: hash and adopt as `verified` (matching bytes win over the hint); on mismatch, remove the bytes and keep `moved` |
 | `.incomplete` bytes in the payload's `.cache/huggingface/` | `partial` | resume via Range from current length |
 | Absent | `missing` | fetch |
 | Present but wrong size, or hash mismatch | `mismatch` | delete, log the event, treat as missing |
@@ -418,10 +418,13 @@ the pinned upstream digest — the same gate that admits a file to a manifest �
 is what permits the source deletion, so an interrupted or rotted copy leaves
 the source bytes untouched. If the moved bytes ever reappear at the source
 (restored by hand from the big vault), reconcile hashes and re-adopts them as
-`verified`: the `moved` record is a hint, and bytes always win. A source with
-nothing left to fetch — every file moved out — holds no payload byte and is
-removed, leaving exactly what a plain `mv` would have. A source that still owes
-bytes stays a skeleton and reports how much remains to fetch there.
+`verified`: the `moved` record is a hint, and matching bytes always win. Bytes
+that come back *wrong* are removed and the record stays `moved` — a bad
+restore never re-fetches what the other vault already holds. A source with
+every file moved out holds no payload byte and is removed, leaving exactly
+what a plain `mv` would have. Any other source stays a skeleton and reports
+what it still owes to fetch — or still holds, when the destination could not
+verify a copy.
 
 When an `archive` run has fetched everything it can *here* but some files are
 `moved` (or when it is run on a fully-drained skeleton), it does not error and
@@ -645,8 +648,8 @@ final mega-pass.
 | Two concurrent runs | Second exits on the live lock. |
 | Partial bundle copied or moved | Relative ledger/cache state resumes at the new vault; an inherited lock is reclaimed only when the physical directory identity changed. |
 | Cooperative inputs disagree | `assemble` rejects them before creating a destination; repo, type, full pin, and expected inventory must all match. |
-| `assemble --move`, destination copy fails to verify | That file's source bytes are kept, not deleted (verify-then-delete, per file, §5); only files the destination re-hashed against the pin are released. |
-| Moved bytes reappear at a skeleton | Reconciliation hashes and re-adopts them as `verified`; the `moved` record is only a hint. |
+| `assemble --move`, destination copy fails to verify | That file's source bytes are kept, not deleted (verify-then-delete, per file, §5); only files the destination re-hashed against the pin are released, and a skeleton still holding such a file is never dissolved. |
+| Moved bytes reappear at a skeleton | Reconciliation hashes and re-adopts them as `verified`; the `moved` record is only a hint. Bytes that fail the pin's checks are removed and the record stays `moved`. |
 | Skeleton ledger lost | Degrades to a plain partial: what is on disk is re-adopted, what was moved out is re-fetched. Never corrupt, only slower. |
 
 ## 9. Considered and rejected

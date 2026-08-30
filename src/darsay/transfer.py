@@ -788,7 +788,8 @@ def reconcile(
         # (never demote to missing, never re-fetch). If the bytes have come
         # back — copied by hand, restored from the other vault — the record
         # is only a hint: fall through and the present-file adoption path
-        # below re-hashes them and promotes them to ``verified``.
+        # below re-hashes them and promotes them to ``verified``. Bytes that
+        # fail those checks are removed while the moved record is kept.
         if state.get("status") == "moved" and not path.is_file():
             continue
 
@@ -831,11 +832,16 @@ def reconcile(
             )
         elif path.is_file() and not size_matches:
             actual_size = path.stat().st_size
+            outcome = (
+                "removed; moved record kept"
+                if state.get("status") == "moved"
+                else "removed and demoted"
+            )
             record_event(
                 ledger,
                 relative,
                 "size_mismatch",
-                f"expected {expected_size}, found {actual_size}; removed and demoted",
+                f"expected {expected_size}, found {actual_size}; {outcome}",
             )
             if apply:
                 _discard_payload_file(path, payload_dir)
@@ -864,6 +870,15 @@ def reconcile(
             )
             if apply:
                 _discard_payload_file(path, payload_dir)
+
+        if state.get("status") == "moved":
+            # The bytes that came back failed the pin's checks and were
+            # removed above, but that does not unsay the move: the verified
+            # copy still lives in the other vault. Keep the record so
+            # nothing re-fetches what that vault already holds.
+            if apply:
+                save_ledger(bundle_dir, ledger)
+            continue
 
         ledger["files"][relative] = {
             "status": "missing",
@@ -1842,6 +1857,17 @@ def _merge_transfer_caches(
     return copied_files, copied_partial_bytes
 
 
+def _ledger_hosts(ledger: dict) -> list[str]:
+    """Distinct hosts that ever ran a session against this ledger."""
+    return sorted(
+        {
+            str(item.get("host"))
+            for item in ledger.get("sessions", [])
+            if item.get("host")
+        }
+    )
+
+
 def release_moved(
     source_dir: Path,
     source_ledger: dict,
@@ -1889,7 +1915,6 @@ def release_moved(
 def _release_sources(
     sources: list[tuple[Path, dict]],
     destination: Path,
-    destination_payload: Path,
     ledger: dict,
     root: str,
     progress,
@@ -1898,12 +1923,10 @@ def _release_sources(
 
     Deletion of a source file only ever follows the destination hashing that
     same file against the pinned upstream digest, so an interrupted or rotted
-    copy never costs the source its only copy. A source left with nothing to
-    fetch is dissolved (it holds no payload byte); one with fetching still to
-    do is kept as a skeleton and its remaining work is reported.
+    copy never costs the source its only copy. A source with every file moved
+    out is dissolved (it holds no payload byte by construction); any other
+    source is kept as a skeleton and what it still holds or owes is reported.
     """
-    import shutil as _shutil
-
     from .readme_gen import human_size
 
     dest_real = destination.resolve()
@@ -1921,13 +1944,7 @@ def _release_sources(
             )
             if not moved_files:
                 continue
-            source_hosts = sorted(
-                {
-                    str(item.get("host"))
-                    for item in source_ledger.get("sessions", [])
-                    if item.get("host")
-                }
-            )
+            source_hosts = _ledger_hosts(source_ledger)
             source_host = ", ".join(source_hosts) if source_hosts else host
             record_event(
                 ledger,
@@ -1937,8 +1954,13 @@ def _release_sources(
                 f"skeleton on {source_host}",
             )
             remaining = transfer_plan(source_dir / root, source_ledger)
-            if remaining["fetched"]:
-                _shutil.rmtree(source_dir, ignore_errors=True)
+            if remaining["files"]["moved"] == remaining["files"]["total"]:
+                # Fully drained: every expected file is moved, so the source
+                # holds no payload byte by construction. ``fetched`` is not
+                # enough here — it also counts files still verified only at
+                # the source (a copy the destination failed to verify), and
+                # those bytes must never be deleted.
+                shutil.rmtree(source_dir, ignore_errors=True)
                 progress(
                     f"Moved {moved_files} files ({human_size(moved_bytes)}) out of "
                     f"{source_dir}; nothing left to fetch there — skeleton removed."
@@ -1955,12 +1977,19 @@ def _release_sources(
                 rem_files = (
                     remaining["files"]["partial"] + remaining["files"]["missing"]
                 )
-                progress(
-                    f"Moved {moved_files} files ({human_size(moved_bytes)}) out of "
-                    f"{source_dir}; {rem_files} files "
-                    f"({human_size(remaining['bytes']['remaining_network'])}) "
-                    "remain to fetch there."
-                )
+                if rem_files:
+                    progress(
+                        f"Moved {moved_files} files ({human_size(moved_bytes)}) out of "
+                        f"{source_dir}; {rem_files} files "
+                        f"({human_size(remaining['bytes']['remaining_network'])}) "
+                        "remain to fetch there."
+                    )
+                else:
+                    progress(
+                        f"Moved {moved_files} files ({human_size(moved_bytes)}) out of "
+                        f"{source_dir}; {remaining['files']['verified']} files the "
+                        "destination could not verify stay put there."
+                    )
 
 
 def assemble_partials(
@@ -2060,13 +2089,7 @@ def assemble_partials(
                     _copy_local_file(source_file, destination_file)
                     copied_payload_files += 1
 
-                hosts = sorted(
-                    {
-                        str(item.get("host"))
-                        for item in source_ledger.get("sessions", [])
-                        if item.get("host")
-                    }
-                )
+                hosts = _ledger_hosts(source_ledger)
                 host_note = ", ".join(hosts) if hosts else "unknown host"
                 record_event(
                     ledger,
@@ -2088,9 +2111,7 @@ def assemble_partials(
             )
 
             if move:
-                _release_sources(
-                    sources, destination, destination_payload, ledger, root, progress
-                )
+                _release_sources(sources, destination, ledger, root, progress)
 
             finish_session(destination, ledger, session, "assemble")
             session_finished = True

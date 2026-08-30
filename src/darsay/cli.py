@@ -376,7 +376,7 @@ def cmd_archive(args) -> int:
                 "Assemble the halves into one vault, then run archive there to register:"
             )
             print(
-                f"  darsay --vault <vault-with-the-other-half> assemble {stop.bundle_dir}"
+                f"  darsay --vault <vault-with-the-other-half> assemble {stop.bundle_dir} --move"
             )
             return 10
         action = {

@@ -49,10 +49,11 @@ Tool version (`darsay.__version__`) is independent of
   file is fetched by no one and registers nowhere. The move is
   verify-then-delete, per file: only a file the destination has re-hashed
   against the pinned upstream digest is released, so a bad copy never costs
-  the source its only copy. A skeleton with nothing left to fetch is removed
-  (exactly what a plain `mv` would leave); one that still owes bytes reports
-  how much remains. If moved bytes reappear at the source, reconciliation
-  re-adopts them — the record is a hint, and bytes always win.
+  the source its only copy. A skeleton with every file moved out is removed
+  (exactly what a plain `mv` would leave); any other reports what it still
+  owes or holds. If moved bytes reappear at the source, reconciliation
+  re-adopts them — the record is a hint, and matching bytes always win;
+  bytes that come back wrong are removed and the record stays `moved`.
 - **`moved` is a fourth per-file transfer state**, beside verified / partial
   / missing, entered only through `assemble --move`. `darsay list` shows a
   skeleton's progress as bytes-anywhere and names the moved amount
