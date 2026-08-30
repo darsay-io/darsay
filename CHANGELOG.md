@@ -35,6 +35,12 @@ Tool version (`darsay.__version__`) is independent of
 - Doctor JSON reports now state `artifacts_created`, `network_attempts`, and
   `target_actions` directly; shallow `health --json` reports no artifacts, no
   network attempts, and no target actions.
+- **Repository-owned doctor safety conformance.** Hermetic pytest coverage now
+  delivers real SIGKILL immediately after durable intent and after target
+  commit, forces two-process contention, proves repeat-fix idempotence and
+  byte-exact undo, checks detector repeatability, and freezes the scrubbed
+  `capabilities --json` contract as a reviewed golden. CI runs the complete
+  layer without relying on an external audit workspace or skill installation.
 
 ### Changed
 

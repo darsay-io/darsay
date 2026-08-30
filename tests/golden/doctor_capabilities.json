@@ -1,0 +1,281 @@
+{
+  "checks": [
+    {
+      "auto_fix": false,
+      "default": true,
+      "description": "The vault root is a readable directory and its doctor evidence area is writable.",
+      "fixer_id": null,
+      "id": "vault.access",
+      "risk": "none",
+      "severity": "error"
+    },
+    {
+      "auto_fix": false,
+      "default": true,
+      "description": "User and vault TOML configuration parses with the installed darsay.",
+      "fixer_id": null,
+      "id": "config.parse",
+      "risk": "none",
+      "severity": "error"
+    },
+    {
+      "auto_fix": false,
+      "default": true,
+      "description": "Every registered bundle manifest is readable and supported.",
+      "fixer_id": null,
+      "id": "bundle.manifest",
+      "risk": "none",
+      "severity": "critical"
+    },
+    {
+      "auto_fix": false,
+      "default": true,
+      "description": "Bundle-controlled payload paths remain relative and contain no symlink escape.",
+      "fixer_id": null,
+      "id": "bundle.paths",
+      "risk": "none",
+      "severity": "critical"
+    },
+    {
+      "auto_fix": false,
+      "default": true,
+      "description": "Registered payload files, sizes, and SHA-256 digests match the manifest.",
+      "fixer_id": null,
+      "id": "bundle.payload",
+      "risk": "none",
+      "severity": "critical"
+    },
+    {
+      "auto_fix": true,
+      "default": true,
+      "description": "The generated bundle README matches manifest.json plus curation.md.",
+      "fixer_id": "bundle.readme.regenerate",
+      "id": "bundle.readme",
+      "risk": "low",
+      "severity": "warning"
+    },
+    {
+      "auto_fix": true,
+      "default": true,
+      "description": "Transfer locks are parseable and do not belong to a dead or copied owner.",
+      "fixer_id": "transfer.lock.quarantine",
+      "id": "transfer.lock",
+      "risk": "low",
+      "severity": "warning"
+    },
+    {
+      "auto_fix": true,
+      "default": true,
+      "description": "Disposable hydration records parse and point at an existing interpreter.",
+      "fixer_id": "runtime.hydration.quarantine",
+      "id": "runtime.hydration",
+      "risk": "low",
+      "severity": "warning"
+    }
+  ],
+  "contract_version": "1.0.0",
+  "detectors": [
+    {
+      "auto_fix": false,
+      "default": true,
+      "description": "The vault root is a readable directory and its doctor evidence area is writable.",
+      "fixer_id": null,
+      "id": "vault.access",
+      "risk": "none",
+      "severity": "error"
+    },
+    {
+      "auto_fix": false,
+      "default": true,
+      "description": "User and vault TOML configuration parses with the installed darsay.",
+      "fixer_id": null,
+      "id": "config.parse",
+      "risk": "none",
+      "severity": "error"
+    },
+    {
+      "auto_fix": false,
+      "default": true,
+      "description": "Every registered bundle manifest is readable and supported.",
+      "fixer_id": null,
+      "id": "bundle.manifest",
+      "risk": "none",
+      "severity": "critical"
+    },
+    {
+      "auto_fix": false,
+      "default": true,
+      "description": "Bundle-controlled payload paths remain relative and contain no symlink escape.",
+      "fixer_id": null,
+      "id": "bundle.paths",
+      "risk": "none",
+      "severity": "critical"
+    },
+    {
+      "auto_fix": false,
+      "default": true,
+      "description": "Registered payload files, sizes, and SHA-256 digests match the manifest.",
+      "fixer_id": null,
+      "id": "bundle.payload",
+      "risk": "none",
+      "severity": "critical"
+    },
+    {
+      "auto_fix": true,
+      "default": true,
+      "description": "The generated bundle README matches manifest.json plus curation.md.",
+      "fixer_id": "bundle.readme.regenerate",
+      "id": "bundle.readme",
+      "risk": "low",
+      "severity": "warning"
+    },
+    {
+      "auto_fix": true,
+      "default": true,
+      "description": "Transfer locks are parseable and do not belong to a dead or copied owner.",
+      "fixer_id": "transfer.lock.quarantine",
+      "id": "transfer.lock",
+      "risk": "low",
+      "severity": "warning"
+    },
+    {
+      "auto_fix": true,
+      "default": true,
+      "description": "Disposable hydration records parse and point at an existing interpreter.",
+      "fixer_id": "runtime.hydration.quarantine",
+      "id": "runtime.hydration",
+      "risk": "low",
+      "severity": "warning"
+    }
+  ],
+  "doctor_version": "1.0.0",
+  "environment_variables": [
+    {
+      "name": "DARSAY_HOME",
+      "purpose": "default vault path",
+      "secret": false
+    },
+    {
+      "name": "DARSAY_CONFIG",
+      "purpose": "explicit operator configuration path",
+      "secret": false
+    },
+    {
+      "name": "XDG_CONFIG_HOME",
+      "purpose": "base for default operator configuration",
+      "secret": false
+    }
+  ],
+  "exit_codes": {
+    "0": "healthy or requested mutation completed",
+    "1": "findings detected",
+    "2": "partial diagnosis or unresolved findings after fix",
+    "3": "fix failed and rollback was attempted",
+    "4": "unsafe mutation or undo refused",
+    "5": "another doctor mutation holds the lock",
+    "6": "online diagnostics unavailable",
+    "64": "usage error",
+    "66": "input or run not found",
+    "73": "cannot create artifact or lock",
+    "74": "I/O error"
+  },
+  "fixers": [
+    {
+      "check_id": "bundle.readme",
+      "default": true,
+      "id": "bundle.readme.regenerate",
+      "risk": "low"
+    },
+    {
+      "check_id": "runtime.hydration",
+      "default": true,
+      "id": "runtime.hydration.quarantine",
+      "risk": "low"
+    },
+    {
+      "check_id": "transfer.lock",
+      "default": true,
+      "id": "transfer.lock.quarantine",
+      "risk": "low"
+    }
+  ],
+  "identity": {
+    "name": "darsay",
+    "version": "[TOOL_VERSION]"
+  },
+  "network": {
+    "checks": [],
+    "default": "disabled"
+  },
+  "platforms": [
+    "linux",
+    "macos"
+  ],
+  "privilege": "current user only; privilege escalation is never attempted",
+  "report_schema": {
+    "required": [
+      "schema_version",
+      "run_id",
+      "status",
+      "summary",
+      "findings",
+      "exit_code",
+      "artifacts_created",
+      "network_attempts",
+      "target_actions"
+    ],
+    "version": 1
+  },
+  "run_artifacts": [
+    "run.json",
+    "report.json",
+    "report.md",
+    "scorecard.json",
+    "actions.jsonl",
+    "backups/",
+    "quarantine/",
+    "stdout.json",
+    "stderr.log",
+    "undo.sh"
+  ],
+  "schema_version": 1,
+  "side_effects": {
+    "diagnose": [
+      "creates private evidence under <vault>/.doctor"
+    ],
+    "fix": [
+      "regenerates derived bundle README.md files",
+      "quarantines stale transfer.lock and hydration.json files"
+    ],
+    "never": [
+      "changes payload bytes",
+      "changes curation.md",
+      "uses the network",
+      "escalates privileges"
+    ]
+  },
+  "supported_subcommands": [
+    "diagnose",
+    "fix",
+    "undo",
+    "explain",
+    "capabilities",
+    "health",
+    "robot-docs",
+    "ls",
+    "diff",
+    "gc"
+  ],
+  "timeouts": {
+    "default_budget_seconds": null,
+    "health_target_ms": 200
+  },
+  "tool": "darsay",
+  "tool_version": "[TOOL_VERSION]",
+  "write_scope": [
+    "<vault>/.doctor/**",
+    "<vault>/*/*/README.md",
+    "<vault>/*/*/transfer.lock",
+    "<vault>/*/*/hydration.json"
+  ]
+}

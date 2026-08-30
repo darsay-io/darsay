@@ -48,6 +48,17 @@ will not reconstruct them from guesses. A live lock and a lock owned by a
 different host are also left alone because local process inspection cannot
 prove that remote owner is dead.
 
+### Current diagnostic scope
+
+The eight checks above are the complete current registry, not a claim to cover
+every possible damaged archive or runtime state. In particular, doctor does not
+yet provide dedicated findings for transfer-ledger semantics, interrupted
+imports, MVB structure, shared runtime-environment leases, installed package or
+completion drift, or foreign-host lock staleness that cannot be proven locally.
+Those states remain manual/refusal territory. `explain --json` describes check
+policy but does not currently publish fixture or input schemas for constructing
+damaged states.
+
 ## Mutation and undo
 
 Every diagnosis or mutation obtains one non-blocking vault-wide doctor lock.
@@ -88,6 +99,11 @@ batch marker. If that marker cannot be written, it compensates the inverse
 mutations before reporting failure. Recovery may reclaim only a same-host,
 same-bundle lock explicitly marked as owned by a dead darsay doctor process;
 ordinary stale, live, and foreign locks remain untouched.
+
+The repository process-safety suite kills real doctor processes immediately
+after durable intent and immediately after target commit. It also exercises
+two-process contention, idempotence, byte-exact undo, detector repeatability,
+and a reviewed golden of `capabilities --json`; see `docs/TESTING.md`.
 
 ## Evidence
 

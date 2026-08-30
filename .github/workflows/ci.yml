@@ -38,9 +38,21 @@ jobs:
 
       - name: Doctor safety envelope
         run: |
-          python -m pytest tests/unit/test_doctor.py tests/integration/test_doctor.py
+          python -m pytest \
+            tests/unit/test_doctor.py \
+            tests/integration/test_doctor.py \
+            tests/integration/test_doctor_safety.py
           DARSAY_HOME="$(mktemp -d)" darsay doctor capabilities --json | python -m json.tool >/dev/null
           DARSAY_HOME="$(mktemp -d)" darsay doctor health --json | python -m json.tool >/dev/null
+
+      - name: Upload doctor golden diff
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: doctor-golden-diff
+          path: tests/golden/*.actual
+          if-no-files-found: ignore
+          retention-days: 7
 
   test:
     name: Tests (Python ${{ matrix.python-version }})

@@ -1225,7 +1225,11 @@ def _preflight_bundle_locks(vault: Path, findings: list[dict]) -> list[Path]:
 
 
 def _preflight_undo_locks(
-    vault: Path, plans: list[dict], *, recovering_interrupted: bool = False
+    vault: Path,
+    plans: list[dict],
+    *,
+    recovering_interrupted: bool = False,
+    recovery_bundles: set[Path] | None = None,
 ) -> list[Path]:
     """Return all bundle locks that must be held for a complete undo."""
     by_bundle: dict[Path, list[Path]] = {}
@@ -1233,6 +1237,14 @@ def _preflight_undo_locks(
         target = Path(plan["target"])
         _relative_in_vault(vault, target)
         by_bundle.setdefault(target.parent, []).append(target)
+    # A process can die after journaling intent but before changing the target.
+    # Such an action produces no inverse plan, but it still leaves the
+    # doctor-owned project lease behind. Include those bundles so explicit
+    # recovery can prove and reclaim the dead lease before marking the source
+    # action recovered.
+    for bundle in recovery_bundles or set():
+        _relative_in_vault(vault, bundle / "transfer.lock")
+        by_bundle.setdefault(bundle, [])
 
     acquire = []
     for bundle in sorted(by_bundle, key=lambda value: value.as_posix()):
@@ -2672,8 +2684,20 @@ def _undo(args, vault: Path) -> int:
             for action in original
         )
         plans = _prepare_undo(vault, source, original)
+        recovery_bundles = (
+            {
+                (vault / Path(str(action["path"]))).parent
+                for action in original
+                if Path(str(action["path"])).name != "transfer.lock"
+            }
+            if recovering_interrupted
+            else set()
+        )
         bundles = _preflight_undo_locks(
-            vault, plans, recovering_interrupted=recovering_interrupted
+            vault,
+            plans,
+            recovering_interrupted=recovering_interrupted,
+            recovery_bundles=recovery_bundles,
         )
         run_id, run, created_at = _new_run(vault, "undo")
         with contextlib.ExitStack() as locks:
