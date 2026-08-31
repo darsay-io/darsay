@@ -12,6 +12,15 @@ def test_matches_include_path_and_basename():
     assert not matches_include("foo.Q8_0.gguf", ["*Q4_K_M*"])
 
 
+def test_matches_include_anchored():
+    assert matches_include("model.safetensors", ["/model.safetensors"])
+    assert not matches_include("FL2VA/model.safetensors", ["/model.safetensors"])
+    # Unanchored keeps the filename fallback.
+    assert matches_include("FL2VA/model.safetensors", ["model.safetensors"])
+    assert matches_include("a/b.gguf", ["/a/*.gguf"])
+    assert not matches_include("x/a/b.gguf", ["/a/*.gguf"])
+
+
 def test_is_sidecar_names():
     assert is_sidecar("config.json")
     assert is_sidecar("LICENSE")

@@ -454,6 +454,7 @@ reason into the output and the manifest's selection record.
 | R12 | legacy `.bin`/`.pt` set beside a full-fidelity safetensors set | `unknown` → fetch (pickle equivalence not cheaply verifiable) |
 | R13 | legacy set with no safetensors sibling | `master` → fetch |
 | R14 | header unreadable — truncated, malformed, over cap, gated without a token, provider lacks `read_bytes` | `unknown` → fetch, reason recorded |
+| R15 | weight set byte-identical, file for file (LFS SHA-256), to another kept set in the same repo | `print` (`exact`) → **skip** — bit-recoverable from the kept twin inside the bundle; no vault gate needed. Added post-ratification when MiniMax-H3 shipped its 62 GiB text encoder three times; identical sets count once toward GGUF source ambiguity |
 
 On the case study: 28-shard indexed set → `master` (R3); 18-shard set →
 `unknown` (R6); all 8 GGUFs → `unknown` (R11 — two differing BF16 sets,

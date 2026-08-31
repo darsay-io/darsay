@@ -139,3 +139,26 @@ def test_archive_plain_repo_unchanged_by_policy(vault, test_provider):
     manifest = load_manifest(bundle)
     assert manifest["source"]["subset"] is None
     assert not any("masters-first" in str(line) for line in notes)
+
+
+def test_archive_default_skips_intra_repo_duplicates(vault, test_provider):
+    from tests.payloads import make_safetensors
+
+    blob = make_safetensors({"w": ("F32", [2, 4])})
+    files = model_files()
+    files["FL2VA/model.safetensors"] = files["model.safetensors"]
+    files["FL2VA/config.json"] = files["config.json"]
+    files["unique/model.safetensors"] = blob[:-1] + b"x"
+    files["unique/config.json"] = files["config.json"]
+    test_provider.add_repo("acme/tripled", files)
+    bundle = archive_quiet("test:acme/tripled", vault=vault)
+    manifest = load_manifest(bundle)
+    subset = manifest["source"]["subset"]
+    assert subset["policy"] == "masters"
+    rules = {s["rule"]: s for s in subset["classification"]["sets"]}
+    assert rules["R15"]["action"] == "skip"
+    assert not (bundle / "model" / "FL2VA" / "model.safetensors").exists()
+    assert (bundle / "model" / "model.safetensors").is_file()
+    assert (bundle / "model" / "unique" / "model.safetensors").is_file()
+    # The duplicate's sidecar config still rides along.
+    assert (bundle / "model" / "FL2VA" / "config.json").is_file()

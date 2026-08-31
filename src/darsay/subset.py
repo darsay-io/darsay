@@ -4,6 +4,11 @@ A glob keeps matching payload files. Small sidecar files (card, license,
 config, tokenizer) are kept as well so a GGUF quant glob still yields a
 loadable bundle. The full upstream inventory is recorded so the bundle
 states exactly what it left out.
+
+A pattern matches the repo-relative path or the bare filename; a leading
+``/`` anchors it to the repo root and disables the filename fallback —
+how a selection says ``model.safetensors`` at the root and *not* its
+byte-identical twin in a subdirectory.
 """
 
 from __future__ import annotations
@@ -69,7 +74,13 @@ def _basename(path: str) -> str:
 
 
 def matches_include(path: str, patterns: list[str]) -> bool:
-    return any(fnmatch(path, pat) or fnmatch(_basename(path), pat) for pat in patterns)
+    for pat in patterns:
+        if pat.startswith("/"):
+            if fnmatch(path, pat[1:]):
+                return True
+        elif fnmatch(path, pat) or fnmatch(_basename(path), pat):
+            return True
+    return False
 
 
 def is_sidecar(path: str) -> bool:

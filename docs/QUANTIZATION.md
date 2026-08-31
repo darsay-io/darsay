@@ -93,8 +93,12 @@ to regenerate. Verdicts come from a closed enum:
   in a repo.
 - **print** — mechanically regenerable and **skipped by default**: a
   GGUF with no imatrix sitting beside exactly one full-fidelity weight
-  set, or a file byte-identical (LFS SHA-256) to the declared base repo
-  *when that base is archived in this vault*.
+  set; a file byte-identical (LFS SHA-256) to the declared base repo
+  *when that base is archived in this vault*; or a weight set
+  byte-identical, file for file, to another kept set in the same repo —
+  multi-pipeline repos ship the same 60 GB text encoder three times,
+  and the skipped twins are bit-recoverable from the copy the bundle
+  keeps.
 - **support** — config, tokenizer, licenses, provenance records: always
   fetched.
 - **unknown** — darsay will not guess, so the files are **fetched**:
@@ -155,7 +159,8 @@ darsay estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
 darsay archive  unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
 ```
 
-`--include` is a glob, repeatable. Matching files are kept, plus sidecar
+`--include` is a glob, repeatable; a leading `/` anchors it to the repo
+root and disables the filename fallback. Matching files are kept, plus sidecar
 files (config, tokenizer, license, card) so a single GGUF still loads.
 The pin is the subset: later reruns without `--include` resume that pin
 rather than expanding it (`--force` re-pins). Completeness rules already

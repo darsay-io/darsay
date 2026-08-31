@@ -401,6 +401,46 @@ def evaluate(files: list[dict], facts: dict, *, locator: str) -> dict:
         verdict, rule, reason = _judge_legacy(weight_set, facts, bool(st_sets))
         weight_set.update(verdict=verdict, rule=rule, reason=reason)
 
+    # R15: a weight set byte-identical (file-for-file LFS SHA-256) to
+    # another kept set in this repo is the strongest print there is —
+    # the twin ships in the same bundle, so the skip is bit-recoverable
+    # from inside the archive, no vault gate, no upstream dependency.
+    # Runs before candidate counting: identical copies are one source.
+    groups: dict[tuple, list[dict]] = {}
+    for weight_set in st_sets + legacy_sets:
+        shas = [weight_set["_sha256"].get(p) for p in weight_set["paths"]]
+        if not shas or any(sha is None for sha in shas):
+            continue  # incomplete hashes: never a claim
+        groups.setdefault(tuple(sorted(shas)), []).append(weight_set)
+    for twins in groups.values():
+        keepable = [t for t in twins if t.get("verdict") in ("master", "unknown")]
+        if len(twins) < 2 or not keepable:
+            continue
+        keeper = min(
+            keepable,
+            key=lambda t: (
+                -1 if t["dir"] == "." else t["dir"].count("/"),
+                t["dir"],
+                t["paths"][0],
+            ),
+        )
+        keeper_name = keeper["dir"] if keeper["dir"] != "." else keeper["paths"][0]
+        for twin in twins:
+            if twin is keeper:
+                continue
+            twin.update(
+                verdict="print",
+                rule="R15",
+                reason=(
+                    f"byte-identical (LFS SHA-256) to {keeper_name} — "
+                    "bit-recoverable from the kept twin in this bundle"
+                ),
+            )
+            twin["evidence"] = {
+                "duplicate_of": keeper["paths"][0],
+                "exact": True,
+            }
+
     established = sum(
         1 for s in st_sets + legacy_sets if s.get("rule") in _CANDIDATE_RULES
     )
@@ -438,7 +478,7 @@ def evaluate(files: list[dict], facts: dict, *, locator: str) -> dict:
             else weight_set["glob"]
             or f"{weight_set['file_count']} files in {weight_set['dir']}"
         )
-        skippable = weight_set["rule"] == "R9" or (
+        skippable = weight_set["rule"] in ("R9", "R15") or (
             weight_set["rule"] == "R2" and base_in_vault
         )
         weight_set["action"] = "skip" if skippable else "fetch"
@@ -505,7 +545,16 @@ def attach_selection(classification: dict, files: list[dict]) -> None:
                 "explicit_paths": False,
             }
             return
-    paths = sorted(kept_weight_paths)
+        # Root-anchored globs disable filename matching: how a kept root
+        # file is told apart from a skipped twin with the same basename.
+        anchored = sorted({f"/{g}" for g in globs})
+        if verified(anchored):
+            classification["selection"] = {
+                "include": anchored,
+                "explicit_paths": False,
+            }
+            return
+    paths = sorted(f"/{p}" for p in kept_weight_paths)
     if verified(paths):
         classification["selection"] = {"include": paths, "explicit_paths": True}
         return
@@ -785,8 +834,9 @@ def print_classification(result: dict, progress=print) -> None:
         )
 
     p(
-        "\n  print = functionally regenerable from kept files under a "
-        "recorded toolchain — not bit-identical."
+        "\n  print = regenerable from kept files: a mechanical "
+        "re-quantization (not bit-identical) or a byte-identical twin "
+        "kept in this bundle [R15]."
     )
     unknown_sets = [s for s in result["sets"] if s["verdict"] == "unknown"]
     if unknown_sets:

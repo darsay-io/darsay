@@ -46,10 +46,10 @@ def test_classify_case_study_shape_refuses_to_guess(vault, test_provider, capsys
                 {"b": ("F32", [2, 2])}
             ),
             "stray-00001-of-00002.safetensors": make_safetensors(
-                {"a": ("F32", [2, 2])}
+                {"a": ("F32", [3, 2])}
             ),
             "stray-00002-of-00002.safetensors": make_safetensors(
-                {"b": ("F32", [2, 2])}
+                {"b": ("F32", [3, 2])}
             ),
             "model.safetensors.index.json": _index(
                 {

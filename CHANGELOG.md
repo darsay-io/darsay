@@ -9,6 +9,20 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Added
+
+- Classification rule R15: a weight set byte-identical, file for file
+  (LFS SHA-256), to another kept set in the same repo is a print and is
+  skipped by default — the strongest print there is, bit-recoverable
+  from the twin the bundle keeps. Multi-pipeline repos ship the same
+  60 GiB text encoder three times; MiniMax-H3 drops from 464 GiB to
+  330 GiB with zero information lost. Identical sets count once toward
+  GGUF source ambiguity.
+- Include patterns accept a leading `/` to anchor at the repo root and
+  disable the filename fallback — how a selection keeps a root
+  `model.safetensors` and not its byte-identical twin in a subdirectory.
+  Policy selections fall back to anchored patterns automatically.
+
 ### Fixed
 
 - `archive --next <board-url>` hands its claim back when the archive

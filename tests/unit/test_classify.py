@@ -344,9 +344,9 @@ def test_selection_globs_verified():
     assert result["skip"]["files"] == 1
 
 
-def test_selection_degrades_to_none_when_unverifiable():
-    # The kept file's only pattern is its basename, which also matches
-    # the skipped print by basename — no honest selection exists.
+def test_selection_anchors_past_basename_collisions():
+    # The kept root file's basename also names the skipped twin; a
+    # root-anchored pattern tells them apart.
     files = [
         F("model.safetensors", sha256="bb"),
         F("copy/model.safetensors", sha256="aa"),
@@ -354,6 +354,24 @@ def test_selection_degrades_to_none_when_unverifiable():
     base = {
         "locator": "acme/base",
         "sha256": {"aa": "model.safetensors"},
+        "in_vault": True,
+        "error": None,
+    }
+    result = _classified(files, _facts(base=base))
+    assert result["selection"]["include"] == ["/model.safetensors"]
+    assert result["skip"]["files"] == 1
+
+
+def test_selection_degrades_to_none_when_unverifiable():
+    # Glob metacharacters in a kept path defeat fnmatch at every tier —
+    # the honest outcome is the full fetch.
+    files = [
+        F("we[i]rd.safetensors", sha256="bb"),
+        F("copy/we[i]rd.safetensors", sha256="aa"),
+    ]
+    base = {
+        "locator": "acme/base",
+        "sha256": {"aa": "we[i]rd.safetensors"},
         "in_vault": True,
         "error": None,
     }
@@ -504,3 +522,72 @@ def test_collect_facts_ticks_every_read(monkeypatch):
     # One tick per range request, including the concurrent header reads.
     assert len(ticks) == result["read"]["requests"]
     assert result["read"]["requests"] >= 3
+
+
+def test_r15_intra_repo_duplicates_skip_and_keep_shallowest():
+    files = [
+        F("text_encoder/model-00001-of-00002.safetensors", sha256="t1"),
+        F("text_encoder/model-00002-of-00002.safetensors", sha256="t2"),
+        F("FL2VA/text_encoder/model-00001-of-00002.safetensors", sha256="t1"),
+        F("FL2VA/text_encoder/model-00002-of-00002.safetensors", sha256="t2"),
+        F("Ref2VA/text_encoder/model-00001-of-00002.safetensors", sha256="t1"),
+        F("Ref2VA/text_encoder/model-00002-of-00002.safetensors", sha256="t2"),
+        F("transformer/model.safetensors", sha256="unique"),
+    ]
+    cfg = {"torch_dtype": "bfloat16"}
+    facts = _facts(
+        configs={
+            "text_encoder": cfg,
+            "FL2VA/text_encoder": cfg,
+            "Ref2VA/text_encoder": cfg,
+            "transformer": cfg,
+        }
+    )
+    result = evaluate(files, facts, locator="a/t")
+    attach_selection(result, files)
+    root = _set_for(result, "text_encoder/model-00001-of-00002.safetensors")
+    assert (root["verdict"], root["action"]) == ("master", "fetch")
+    for prefix in ("FL2VA", "Ref2VA"):
+        twin = _set_for(
+            result, f"{prefix}/text_encoder/model-00001-of-00002.safetensors"
+        )
+        assert (twin["verdict"], twin["rule"], twin["action"]) == (
+            "print",
+            "R15",
+            "skip",
+        )
+        assert twin["evidence"]["exact"] is True
+    assert _set_for(result, "transformer/model.safetensors")["action"] == "fetch"
+    kept = set()
+    for pattern in result["selection"]["include"]:
+        kept.add(pattern)
+    assert not any(p.startswith(("FL2VA", "Ref2VA")) for p in kept)
+
+
+def test_r15_never_claims_on_missing_hashes_or_different_bytes():
+    files = [
+        F("a/model.safetensors", sha256="x"),
+        F("b/model.safetensors", sha256=None),
+        F("c/model.safetensors", sha256="y"),
+    ]
+    cfg = {"torch_dtype": "bfloat16"}
+    facts = _facts(configs={"a": cfg, "b": cfg, "c": cfg})
+    result = evaluate(files, facts, locator="a/t")
+    assert all(s["rule"] != "R15" for s in result["sets"] if s["kind"] != "support")
+    assert result["skip"]["bytes"] == 0
+
+
+def test_r15_duplicates_do_not_inflate_gguf_ambiguity():
+    # Two byte-identical BF16 sets are one source: the GGUF stays R9.
+    files = [
+        F("model.safetensors", sha256="s"),
+        F("mirror/model.safetensors", sha256="s"),
+        F("Q4.gguf"),
+    ]
+    cfg = {"torch_dtype": "bfloat16"}
+    gguf = {"Q4.gguf": {"kv": {"general.file_type": 15}}}
+    facts = _facts(configs={".": cfg, "mirror": cfg}, gguf=gguf)
+    result = evaluate(files, facts, locator="a/t")
+    assert result["candidates"] == 1
+    assert _set_for(result, "Q4.gguf")["rule"] == "R9"
+    assert _set_for(result, "mirror/model.safetensors")["rule"] == "R15"
