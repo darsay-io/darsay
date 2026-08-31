@@ -1021,3 +1021,80 @@ def test_digest_abandoned_by_ctrl_c_is_adopted_by_the_next_run(
     record = load_ledger(bundle)["files"]["model.safetensors"]
     assert record["status"] == "verified"
     assert record["source"] == "adopted"
+
+
+def test_large_files_stream_concurrently_up_to_jobs(vault, test_provider, monkeypatch):
+    """``--jobs 3``: three large files are in flight at once."""
+    import threading
+
+    monkeypatch.setattr("darsay.transfer.SMALL_FILE_LIMIT", 0)
+    files = model_files()
+    assert len(files) >= 3
+    test_provider.add_repo("acme/toy", files)
+    # The first three fetches must all be inside download_file together;
+    # with one stream the first would wait here alone until the timeout.
+    rendezvous = threading.Barrier(3, timeout=10)
+    lock = threading.Lock()
+    state = {"entered": 0, "active": 0, "peak": 0}
+    real_download = test_provider.download_file
+
+    def download(source, revision, relative, payload_dir, *, force, tqdm_class):
+        with lock:
+            state["entered"] += 1
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+            ordinal = state["entered"]
+        try:
+            if ordinal <= 3:
+                rendezvous.wait()
+            real_download(
+                source,
+                revision,
+                relative,
+                payload_dir,
+                force=force,
+                tqdm_class=tqdm_class,
+            )
+        finally:
+            with lock:
+                state["active"] -= 1
+
+    monkeypatch.setattr(test_provider, "download_file", download)
+    bundle = archive_quiet("test:acme/toy", vault=vault, jobs=3)
+    assert not rendezvous.broken
+    assert state["peak"] == 3
+    assert load_manifest(bundle)["inventory"]["file_count"] == len(files)
+    ledger = load_ledger(bundle)
+    assert all(state["status"] == "verified" for state in ledger["files"].values())
+
+
+def test_large_path_headroom_pauses_before_a_file_that_cannot_fit(
+    vault, test_provider, monkeypatch
+):
+    """The pipeline's floor guard: same pause, same wording, one stream."""
+    from types import SimpleNamespace
+
+    monkeypatch.setattr("darsay.transfer.SMALL_FILE_LIMIT", 0)
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    floor = 2 * 1024**3
+    largest = max(files, key=lambda name: len(files[name]))
+    disk = SimpleNamespace(free=floor + len(files[largest]) - 1)
+    monkeypatch.setattr("darsay.transfer.shutil.disk_usage", lambda path: disk)
+    with pytest.raises(PartialTransfer) as stopped:
+        archive_quiet("test:acme/toy", vault=vault, min_free=floor)
+    assert stopped.value.reason == "disk"
+    assert stopped.value.detail.startswith(
+        f"{largest} needs {len(files[largest])} B more"
+    )
+    assert test_provider.attempts.get(largest, 0) == 0
+    ledger = load_ledger(stopped.value.bundle_dir)
+    verified = {
+        path for path, state in ledger["files"].items() if state["status"] == "verified"
+    }
+    # Every file that fit landed and was verified, digests included, even
+    # though the pause came while the last of them was still hashing.
+    assert verified == set(files) - {largest}
+    disk.free = 100 * 1024**3
+    bundle = archive_quiet("test:acme/toy", vault=vault, min_free=floor)
+    assert load_manifest(bundle)["inventory"]["file_count"] == len(files)

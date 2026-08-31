@@ -21,7 +21,9 @@ point `darsay` (argparse, subcommands in `cli.py`).
 
 - `src/darsay/` — `archiver.py` (download + manifest assembly),
   `transfer.py` (pin ledger, reconciliation, resumable/budgeted per-file
-  transfer, cooperative lanes/assembly, sibling-blob reuse, the rate-cap
+  transfer through a fetch → hash → commit pipeline — `_FileJob`, `--jobs`
+  streams, one hash thread, ledger writes only on the main thread —
+  cooperative lanes/assembly, sibling-blob reuse, the rate-cap
   leaky bucket, and reconnect-after-network-loss via the shared `Link`),
   `progress.py` (archive-level live transfer panel: percent, bytes, rate,
   ETA, offline/reconnecting states; captures stray stdout/stderr *and*

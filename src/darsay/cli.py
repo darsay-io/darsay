@@ -1569,7 +1569,11 @@ def build_parser() -> argparse.ArgumentParser:
         type=_positive_int,
         default=4,
         metavar="N",
-        help="parallel workers for files smaller than 8 MiB (default: 4)",
+        help=(
+            "parallel transfer streams: N small files at once, and N large "
+            "files at once with one hash thread verifying alongside "
+            "(default: 4)"
+        ),
     )
     p.add_argument(
         "--shard",

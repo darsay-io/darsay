@@ -195,15 +195,20 @@ completed file is retried once (transit corruption), then logged as an
 upstream mismatch and set aside — it never silently blocks the rest of the
 transfer. Small files (< 8 MiB) may fetch through a bounded worker pool
 (`--jobs`, default 4 — dataset bundles with thousands of parquet shards
-need this); large files download one saturating stream at a time, and a
-finished file's digest runs on a separate hash thread while the next file
-downloads, so the network never idles for verification (`hashlib` releases
-the GIL; a 5 GiB shard hashes in seconds on a local SSD). Workers never
-write the ledger: results are committed on the main thread as digests
-finish. Only Ctrl-C abandons a running digest — the file stays on disk and
-the next run's reconcile adopts it after hashing; a byte or time budget
-lets queued digests finish, since they spend no network and no disk. An
-error on one file halts the other streams at their next chunk.
+need this); large files fetch through `--jobs` concurrent streams as well
+(each file one HTTP stream — a single CDN connection rarely fills a fast
+link), and a finished file's digest runs on a separate hash thread while
+the streams keep downloading, so the network never idles for verification
+(`hashlib` releases the GIL; a 5 GiB shard hashes in seconds on a local
+SSD). Workers never write the ledger: results are committed on the main
+thread as digests finish, so completion order can differ from start order.
+The floor guard counts every in-flight stream at the bytes it has yet to
+land before another file begins. Only Ctrl-C abandons a running digest —
+the file stays on disk and the next run's reconcile adopts it after
+hashing; a byte or time budget lets queued digests finish, since they
+spend no network and no disk. An error on one file halts the other streams
+at their next chunk. Streams share one rate cap and one byte budget; a stop
+leaves up to `--jobs` resumable partials instead of one.
 darsay deliberately selects `hf_hub_download`'s HTTP path even
 when `hf_xet` is installed: current Xet aborts discard in-flight
 reconstruction state, while HTTP Range leaves a durable `.incomplete` file
@@ -511,13 +516,13 @@ recorded hashes for bytes this pin handed to a named vault.
 | `--revision REF` | pin a branch, tag, or commit instead of `main`; the resolved commit is frozen for every later run |
 | `-n` / `--dry-run` | pin (if new) + reconcile + plan report; move no payload bytes. Every writing command takes the same flag |
 | `--rehash` | re-verify every present file by digest instead of trusting the ledger (periodic paranoia for months-long archives) |
-| `--jobs N` | small-file worker pool width (default 4; large files always sequential) |
+| `--jobs N` | parallel transfer streams (default 4): N small files at once, and N large files at once with one hash thread verifying finished files alongside; `1` restores a single stream, still hashing in parallel |
 | `--shard N/T` | advisory cooperative order: byte-balance files into T lanes and fetch lane N first; the expected set is unchanged |
 
-Budgets are approximate and checked at received-chunk boundaries: active
-small-file workers and the chunk that crosses a cap may overshoot it. The
-in-flight file is left as a
-resumable partial, counted toward the next session. `darsay list` grows
+Budgets are approximate and checked at received-chunk boundaries: every
+active stream and the chunk that crosses a cap may overshoot it. In-flight
+files are left as resumable partials, counted toward the next session.
+`darsay list` grows
 an in-progress row for bundles with a ledger but no manifest —
 `archiving: 61% (34.1/55.6 GB, 9/15 files verified)` — so the vault's
 overall state is visible without running anything.

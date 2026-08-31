@@ -25,6 +25,15 @@ Tool version (`darsay.__version__`) is independent of
 - `rm` lists sizes before asking; `regen` and `catalog regen` report whether
   README.md actually changed (`+3 -1 lines` / `unchanged`); `catalog adopt`
   lists the entries it took.
+- **`--jobs` now streams large files too.** Large files fetch through the
+  same pool width as small ones (default 4 — each file is one HTTP stream,
+  and a single CDN connection rarely fills a fast link), with one hash
+  thread verifying finished files alongside. The floor guard counts every
+  in-flight stream at the bytes it has yet to land before another file
+  begins (`model-00023… with 2 in flight needs 12.0 GiB more …`). Streams
+  share the rate cap and the byte budget; a stop leaves up to `--jobs`
+  resumable partials instead of one. `--jobs 1` restores a single stream,
+  still hashing in parallel.
 
 ### Changed
 

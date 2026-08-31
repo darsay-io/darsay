@@ -2046,8 +2046,11 @@ def transfer_all(
 ) -> dict:
     """Fetch and immediately verify every remaining file at the pinned commit.
 
-    ``max_rate`` caps network bytes per second; ``max_offline`` is how long
-    a lost network is waited out before the session pauses cleanly.
+    ``jobs`` is how many files are in flight at once: small files as pool
+    workers, large files as concurrent streams beside one hash thread.
+    ``max_rate`` caps network bytes per second across every stream;
+    ``max_offline`` is how long a lost network is waited out before the
+    session pauses cleanly.
     """
     from .config import DEFAULT_MAX_OFFLINE
     from .progress import TransferDisplay, meter_from_plan
@@ -2114,7 +2117,7 @@ def transfer_all(
                 counter,
                 local_sources,
                 stop_controller,
-                1,
+                jobs,
                 emit,
                 meter=meter,
                 live=display.live,

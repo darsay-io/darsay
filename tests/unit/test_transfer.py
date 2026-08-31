@@ -1155,3 +1155,56 @@ def test_stop_controller_check_interrupt_is_only_about_ctrl_c():
     ctrl.interrupted = True
     with pytest.raises(CleanStop, match="SIGINT"):
         ctrl.check_interrupt()
+
+
+def test_pipeline_headroom_counts_every_stream_in_flight(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from darsay.transfer import _FileJob, _pipeline_headroom
+
+    gib = 1024**3
+    banked = {"a.bin": 1 * gib}
+    provider = SimpleNamespace(
+        partial_bytes=lambda payload_dir, expected: banked.get(expected["path"], 0)
+    )
+    ledger = {"files": {}}
+    payload = tmp_path / "model"
+
+    def job(path, size, digest="d" * 64):
+        return _FileJob(
+            {"path": path, "size": size, "lfs_sha256": digest}, payload, ledger, {}
+        )
+
+    floor = 2 * gib
+    disk = SimpleNamespace(free=floor + 8 * gib)
+    monkeypatch.setattr("darsay.transfer.shutil.disk_usage", lambda path: disk)
+    ctrl = StopController(min_free_bytes=floor, disk_path=tmp_path)
+    in_flight = [job("a.bin", 5 * gib)]  # 1 GiB banked: 4 GiB still to land
+    # 4 GiB in flight + 5 GiB new = 9 GiB against 8 GiB of headroom.
+    with pytest.raises(CleanStop) as stopped:
+        _pipeline_headroom(job("b.bin", 5 * gib), in_flight, provider, ctrl)
+    assert stopped.value.reason == "disk"
+    assert stopped.value.detail.startswith("b.bin with 1 in flight needs 9.0 GiB more")
+    # The stop is sticky, like the floor's.
+    with pytest.raises(CleanStop):
+        _pipeline_headroom(job("c.bin", 1), [], provider, ctrl)
+
+    ctrl = StopController(min_free_bytes=floor, disk_path=tmp_path)
+    banked["a.bin"] = 2 * gib  # 3 GiB to land + 5 GiB new = 8 GiB: fits.
+    _pipeline_headroom(job("b.bin", 5 * gib), in_flight, provider, ctrl)
+    # Alone, the wording is the classic one.
+    with pytest.raises(CleanStop, match=r"^big.bin needs 9.0 GiB more"):
+        _pipeline_headroom(job("big.bin", 9 * gib), [], provider, ctrl)
+
+    ctrl = StopController(min_free_bytes=floor, disk_path=tmp_path)
+    # A sibling-bundle copy is not guarded; a file already on disk needs nothing.
+    copy = job("copy.bin", 50 * gib)
+    copy.candidates = [{"path": tmp_path / "x", "bundle_id": "other"}]
+    _pipeline_headroom(copy, [], provider, ctrl)
+    payload.mkdir()
+    (payload / "landed.bin").write_bytes(b"x")
+    landed = job("landed.bin", 50 * gib)
+    assert landed.remaining_bytes(provider) == 0
+    _pipeline_headroom(job("b.bin", 5 * gib), [landed], provider, ctrl)
+    # No controller, no floor: nothing to check.
+    _pipeline_headroom(job("b.bin", 50 * gib), in_flight, provider, None)
