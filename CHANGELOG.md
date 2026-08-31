@@ -26,6 +26,22 @@ Tool version (`darsay.__version__`) is independent of
   README.md actually changed (`+3 -1 lines` / `unchanged`); `catalog adopt`
   lists the entries it took.
 
+### Changed
+
+- **`archive` hashes a finished large file while the next one downloads.**
+  Large files used to run download → hash → next in strict sequence, so
+  the network sat idle for every digest pass. Each large file now moves
+  through a fetch → hash → commit pipeline: fetching on a worker, digesting
+  on a dedicated hash thread (`hashlib` releases the GIL, so the two do not
+  contend), and the ledger written only on the main thread as digests
+  finish. The invariants are unchanged: a digest abandoned by Ctrl-C leaves
+  the complete file for the next run's reconcile to adopt, a budget lets
+  queued digests finish (they cost no network and no disk), a mismatch is
+  discarded and fetched once more with `force`, and an error on one file
+  halts the other streams at their next chunk. Non-live logs gain a
+  `Verified …` line per large file, since completion order can now differ
+  from start order.
+
 ### Fixed
 
 - The live panel no longer reads `stalled` while `archive` digests a file it

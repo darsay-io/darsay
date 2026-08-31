@@ -1121,3 +1121,37 @@ def test_network_mount_detection_from_mount_tables():
     assert _deepest_mount("/mnt/my disk/vault", linux) is False
     assert _deepest_mount("/mnt/nasty", linux) is False
     assert _deepest_mount("/home/jeremy/vault", linux) is False
+
+
+def test_network_counter_halt_stops_the_next_chunk():
+    ctrl = StopController()
+    counter = NetworkCounter({"bytes_network": 0}, ctrl)
+    counter.add(10)
+    counter.halt(CleanStop("error", "ValueError on other.bin"))
+    # A deferred (Xet) callback banks the stop without raising ...
+    counter.add(10, defer_only=True)
+    # ... and the next ordinary chunk raises it, its bytes counted first.
+    with pytest.raises(CleanStop, match="other.bin"):
+        counter.add(10)
+    assert counter.session["bytes_network"] == 30
+    with pytest.raises(CleanStop, match="other.bin"):
+        counter.poll()
+
+
+def test_network_counter_halt_keeps_an_earlier_stop():
+    ctrl = StopController(max_bytes=5)
+    counter = NetworkCounter({"bytes_network": 0}, ctrl)
+    counter.add(10)  # over budget: banked, raised at the next chunk
+    counter.halt(CleanStop("error", "later"))
+    with pytest.raises(CleanStop, match="budget"):
+        counter.add(1)
+
+
+def test_stop_controller_check_interrupt_is_only_about_ctrl_c():
+    ctrl = StopController(max_bytes=1)
+    with pytest.raises(CleanStop, match="budget"):
+        ctrl.check({"bytes_network": 5})
+    ctrl.check_interrupt()
+    ctrl.interrupted = True
+    with pytest.raises(CleanStop, match="SIGINT"):
+        ctrl.check_interrupt()

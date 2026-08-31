@@ -195,8 +195,16 @@ completed file is retried once (transit corruption), then logged as an
 upstream mismatch and set aside — it never silently blocks the rest of the
 transfer. Small files (< 8 MiB) may fetch through a bounded worker pool
 (`--jobs`, default 4 — dataset bundles with thousands of parquet shards
-need this); large files download sequentially, one saturating stream at a
-time. darsay deliberately selects `hf_hub_download`'s HTTP path even
+need this); large files download one saturating stream at a time, and a
+finished file's digest runs on a separate hash thread while the next file
+downloads, so the network never idles for verification (`hashlib` releases
+the GIL; a 5 GiB shard hashes in seconds on a local SSD). Workers never
+write the ledger: results are committed on the main thread as digests
+finish. Only Ctrl-C abandons a running digest — the file stays on disk and
+the next run's reconcile adopts it after hashing; a byte or time budget
+lets queued digests finish, since they spend no network and no disk. An
+error on one file halts the other streams at their next chunk.
+darsay deliberately selects `hf_hub_download`'s HTTP path even
 when `hf_xet` is installed: current Xet aborts discard in-flight
 reconstruction state, while HTTP Range leaves a durable `.incomplete` file
 that survives budgets, SIGINT, process restarts, and filesystem copies. The

@@ -877,3 +877,147 @@ def test_assemble_move_refuses_registered_source(vault, test_provider, tmp_path)
     assert (source / "model" / "config.json").is_file() or any(
         (source / "model").rglob("*")
     )
+
+
+def _corrupting(test_provider, relative: str, times: int):
+    """A ``download_file`` that lands wrong bytes for ``relative`` ``times``
+    times (-1: always), so the pinned digest never matches."""
+    real_download = test_provider.download_file
+    left = {"n": times}
+
+    def download(source, revision, path, payload_dir, *, force, tqdm_class):
+        real_download(
+            source, revision, path, payload_dir, force=force, tqdm_class=tqdm_class
+        )
+        if path == relative and left["n"] != 0:
+            left["n"] -= 1
+            dest = payload_dir.joinpath(*Path(path).parts)
+            data = bytearray(dest.read_bytes())
+            data[-1] ^= 0xFF
+            dest.write_bytes(bytes(data))
+
+    return download
+
+
+def test_large_file_hash_overlaps_the_next_fetch(vault, test_provider, monkeypatch):
+    """One stream: file N's digest runs while file N+1 is downloading."""
+    import threading
+
+    import darsay.transfer as transfer_module
+
+    monkeypatch.setattr("darsay.transfer.SMALL_FILE_LIMIT", 0)
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    first = min(files, key=lambda name: (len(files[name]), name))
+    next_fetched = threading.Event()
+    seen: dict[str, bool] = {}
+    real_hash = transfer_module.hash_file
+
+    def hash_waiting_for_the_next_fetch(path, *args, **kwargs):
+        if path.name == Path(first).name and "overlapped" not in seen:
+            seen["overlapped"] = next_fetched.wait(timeout=10)
+        return real_hash(path, *args, **kwargs)
+
+    monkeypatch.setattr("darsay.transfer.hash_file", hash_waiting_for_the_next_fetch)
+    real_download = test_provider.download_file
+
+    def download(source, revision, relative, payload_dir, *, force, tqdm_class):
+        real_download(
+            source, revision, relative, payload_dir, force=force, tqdm_class=tqdm_class
+        )
+        if relative != first:
+            next_fetched.set()
+
+    monkeypatch.setattr(test_provider, "download_file", download)
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    assert seen["overlapped"] is True
+    assert load_manifest(bundle)["inventory"]["file_count"] == len(files)
+
+
+def test_large_file_digest_mismatch_is_fetched_once_more(
+    vault, test_provider, monkeypatch
+):
+    monkeypatch.setattr("darsay.transfer.SMALL_FILE_LIMIT", 0)
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    monkeypatch.setattr(
+        test_provider,
+        "download_file",
+        _corrupting(test_provider, "model.safetensors", 1),
+    )
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    ledger = load_ledger(bundle)
+    record = ledger["files"]["model.safetensors"]
+    assert record["status"] == "verified"
+    assert record["verified_against_upstream"] is True
+    assert record["attempts"] == 2
+    assert test_provider.attempts["model.safetensors"] == 2
+    events = [
+        e["event"] for e in ledger["events"] if e.get("path") == "model.safetensors"
+    ]
+    assert events == ["digest_mismatch"]
+    assert ledger["sessions"][-1]["retries"] == 1
+
+
+def test_large_file_persistent_mismatch_is_kept_and_flagged(
+    vault, test_provider, monkeypatch
+):
+    monkeypatch.setattr("darsay.transfer.SMALL_FILE_LIMIT", 0)
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    monkeypatch.setattr(
+        test_provider,
+        "download_file",
+        _corrupting(test_provider, "model.safetensors", -1),
+    )
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    ledger = load_ledger(bundle)
+    record = ledger["files"]["model.safetensors"]
+    assert record["status"] == "verified"
+    assert record["verified_against_upstream"] is False
+    assert record["attempts"] == 2
+    events = [
+        e["event"] for e in ledger["events"] if e.get("path") == "model.safetensors"
+    ]
+    assert events == [
+        "digest_mismatch",
+        "digest_mismatch",
+        "persistent_digest_mismatch",
+    ]
+    assert (bundle / "model" / "model.safetensors").is_file()
+    manifest = load_manifest(bundle)
+    assert manifest["validation"]["checksum_verification"]["status"] == "fail"
+
+
+def test_digest_abandoned_by_ctrl_c_is_adopted_by_the_next_run(
+    vault, test_provider, monkeypatch
+):
+    """Ctrl-C mid-hash keeps the landed bytes; nothing is re-downloaded."""
+    import darsay.transfer as transfer_module
+    from darsay.transfer import CleanStop
+
+    monkeypatch.setattr("darsay.transfer.SMALL_FILE_LIMIT", 0)
+    files = model_files()
+    test_provider.add_repo("acme/toy", files)
+    real_hash = transfer_module.hash_file
+    abandoned: list[Path] = []
+
+    def hash_interrupted_once(path, *args, **kwargs):
+        if path.name == "model.safetensors" and not abandoned:
+            abandoned.append(path)
+            raise CleanStop("interrupt", "SIGINT received")
+        return real_hash(path, *args, **kwargs)
+
+    monkeypatch.setattr("darsay.transfer.hash_file", hash_interrupted_once)
+    with pytest.raises(PartialTransfer) as stopped:
+        archive_quiet("test:acme/toy", vault=vault)
+    assert stopped.value.reason == "interrupt"
+    bundle = stopped.value.bundle_dir
+    assert (bundle / "model" / "model.safetensors").is_file()
+    assert load_ledger(bundle)["files"]["model.safetensors"].get("status") != "verified"
+    test_provider.downloads.clear()
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    assert "model.safetensors" not in test_provider.downloads
+    record = load_ledger(bundle)["files"]["model.safetensors"]
+    assert record["status"] == "verified"
+    assert record["source"] == "adopted"

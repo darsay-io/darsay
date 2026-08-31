@@ -19,7 +19,15 @@ import subprocess
 import sys
 import threading
 import time
-from concurrent.futures import CancelledError, ThreadPoolExecutor, as_completed
+from collections import deque
+from concurrent.futures import (
+    FIRST_COMPLETED,
+    CancelledError,
+    Future,
+    ThreadPoolExecutor,
+    as_completed,
+    wait,
+)
 from contextlib import contextmanager, suppress
 from pathlib import Path, PurePosixPath
 
@@ -104,6 +112,16 @@ class StopController:
             or self._disk_stop is not None
             or (self.deadline is not None and time.monotonic() >= self.deadline)
         )
+
+    def check_interrupt(self) -> None:
+        """Raise for Ctrl-C only.
+
+        For work that spends no network bytes and no disk — a digest pass
+        over a file that already landed — budgets and the floor are not a
+        reason to stop; the bytes are paid for and the hash is seconds away.
+        """
+        if self.interrupted:
+            raise CleanStop("interrupt", "SIGINT received")
 
     def check(self, session: dict) -> None:
         if self.interrupted:
@@ -1231,14 +1249,14 @@ class NetworkCounter:
             self.session["bytes_network"] += amount
             if self.throttle is not None and amount:
                 wait = self.throttle.debit(amount)
+            # Providers typically report a chunk immediately before writing
+            # it. Defer the first stop until the following callback so the
+            # triggering chunk is durably banked in the incomplete file.
+            if self.pending_stop is not None:
+                if not defer_only:
+                    raise self.pending_stop
+                return
             if self.stop_controller is not None:
-                # Providers typically report a chunk immediately before writing
-                # it. Defer the first stop until the following callback so the
-                # triggering chunk is durably banked in the incomplete file.
-                if self.pending_stop is not None:
-                    if not defer_only:
-                        raise self.pending_stop
-                    return
                 try:
                     self.stop_controller.check(self.session)
                 except CleanStop as stop:
@@ -1254,6 +1272,16 @@ class NetworkCounter:
         stop = self.pending_stop
         if stop is not None:
             raise stop
+
+    def halt(self, stop: CleanStop) -> None:
+        """Stop every in-flight transfer at its next chunk; bytes stay banked.
+
+        For a failure elsewhere in the session: the other streams must not
+        run a multi-gigabyte file to the end for a run that is already lost.
+        """
+        with self.lock:
+            if self.pending_stop is None:
+                self.pending_stop = stop
 
 
 def _event(path: str | None, event: str, detail: str) -> dict:
@@ -1395,6 +1423,210 @@ def _fetch_with_reconnect(
         return
 
 
+class _FileJob:
+    """One pinned file on its way through fetch → hash → commit.
+
+    ``fetch`` and ``hash`` run on worker threads and never touch the ledger.
+    ``settle`` runs wherever results are collected and says whether the
+    record is final or the file goes around again: a sibling-bundle copy
+    that failed re-verification falls back to the next candidate or the
+    network; a first network fetch that missed the pinned digest is
+    discarded and fetched once more with ``force``; a second miss is kept
+    and recorded as an upstream verification failure.
+    """
+
+    def __init__(
+        self,
+        expected: dict,
+        payload_dir: Path,
+        ledger: dict,
+        local_sources: dict[str, list[dict]],
+    ):
+        self.expected = expected
+        self.relative: str = expected["path"]
+        self.size = expected.get("size")
+        self.payload_dir = payload_dir
+        self.path = _payload_path(payload_dir, self.relative)
+        previous = ledger["files"].get(self.relative) or {}
+        self.attempts = int(previous.get("attempts") or 0)
+        self.events: list[dict] = []
+        self.retries = 0
+        digest = expected.get("lfs_sha256")
+        self.candidates: list[dict] = (
+            list(local_sources.get(digest, [])) if digest else []
+        )
+        self.candidate: dict | None = None
+        self.network_attempts = 0
+        self.source: str | None = None
+        self.copy_method: str | None = None
+        self.record: dict | None = None
+        self.bytes_local_sources = 0
+        self.started = False
+
+    def remaining_bytes(self, provider) -> int:
+        """Bytes this file still needs on disk, for the floor guard."""
+        size = int(self.size or 0)
+        if not size or self.path.is_file():
+            return 0
+        return max(0, size - provider.partial_bytes(self.payload_dir, self.expected))
+
+    def fetch(
+        self,
+        provider,
+        source,
+        ledger: dict,
+        counter: NetworkCounter,
+        stop_controller: StopController | None,
+        meter=None,
+        *,
+        check_headroom: bool = True,
+    ) -> None:
+        """Bring the next source's bytes to ``self.path`` (worker thread).
+
+        Sibling-bundle copies come first; the network is the last resort.
+        ``check_headroom`` guards the first network fetch against the floor
+        here; a pipeline that already checked the aggregate passes False.
+        """
+        self.started = True
+        if stop_controller is not None:
+            stop_controller.check(counter.session)
+        if meter is not None:
+            meter.set_current(self.relative, self.size, phase="download")
+        while self.candidates:
+            candidate = self.candidates.pop(0)
+            self.attempts += 1
+            try:
+                if meter is not None:
+                    meter.begin_hash(self.relative, self.size)
+                self.copy_method = _copy_local_file(candidate["path"], self.path)
+            except OSError as exc:
+                _discard_payload_file(self.path, self.payload_dir)
+                if _disk_full(exc):
+                    raise _disk_stop(
+                        stop_controller, _full_while_writing(self.relative)
+                    ) from exc
+                self.events.append(
+                    _event(
+                        self.relative,
+                        "local_source_error",
+                        f"{candidate['bundle_id']} could not be copied: {exc}",
+                    )
+                )
+                continue
+            self.candidate = candidate
+            self.source = f"local:{candidate['bundle_id']}"
+            return
+
+        if (
+            check_headroom
+            and stop_controller is not None
+            and self.network_attempts == 0
+            and self.size
+        ):
+            # Pause at the boundary rather than start a file that cannot
+            # finish above the floor; a banked partial only needs the rest.
+            banked = provider.partial_bytes(self.payload_dir, self.expected)
+            stop_controller.check_headroom(self.relative, int(self.size) - banked)
+        self.network_attempts += 1
+        self.attempts += 1
+        if meter is not None:
+            meter.set_current(self.relative, self.size, phase="download")
+        _fetch_with_reconnect(
+            provider,
+            source,
+            ledger,
+            self.relative,
+            self.payload_dir,
+            force=self.network_attempts > 1,
+            tqdm_class=provider.progress_wrapper(counter, meter=meter),
+            counter=counter,
+            events=self.events,
+        )
+        self.candidate = None
+        self.source = "network"
+        self.copy_method = None
+
+    def hash(self, stop_controller: StopController | None, meter=None) -> None:
+        """Digest the bytes at ``self.path`` (hash thread); never the ledger.
+
+        Only Ctrl-C abandons a running digest; budgets and the floor are
+        about network and disk, and this file's share of both is spent. An
+        abandoned file stays on disk for the next run's reconcile to adopt.
+        """
+        assert self.source is not None
+        if meter is not None:
+            meter.begin_hash(self.relative, self.size)
+        interrupt_check = (
+            stop_controller.check_interrupt if stop_controller is not None else None
+        )
+        on_bytes = None
+        if meter is not None:
+
+            def on_bytes(n, total, *, _path=self.relative):
+                meter.note_hash_bytes(_path, n, total, count=False)
+
+        self.record = _verified_record(
+            self.expected,
+            self.path,
+            self.source,
+            self.attempts,
+            interrupt_check=interrupt_check,
+            on_bytes=on_bytes,
+        )
+
+    def settle(self) -> bool:
+        """After a hash: True when the record is final, else it goes around."""
+        record = self.record
+        assert record is not None and self.source is not None
+        if record["verified_against_upstream"] is not False:
+            if self.candidate is not None:
+                record["local_copy_method"] = self.copy_method
+                self.bytes_local_sources = record["size"]
+            return True
+        if self.candidate is not None:
+            self.events.append(
+                _event(
+                    self.relative,
+                    "local_source_mismatch",
+                    f"{self.candidate['bundle_id']} failed re-verification; falling back",
+                )
+            )
+            _discard_payload_file(self.path, self.payload_dir)
+            self.record = None
+            return False
+        self.events.append(
+            _event(
+                self.relative,
+                "digest_mismatch",
+                f"download attempt {self.attempts} did not match pinned upstream digest",
+            )
+        )
+        if self.network_attempts == 1:
+            self.retries += 1
+            _discard_payload_file(self.path, self.payload_dir)
+            self.record = None
+            return False
+        self.events.append(
+            _event(
+                self.relative,
+                "persistent_digest_mismatch",
+                "second download mismatch; retained and marked as an upstream verification failure",
+            )
+        )
+        return True
+
+    def result(self) -> dict:
+        """The commit payload for ``_record_download_result``."""
+        assert self.record is not None
+        return {
+            "path": self.relative,
+            "record": self.record,
+            "events": self.events,
+            "retries": self.retries,
+            "bytes_local_sources": self.bytes_local_sources,
+        }
+
+
 def _download_one(
     expected: dict,
     payload_dir: Path,
@@ -1404,160 +1636,21 @@ def _download_one(
     local_sources: dict[str, list[dict]],
     meter=None,
 ) -> dict:
-    """Worker-safe download/hash result; it never writes the ledger."""
-    if stop_controller is not None:
-        stop_controller.check(counter.session)
-    relative = expected["path"]
-    path = _payload_path(payload_dir, relative)
-    previous = ledger["files"].get(relative) or {}
-    attempts = int(previous.get("attempts") or 0)
-    events = []
-    retries = 0
-    record = None
-    interrupt_check = (
-        (lambda: stop_controller.check(counter.session))
-        if stop_controller is not None
-        else None
-    )
+    """Worker-safe fetch → hash → settle loop for one file; never writes the ledger."""
+    from .sources import get_provider, source_from_ledger
+
+    provider = get_provider(ledger.get("provider") or "huggingface")
+    source = source_from_ledger(ledger)
+    job = _FileJob(expected, payload_dir, ledger, local_sources)
     try:
-        if meter is not None:
-            meter.set_current(relative, expected.get("size"), phase="download")
-
-        digest = expected.get("lfs_sha256")
-        for candidate in local_sources.get(digest, []) if digest else []:
-            attempts += 1
-            try:
-                if meter is not None:
-                    meter.begin_hash(relative, expected.get("size"))
-                method = _copy_local_file(candidate["path"], path)
-                record = _verified_record(
-                    expected,
-                    path,
-                    f"local:{candidate['bundle_id']}",
-                    attempts,
-                    interrupt_check=interrupt_check,
-                    on_bytes=(
-                        None
-                        if meter is None
-                        else (
-                            lambda n, total, p=relative: meter.note_hash_bytes(
-                                p, n, total, count=False
-                            )
-                        )
-                    ),
-                )
-            except OSError as exc:
-                _discard_payload_file(path, payload_dir)
-                if _disk_full(exc):
-                    raise _disk_stop(
-                        stop_controller, _full_while_writing(relative)
-                    ) from exc
-                events.append(
-                    {
-                        "at": _utc_now(),
-                        "path": relative,
-                        "event": "local_source_error",
-                        "detail": f"{candidate['bundle_id']} could not be copied: {exc}",
-                    }
-                )
-                continue
-            if record["verified_against_upstream"] is not False:
-                record["local_copy_method"] = method
-                return {
-                    "path": relative,
-                    "record": record,
-                    "events": events,
-                    "retries": retries,
-                    "bytes_local_sources": record["size"],
-                }
-            events.append(
-                {
-                    "at": _utc_now(),
-                    "path": relative,
-                    "event": "local_source_mismatch",
-                    "detail": f"{candidate['bundle_id']} failed re-verification; falling back",
-                }
-            )
-            _discard_payload_file(path, payload_dir)
-
-        from .sources import get_provider, source_from_ledger
-
-        provider = get_provider(ledger.get("provider") or "huggingface")
-        source = source_from_ledger(ledger)
-        tqdm_class = provider.progress_wrapper(counter, meter=meter)
-
-        if stop_controller is not None and expected.get("size"):
-            # Pause at the boundary rather than start a file that cannot
-            # finish above the floor; a banked partial only needs the rest.
-            banked = provider.partial_bytes(payload_dir, expected)
-            stop_controller.check_headroom(relative, int(expected["size"]) - banked)
-
-        for retry in range(2):
-            attempts += 1
-            if meter is not None:
-                meter.set_current(relative, expected.get("size"), phase="download")
-            _fetch_with_reconnect(
-                provider,
-                source,
-                ledger,
-                relative,
-                payload_dir,
-                force=retry > 0,
-                tqdm_class=tqdm_class,
-                counter=counter,
-                events=events,
-            )
-            if meter is not None:
-                meter.begin_hash(relative, expected.get("size"))
-            record = _verified_record(
-                expected,
-                path,
-                "network",
-                attempts,
-                interrupt_check=interrupt_check,
-                on_bytes=(
-                    None
-                    if meter is None
-                    else (
-                        lambda n, total, p=relative: meter.note_hash_bytes(
-                            p, n, total, count=False
-                        )
-                    )
-                ),
-            )
-            if record["verified_against_upstream"] is not False:
-                break
-            events.append(
-                {
-                    "at": _utc_now(),
-                    "path": relative,
-                    "event": "digest_mismatch",
-                    "detail": f"download attempt {attempts} did not match pinned upstream digest",
-                }
-            )
-            if retry == 0:
-                retries += 1
-                _discard_payload_file(path, payload_dir)
-        assert record is not None
-        if record["verified_against_upstream"] is False:
-            events.append(
-                {
-                    "at": _utc_now(),
-                    "path": relative,
-                    "event": "persistent_digest_mismatch",
-                    "detail": "second download mismatch; retained and marked as an upstream verification failure",
-                }
-            )
-        return {
-            "path": relative,
-            "record": record,
-            "events": events,
-            "retries": retries,
-            "bytes_local_sources": 0,
-        }
+        while True:
+            job.fetch(provider, source, ledger, counter, stop_controller, meter)
+            job.hash(stop_controller, meter)
+            if job.settle():
+                return job.result()
     finally:
         if meter is not None:
-            meter.clear_current(relative)
+            meter.clear_current(job.relative)
 
 
 def _copy_local_file(source: Path, destination: Path) -> str:
@@ -1735,6 +1828,210 @@ def _transfer_small_files(
         raise clean_stop
 
 
+def _pipeline_headroom(
+    job: _FileJob,
+    in_flight: list[_FileJob],
+    provider,
+    stop_controller: StopController | None,
+) -> None:
+    """Refuse to start a fetch that cannot finish above the floor.
+
+    With several streams running the floor must hold what *all* of them
+    still need, not just this file: every in-flight fetch counts at the
+    bytes it has yet to land. A sibling-bundle copy is not guarded, as
+    before; if it fails and the file goes around to the network, it is.
+    """
+    if stop_controller is None or job.candidates or not job.size:
+        return
+    others = [other for other in in_flight if other is not job]
+    needed = job.remaining_bytes(provider) + sum(
+        other.remaining_bytes(provider) for other in others
+    )
+    label = job.relative
+    if others:
+        label = f"{job.relative} with {len(others)} in flight"
+    stop_controller.check_headroom(label, needed)
+
+
+def _transfer_large_files(
+    large: list[dict],
+    bundle_dir: Path,
+    payload_dir: Path,
+    ledger: dict,
+    session: dict,
+    counter: NetworkCounter,
+    local_sources: dict[str, list[dict]],
+    stop_controller: StopController | None,
+    streams: int,
+    progress,
+    meter=None,
+    live: bool = False,
+) -> None:
+    """Large files: ``streams`` fetch workers feeding one hash worker.
+
+    A file's digest runs while the next file downloads, so the network
+    never idles for verification (``hashlib`` releases the GIL; the two
+    barely share a core). Workers never touch the ledger: every result is
+    committed here, in the main thread, in the order digests finish.
+
+    Stops: a fetch that raises a clean stop has banked its partial; a
+    digest abandoned by Ctrl-C leaves a complete file that the next run's
+    reconcile adopts after hashing; any other stop lets queued digests
+    finish, since they cost no network and no disk. An error on one file
+    halts the other streams at their next chunk, so a 5 GiB fetch does not
+    run to the end for a session that is already lost.
+    """
+    if not large:
+        return
+    from .sources import get_provider, source_from_ledger
+
+    provider = get_provider(ledger.get("provider") or "huggingface")
+    source = source_from_ledger(ledger)
+    streams = max(1, int(streams))
+    width = min(streams, len(large))
+    if not live:
+        progress(
+            f"Transferring {len(large)} large files with {width} "
+            f"stream{'s' if width != 1 else ''}, hashing alongside "
+            f"(>= {SMALL_FILE_LIMIT} bytes each) ..."
+        )
+    queue: deque[_FileJob] = deque(
+        _FileJob(expected, payload_dir, ledger, local_sources) for expected in large
+    )
+    fetching: dict[Future, _FileJob] = {}
+    hashing: dict[Future, _FileJob] = {}
+    clean_stop: CleanStop | None = None
+    first_error: BaseException | None = None
+    begun = 0
+
+    def note_stop(stop: CleanStop) -> None:
+        nonlocal clean_stop
+        if clean_stop is None or stop.reason == "interrupt":
+            clean_stop = stop
+
+    def halted() -> bool:
+        return clean_stop is not None or first_error is not None
+
+    def forget(job: _FileJob) -> None:
+        if meter is not None:
+            meter.clear_current(job.relative)
+
+    def commit(job: _FileJob) -> None:
+        result = job.result()
+        forget(job)
+        if not live:
+            origin = result["record"]["source"]
+            suffix = f" from {origin}" if origin.startswith("local:") else ""
+            progress(
+                f"Verified {job.relative} ({result['record']['size']} bytes){suffix}"
+            )
+        _record_download_result(bundle_dir, ledger, session, result, stop_controller)
+        if meter is not None:
+            meter.note()
+        if stop_controller is not None:
+            try:
+                stop_controller.check(session)
+            except CleanStop as stop:
+                note_stop(stop)
+
+    fetch_pool = ThreadPoolExecutor(
+        max_workers=streams, thread_name_prefix="darsay-fetch"
+    )
+    hash_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="darsay-hash")
+    try:
+        while queue or fetching or hashing:
+            while queue and len(fetching) < streams and not halted():
+                job = queue[0]
+                try:
+                    _pipeline_headroom(
+                        job, list(fetching.values()), provider, stop_controller
+                    )
+                except CleanStop as stop:
+                    note_stop(stop)
+                    break
+                queue.popleft()
+                if not live and not job.started:
+                    begun += 1
+                    progress(
+                        f"Transferring large file {begun}/{len(large)}: "
+                        f"{job.relative} ({job.size or 0} bytes)"
+                    )
+                future = fetch_pool.submit(
+                    job.fetch,
+                    provider,
+                    source,
+                    ledger,
+                    counter,
+                    stop_controller,
+                    meter,
+                    check_headroom=False,
+                )
+                fetching[future] = job
+            if not fetching and not hashing:
+                break
+            done, _pending = wait(
+                set(fetching) | set(hashing), return_when=FIRST_COMPLETED
+            )
+            for future in done:
+                if future in fetching:
+                    job = fetching.pop(future)
+                    try:
+                        future.result()
+                    except CancelledError:
+                        forget(job)
+                    except CleanStop as stop:
+                        forget(job)
+                        note_stop(stop)
+                    except KeyboardInterrupt:
+                        raise
+                    except BaseException as exc:
+                        forget(job)
+                        if first_error is None:
+                            first_error = exc
+                            counter.halt(
+                                CleanStop(
+                                    "error",
+                                    f"{type(exc).__name__} on {job.relative}",
+                                )
+                            )
+                    else:
+                        hashing[hash_pool.submit(job.hash, stop_controller, meter)] = (
+                            job
+                        )
+                    continue
+                job = hashing.pop(future)
+                try:
+                    future.result()
+                except CancelledError:
+                    forget(job)
+                except CleanStop as stop:
+                    forget(job)
+                    note_stop(stop)
+                except KeyboardInterrupt:
+                    raise
+                except BaseException as exc:
+                    forget(job)
+                    if first_error is None:
+                        first_error = exc
+                else:
+                    if job.settle():
+                        commit(job)
+                    else:
+                        # The next candidate, or the forced second fetch:
+                        # ahead of the rest, so the retry is not starved.
+                        queue.appendleft(job)
+            if clean_stop is not None and clean_stop.reason == "interrupt":
+                for pending in list(hashing):
+                    pending.cancel()
+    finally:
+        fetch_pool.shutdown(wait=True, cancel_futures=True)
+        hash_pool.shutdown(wait=True, cancel_futures=True)
+    if first_error is not None:
+        raise first_error
+    if clean_stop is not None:
+        raise clean_stop
+
+
 def transfer_all(
     bundle_dir: Path,
     payload_dir: Path,
@@ -1808,27 +2105,20 @@ def transfer_all(
                 live=display.live,
             )
 
-            for index, expected in enumerate(large, 1):
-                if not display.live:
-                    emit(
-                        f"Transferring large file {index}/{len(large)}: {expected['path']} "
-                        f"({expected.get('size') or 0} bytes)"
-                    )
-                result = _download_one(
-                    expected,
-                    payload_dir,
-                    ledger,
-                    counter,
-                    stop_controller,
-                    local_sources,
-                    meter,
-                )
-                _record_download_result(
-                    bundle_dir, ledger, session, result, stop_controller
-                )
-                meter.note()
-                if stop_controller is not None:
-                    stop_controller.check(session)
+            _transfer_large_files(
+                large,
+                bundle_dir,
+                payload_dir,
+                ledger,
+                session,
+                counter,
+                local_sources,
+                stop_controller,
+                1,
+                emit,
+                meter=meter,
+                live=display.live,
+            )
 
         # Everything fetchable here is done, but some files live in another
         # vault (a skeleton). This is a clean stop, not a failure: raised
