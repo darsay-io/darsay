@@ -26,8 +26,8 @@ point `darsay` (argparse, subcommands in `cli.py`).
   cooperative lanes/assembly, sibling-blob reuse, the rate-cap
   leaky bucket, and reconnect-after-network-loss via the shared `Link`),
   `progress.py` (archive-level live transfer panel: percent, bytes, rate,
-  ETA, offline/reconnecting states; captures stray stdout/stderr *and*
-  library `StreamHandler`s above the panel),
+  ETA, offline/reconnecting/verifying states; captures stray stdout/stderr
+  *and* library `StreamHandler`s above the panel),
   `estimate.py` (read-only preflight: sizes/params/disk from source metadata),
   `config.py` (machine-local TOML settings — user file + `<vault>/config.toml`
   + env + flag layers; the transfer free-space floor, rate cap, and
@@ -58,8 +58,9 @@ point `darsay` (argparse, subcommands in `cli.py`).
   contract, hydration.json).
   `docs/QUANTIZATION.md` — fidelity policy: what gets archived vs derived
   when a model has quantized variants.
-  `docs/DESIGN.md` — implementation rationale: why Python, and why bundle
-  longevity rests on the formats, not the tool.
+  `docs/DESIGN.md` — implementation rationale: why Python, why transfer
+  concurrency stays in Python threads (measurements; the Xet tradeoff),
+  and why bundle longevity rests on the formats, not the tool.
   `docs/DATASETS.md` — dataset bundles: Hub-address refs, per-type payload
   roots, dataset manifest sections.
   `docs/INCREMENTAL.md` — incremental archiving: idempotent resumable transfer — pin →

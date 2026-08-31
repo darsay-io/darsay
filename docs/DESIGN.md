@@ -40,12 +40,13 @@ not a new CLI. See [SOURCES.md](SOURCES.md).
 
 **Performance is not the bottleneck.** The workload is network download and
 disk IO, then hashing. `hashlib` releases the GIL and runs OpenSSL's
-hardware-accelerated SHA-256; the optional `blake3` package is the same
-Rust core a Rust rewrite would link. Archiving a 55 GB model spends tens of
-minutes downloading; a compiled language saves seconds of that. If hashing
-ever matters, parallelizing shard hashing with a thread pool (the GIL is
-released during hashing; 3.14 free-threading exists) is a small change, not
-a rewrite.
+hardware-accelerated SHA-256 (3.3 GB/s per thread measured; four threads
+scale to 12.8 GB/s); the optional `blake3` package is the same Rust core a
+Rust rewrite would link. Archiving a 55 GB model spends tens of minutes
+downloading; a compiled language saves seconds of that. Digests overlap
+downloads and `--jobs` streams files in parallel — with threads, not a
+rewrite. See [Transfer concurrency](#transfer-concurrency) for the
+measurements and the Xet question.
 
 **The code's shape is Python's sweet spot.** The tool is glue over network,
 filesystem, subprocess, and JSON; the stdlib supplies tar, hashing, and
@@ -61,6 +62,96 @@ lines of CLI.
   single static binary. Frozen executables are possible but a poor
   primary path for this CLI — see [DISTRIBUTION.md](DISTRIBUTION.md).
   That choice does not threaten the archive.
+
+## Transfer concurrency
+
+Why the fetch → hash → commit pipeline in `transfer.py` is Python threads
+and not a Go/Rust core. The question was asked in earnest when a 703 GiB
+archive read `stalled` for minutes while it digested a 5 GiB shard; the
+answer rests on measurements, not on taste.
+
+### What was measured
+
+18-core Apple Silicon, Python 3.14, OpenSSL-backed `hashlib`, August 2026:
+
+| | |
+|---|---|
+| `hashlib.sha256`, one thread, 1 MiB updates | 3.3 GB/s |
+| four threads hashing at once | 12.8 GB/s aggregate — the GIL is released inside OpenSSL |
+| `hash_file` as `archive` calls it (SHA-256 + git blob SHA-1, per-MiB panel callbacks) | 1.45 GB/s — a 5 GiB shard in about 4 s |
+| uncached read from the vault SSD, 1 MiB reads | 4.1 GB/s |
+
+The minutes in that report came from a slower volume, not from Python: the
+panel showed at most 140 MB/s during the digest, which is a disk-read
+figure. Socket reads and file writes release the GIL too. So a Python
+thread that hashes while another downloads gets the whole benefit a
+compiled core would, for this workload.
+
+### What is parallel, and what is not
+
+- **Overlap, not per-file parallel hashing.** SHA-256 is sequential per
+  stream in every language; no core can split one file's digest across
+  cores. (BLAKE3 can, being a tree hash — the optional `blake3` package is
+  the same Rust core, with `max_threads`.) What the pipeline buys is
+  overlap: the network never idles for a digest, and one hash thread at
+  1.5–3 GB/s outruns any link this tool will meet.
+- **Per-file streams, not per-file range requests.** `--jobs` runs N files
+  as N single HTTP streams. Splitting one file into parallel ranges is what
+  `hf_xet` does, in Rust; darsay does not reimplement it (see below).
+- **The ledger is single-writer.** Workers fetch and hash; only the main
+  thread commits, so `transfer.json` never sees two writers and the
+  invariants in [INCREMENTAL.md](INCREMENTAL.md) hold without new locking.
+- **Backpressure.** If the disk cannot keep up with the network (a network
+  volume, a USB drive), fetching pauses at `--jobs` + 1 files awaiting
+  digest. Otherwise a fast link could run gigabytes ahead of the ledger,
+  and a Ctrl-C would leave all of it to re-hash.
+
+What a compiled core would add: nothing on the hash (OpenSSL is the
+ceiling), nothing on I/O (the syscalls already release the GIL), and only
+in-file range parallelism on the network — which `hf_xet` provides
+already. What it would cost: a second toolchain, platform wheels instead of
+a pure-Python one ([DISTRIBUTION.md](DISTRIBUTION.md)), and an FFI seam
+through the most invariant-dense module in the tool.
+
+### Xet
+
+Xet is Hugging Face's replacement for Git LFS storage. LFS keeps a file as
+one blob, fetched with one HTTP stream; Xet splits files into
+content-defined chunks (about 64 KB), deduplicates them, packs them into
+~64 MB xorbs in a content-addressed store, and describes a file as a list
+of chunk hashes. A download fetches that reconstruction plan, then pulls
+the byte ranges it needs in parallel, verifying each chunk. `hf_xet` is
+the PyPI package that carries the Rust client; `huggingface_hub` uses it on
+its own when it is installed and the repo is Xet-backed, which most are
+since 2025. It gives in-file parallelism, chunk-level dedup across
+revisions and repos, and integrity checks during transfer.
+
+darsay switches it off for the transfer session (`HF_HUB_DISABLE_XET=1`
+in the provider's `transfer_session`) because, when this was validated at
+v0.5.0, an aborted Xet download — a byte budget, a Ctrl-C — discarded its
+in-flight reconstruction: nothing durable to resume from. HTTP Range
+leaves a byte-exact `.incomplete` that survives restarts and an `rsync` to
+another vault. "Partial bytes are authoritative and portable" outranked
+throughput.
+
+An opt-in (`--xet`, or a config key) would leave Xet on for people on a
+fast, reliable link who run without budgets. Before shipping one, verify
+against the installed `hf_xet`:
+
+1. An aborted download leaves reusable state in the chunk cache (darsay
+   already points `HF_XET_CACHE` inside the payload's `.cache/`), so a
+   restart skips the chunks it already has.
+2. `partial_bytes` and the transfer plan can bank Xet's bytes — today they
+   read the `.incomplete` size, which Xet does not grow monotonically.
+3. The meter's Xet handling (`_darsay_xet`; `update_transfer` reporting
+   network bytes apart from reconstruction) still matches the installed
+   `huggingface_hub`.
+4. The byte budget stays honest across parallel range gets.
+
+The case is weaker than it was: `--jobs` streams already fill a link for
+any multi-shard model. Xet's in-file parallelism matters for a model that
+is one giant file, and its chunk-level dedup is finer than darsay's
+file-level sibling-blob reuse — real, but narrow.
 
 ## Longevity: formats outlive tools
 
@@ -106,6 +197,10 @@ Only when a component appears whose profile is genuinely different — a
 long-running vault server, or a mass-distributed verifier where a static
 binary is the point. Write *that component* in Go/Rust; do not port the
 tool.
+
+Xet: when the four checks under [Transfer concurrency](#xet) pass against
+the installed `hf_xet` — and then as an opt-in, never the default for a
+budgeted or interruptible transfer.
 
 ---
 

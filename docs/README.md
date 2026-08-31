@@ -86,7 +86,7 @@ are an optional third surface: a shareable want-list. They are not inside
 
 | Document | Open it when… |
 |---|---|
-| [**Design**](DESIGN.md) | Why Python. Why longevity is in the formats, not a frozen binary. |
+| [**Design**](DESIGN.md) | Why Python. Why transfer concurrency is threads, and where Xet fits. Why longevity is in the formats, not a frozen binary. |
 | [**Distribution**](DISTRIBUTION.md) | PyPI, pipx / uvx / wheel, personal Homebrew tap. |
 | [**Testing**](TESTING.md) | Unit / integration / opt-in Hub e2e. What the suite is there to keep. |
 
