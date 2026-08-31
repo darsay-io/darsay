@@ -64,10 +64,18 @@ class TestProvider(SourceProvider):
         # calls for a path, consumed front to back, before any byte moves.
         self.faults: dict[str, list[BaseException]] = {}
         self.attempts: dict[str, int] = {}
+        # Range-read bookkeeping: every ``read_bytes`` call, and faults
+        # raised by the next reads of a path, front to back.
+        self.reads: list[tuple[str, int, int]] = []
+        self.read_faults: dict[str, list[BaseException]] = {}
 
     def fail_next(self, relative: str, *errors: BaseException) -> None:
         """Make the next ``download_file`` calls for ``relative`` raise, in order."""
         self.faults.setdefault(relative, []).extend(errors)
+
+    def fail_next_read(self, relative: str, *errors: BaseException) -> None:
+        """Make the next ``read_bytes`` calls for ``relative`` raise, in order."""
+        self.read_faults.setdefault(relative, []).extend(errors)
 
     def add_repo(self, locator: str, files: dict[str, bytes], **kwargs) -> PinnedRepo:
         kwargs.setdefault(
@@ -256,6 +264,29 @@ class TestProvider(SourceProvider):
                 return None
 
         return _Bar
+
+    def read_bytes(
+        self,
+        source: SourceRef,
+        revision: str,
+        relative: str,
+        start: int,
+        length: int,
+    ) -> bytes:
+        repo = self._lookup(source, revision)
+        if repo.access_denied:
+            raise SourceGatedError(self.access_denied_message(source))
+        if relative not in repo.files:
+            raise SourceNotFoundError(
+                f"error: {relative!r} not in {source.locator!r} on {self.label}."
+            )
+        queued = self.read_faults.get(relative)
+        if queued:
+            raise queued.pop(0)
+        if length <= 0:
+            return b""
+        self.reads.append((relative, start, length))
+        return repo.files[relative][start : start + length]
 
     def partial_bytes(self, payload_dir: Path, expected: dict) -> int:
         """Bank ``.cache/test/<path>.incomplete`` bytes, like the Hub provider."""

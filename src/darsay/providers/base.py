@@ -238,6 +238,27 @@ class SourceProvider(ABC):
         """Best-effort size of an in-progress partial for ``expected`` (0 if unknown)."""
         return 0
 
+    def read_bytes(
+        self,
+        source: SourceRef,
+        revision: str,
+        relative: str,
+        start: int,
+        length: int,
+    ) -> bytes:
+        """Read ``length`` bytes of one payload file at offset ``start``.
+
+        A bounded range read for classification-time header inspection —
+        never a whole-file download. Returns exactly the requested range,
+        shorter only when the file ends inside it. Raises ``SourceError``
+        when the provider has no range transport (this default) or the
+        read fails; callers degrade — record the reason, treat the file
+        as unreadable — and never crash.
+        """
+        raise SourceError(
+            f"error: {self.label} does not support remote byte-range reads"
+        )
+
     def access_denied_message(self, source: SourceRef, *, partial: bool = False) -> str:
         closing = (
             "The partial archive was kept and resumes if access returns."

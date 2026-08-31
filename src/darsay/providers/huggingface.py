@@ -696,6 +696,70 @@ class HuggingFaceProvider(SourceProvider):
         except (OSError, ValueError):
             return 0
 
+    def read_bytes(
+        self,
+        source: SourceRef,
+        revision: str,
+        relative: str,
+        start: int,
+        length: int,
+    ) -> bytes:
+        """Range request against the resolve URL, via the Hub client's session.
+
+        Auth headers, retries, and CDN redirects come from the client. A
+        server that answers 200 to a mid-file Range is refused rather than
+        silently returning wrong-offset bytes.
+        """
+        from huggingface_hub import hf_hub_url
+        from huggingface_hub.utils import build_hf_headers, get_session
+
+        if length <= 0:
+            return b""
+        url = hf_hub_url(
+            source.locator,
+            relative,
+            repo_type=source.artifact_type,
+            revision=revision,
+        )
+        headers = build_hf_headers()
+        headers["Range"] = f"bytes={start}-{start + length - 1}"
+        try:
+            with get_session().stream(
+                "GET", url, headers=headers, follow_redirects=True
+            ) as response:
+                if response.status_code == 416:
+                    # Range starts at or past EOF.
+                    return b""
+                response.raise_for_status()
+                if response.status_code != 206 and start:
+                    raise SourceError(
+                        f"error: {self.label} ignored a Range request for "
+                        f"{relative} — cannot read {source.locator} remotely"
+                    )
+                chunks: list[bytes] = []
+                got = 0
+                for chunk in response.iter_bytes():
+                    take = chunk[: length - got]
+                    chunks.append(take)
+                    got += len(take)
+                    if got >= length:
+                        break
+                return b"".join(chunks)
+        except SourceError:
+            raise
+        except Exception as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", None)
+            if status in (401, 403):
+                raise SourceGatedError(
+                    f"error: {relative} on {self.label} requires authorization "
+                    f"to read (HTTP {status})."
+                ) from exc
+            reason = self.transient_network_error(exc) or str(exc)
+            raise SourceError(
+                f"error: cannot read bytes {start}-{start + length - 1} of "
+                f"{relative} from {source.canonical}: {reason}"
+            ) from exc
+
     def access_denied_message(self, source: SourceRef, *, partial: bool = False) -> str:
         closing = (
             "The partial archive was kept and resumes if access returns."
