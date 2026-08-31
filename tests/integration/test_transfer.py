@@ -1098,3 +1098,68 @@ def test_large_path_headroom_pauses_before_a_file_that_cannot_fit(
     disk.free = 100 * 1024**3
     bundle = archive_quiet("test:acme/toy", vault=vault, min_free=floor)
     assert load_manifest(bundle)["inventory"]["file_count"] == len(files)
+
+
+def test_fetching_pauses_when_the_hash_thread_falls_behind(
+    vault, test_provider, monkeypatch
+):
+    """Backpressure: one stream, two digests pending, no third fetch."""
+    import threading
+    import time
+
+    import darsay.transfer as transfer_module
+
+    monkeypatch.setattr("darsay.transfer.SMALL_FILE_LIMIT", 0)
+    files = model_files()
+    assert len(files) >= 3
+    test_provider.add_repo("acme/toy", files)
+    lock = threading.Lock()
+    downloads = {"n": 0}
+    observed: list[int] = []
+    real_hash = transfer_module.hash_file
+
+    def hash_watching_the_downloads(path, *args, **kwargs):
+        if not observed:
+            # Hold the first digest until a second file has landed, then
+            # give the main loop every chance to (wrongly) start a third.
+            deadline = time.monotonic() + 10
+            while downloads["n"] < 2 and time.monotonic() < deadline:
+                time.sleep(0.01)
+            time.sleep(0.25)
+            with lock:
+                observed.append(downloads["n"])
+        return real_hash(path, *args, **kwargs)
+
+    monkeypatch.setattr("darsay.transfer.hash_file", hash_watching_the_downloads)
+    real_download = test_provider.download_file
+
+    def download(source, revision, relative, payload_dir, *, force, tqdm_class):
+        with lock:
+            downloads["n"] += 1
+        real_download(
+            source, revision, relative, payload_dir, force=force, tqdm_class=tqdm_class
+        )
+
+    monkeypatch.setattr(test_provider, "download_file", download)
+    bundle = archive_quiet("test:acme/toy", vault=vault, jobs=1)
+    assert observed == [2]
+    assert load_manifest(bundle)["inventory"]["file_count"] == len(files)
+
+
+def test_hash_error_ends_the_session_as_an_error(vault, test_provider, monkeypatch):
+    import darsay.transfer as transfer_module
+
+    monkeypatch.setattr("darsay.transfer.SMALL_FILE_LIMIT", 0)
+    test_provider.add_repo("acme/toy", model_files())
+    real_hash = transfer_module.hash_file
+
+    def hash_failing_once(path, *args, **kwargs):
+        if path.name == "model.safetensors":
+            raise OSError("read error")
+        return real_hash(path, *args, **kwargs)
+
+    monkeypatch.setattr("darsay.transfer.hash_file", hash_failing_once)
+    with pytest.raises(OSError, match="read error"):
+        archive_quiet("test:acme/toy", vault=vault, jobs=2)
+    bundle = next((vault / "test--acme--toy").iterdir())
+    assert load_ledger(bundle)["sessions"][-1]["end_reason"] == "error"

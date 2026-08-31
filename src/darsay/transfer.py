@@ -1909,6 +1909,12 @@ def _transfer_large_files(
         if clean_stop is None or stop.reason == "interrupt":
             clean_stop = stop
 
+    def fail(exc: BaseException, job: _FileJob) -> None:
+        nonlocal first_error
+        if first_error is None:
+            first_error = exc
+        counter.halt(CleanStop("error", f"{type(exc).__name__} on {job.relative}"))
+
     def halted() -> bool:
         return clean_stop is not None or first_error is not None
 
@@ -1938,91 +1944,105 @@ def _transfer_large_files(
         max_workers=streams, thread_name_prefix="darsay-fetch"
     )
     hash_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="darsay-hash")
+
+    def start_next_fetch() -> bool:
+        """Begin the file at the head of the queue; False if it must wait."""
+        nonlocal begun
+        job = queue[0]
+        try:
+            _pipeline_headroom(job, list(fetching.values()), provider, stop_controller)
+        except CleanStop as stop:
+            note_stop(stop)
+            return False
+        queue.popleft()
+        if not live and not job.started:
+            begun += 1
+            progress(
+                f"Transferring large file {begun}/{len(large)}: "
+                f"{job.relative} ({job.size or 0} bytes)"
+            )
+        future = fetch_pool.submit(
+            job.fetch,
+            provider,
+            source,
+            ledger,
+            counter,
+            stop_controller,
+            meter,
+            check_headroom=False,
+        )
+        fetching[future] = job
+        return True
+
+    def fetched(job: _FileJob, future: Future) -> None:
+        """A fetch worker is done: queue the digest, or note why not."""
+        try:
+            future.result()
+        except CancelledError:
+            forget(job)
+        except CleanStop as stop:
+            forget(job)  # its partial is banked
+            note_stop(stop)
+        except KeyboardInterrupt:
+            raise
+        except BaseException as exc:
+            forget(job)
+            fail(exc, job)
+        else:
+            hashing[hash_pool.submit(job.hash, stop_controller, meter)] = job
+
+    def hashed(job: _FileJob, future: Future) -> None:
+        """The hash worker is done: commit, or send the file around again."""
+        try:
+            future.result()
+        except CancelledError:
+            forget(job)
+        except CleanStop as stop:
+            forget(job)  # Ctrl-C: the complete file stays for reconcile
+            note_stop(stop)
+        except KeyboardInterrupt:
+            raise
+        except BaseException as exc:
+            forget(job)
+            fail(exc, job)
+        else:
+            if job.settle():
+                commit(job)
+            else:
+                # The next candidate, or the forced second fetch: ahead of
+                # the rest, so the retry is not starved.
+                queue.appendleft(job)
+
     try:
         while queue or fetching or hashing:
-            while queue and len(fetching) < streams and not halted():
-                job = queue[0]
-                try:
-                    _pipeline_headroom(
-                        job, list(fetching.values()), provider, stop_controller
-                    )
-                except CleanStop as stop:
-                    note_stop(stop)
-                    break
-                queue.popleft()
-                if not live and not job.started:
-                    begun += 1
-                    progress(
-                        f"Transferring large file {begun}/{len(large)}: "
-                        f"{job.relative} ({job.size or 0} bytes)"
-                    )
-                future = fetch_pool.submit(
-                    job.fetch,
-                    provider,
-                    source,
-                    ledger,
-                    counter,
-                    stop_controller,
-                    meter,
-                    check_headroom=False,
-                )
-                fetching[future] = job
+            # Keep ``streams`` fetches running while the hash thread keeps
+            # up. If the disk cannot, fetching pauses rather than piling up
+            # unverified files ahead of the ledger (and of Ctrl-C).
+            while (
+                queue
+                and len(fetching) < streams
+                and len(hashing) <= streams
+                and not halted()
+                and start_next_fetch()
+            ):
+                pass
             if not fetching and not hashing:
                 break
-            done, _pending = wait(
-                set(fetching) | set(hashing), return_when=FIRST_COMPLETED
-            )
+            done, _ = wait(set(fetching) | set(hashing), return_when=FIRST_COMPLETED)
             for future in done:
                 if future in fetching:
-                    job = fetching.pop(future)
-                    try:
-                        future.result()
-                    except CancelledError:
-                        forget(job)
-                    except CleanStop as stop:
-                        forget(job)
-                        note_stop(stop)
-                    except KeyboardInterrupt:
-                        raise
-                    except BaseException as exc:
-                        forget(job)
-                        if first_error is None:
-                            first_error = exc
-                            counter.halt(
-                                CleanStop(
-                                    "error",
-                                    f"{type(exc).__name__} on {job.relative}",
-                                )
-                            )
-                    else:
-                        hashing[hash_pool.submit(job.hash, stop_controller, meter)] = (
-                            job
-                        )
-                    continue
-                job = hashing.pop(future)
-                try:
-                    future.result()
-                except CancelledError:
-                    forget(job)
-                except CleanStop as stop:
-                    forget(job)
-                    note_stop(stop)
-                except KeyboardInterrupt:
-                    raise
-                except BaseException as exc:
-                    forget(job)
-                    if first_error is None:
-                        first_error = exc
+                    fetched(fetching.pop(future), future)
                 else:
-                    if job.settle():
-                        commit(job)
-                    else:
-                        # The next candidate, or the forced second fetch:
-                        # ahead of the rest, so the retry is not starved.
-                        queue.appendleft(job)
+                    hashed(hashing.pop(future), future)
             if clean_stop is not None and clean_stop.reason == "interrupt":
                 for pending in list(hashing):
                     pending.cancel()
+    except BaseException as exc:
+        # The main thread is leaving with the session lost — a second Ctrl-C,
+        # a ledger write that failed: stop the streams at their next chunk
+        # rather than let them run their files to the end.
+        counter.halt(CleanStop("error", type(exc).__name__))
+        raise
     finally:
         fetch_pool.shutdown(wait=True, cancel_futures=True)
         hash_pool.shutdown(wait=True, cancel_futures=True)

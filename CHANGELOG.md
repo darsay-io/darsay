@@ -25,31 +25,31 @@ Tool version (`darsay.__version__`) is independent of
 - `rm` lists sizes before asking; `regen` and `catalog regen` report whether
   README.md actually changed (`+3 -1 lines` / `unchanged`); `catalog adopt`
   lists the entries it took.
-- **`--jobs` now streams large files too.** Large files fetch through the
-  same pool width as small ones (default 4 — each file is one HTTP stream,
-  and a single CDN connection rarely fills a fast link), with one hash
-  thread verifying finished files alongside. The floor guard counts every
-  in-flight stream at the bytes it has yet to land before another file
-  begins (`model-00023… with 2 in flight needs 12.0 GiB more …`). Streams
-  share the rate cap and the byte budget; a stop leaves up to `--jobs`
-  resumable partials instead of one. `--jobs 1` restores a single stream,
-  still hashing in parallel.
 
 ### Changed
 
-- **`archive` hashes a finished large file while the next one downloads.**
-  Large files used to run download → hash → next in strict sequence, so
-  the network sat idle for every digest pass. Each large file now moves
-  through a fetch → hash → commit pipeline: fetching on a worker, digesting
-  on a dedicated hash thread (`hashlib` releases the GIL, so the two do not
-  contend), and the ledger written only on the main thread as digests
-  finish. The invariants are unchanged: a digest abandoned by Ctrl-C leaves
-  the complete file for the next run's reconcile to adopt, a budget lets
-  queued digests finish (they cost no network and no disk), a mismatch is
-  discarded and fetched once more with `force`, and an error on one file
+- **Large files are pipelined and streamed.** They used to run
+  download → hash → next in strict sequence, one HTTP stream, so the
+  network sat idle for every digest pass and a single CDN connection set
+  the ceiling. Each large file now moves through a fetch → hash → commit
+  pipeline: `--jobs` fetch streams (the same width small files already had,
+  default 4), one dedicated hash thread digesting finished files alongside
+  (`hashlib` releases the GIL, so the two do not contend), and the ledger
+  written only on the main thread as digests finish. If the disk cannot
+  keep up, fetching pauses at `--jobs` + 1 files awaiting digest rather
+  than running ahead of the ledger. The floor guard counts every in-flight
+  stream at the bytes it has yet to land before another file begins
+  (`model-00023… with 2 in flight needs 12.0 GiB more …`). Streams share
+  the rate cap and the byte budget; a stop leaves up to `--jobs` resumable
+  partials. The invariants are unchanged: a digest abandoned by Ctrl-C
+  leaves the complete file for the next run's reconcile to adopt, a budget
+  lets queued digests finish (they cost no network and no disk), a mismatch
+  is discarded and fetched once more with `force`, and an error anywhere
   halts the other streams at their next chunk. Non-live logs gain a
   `Verified …` line per large file, since completion order can now differ
-  from start order.
+  from start order. `--jobs 1` restores a single stream, still hashing in
+  parallel. Why this stays in Python threads rather than a Rust core, and
+  where Xet fits: [docs/DESIGN.md](docs/DESIGN.md#transfer-concurrency).
 
 ### Fixed
 

@@ -193,22 +193,31 @@ resume) → hash → compare to upstream digest → append to ledger →
 atomically rewrite `transfer.json`. A digest mismatch on a freshly
 completed file is retried once (transit corruption), then logged as an
 upstream mismatch and set aside — it never silently blocks the rest of the
-transfer. Small files (< 8 MiB) may fetch through a bounded worker pool
-(`--jobs`, default 4 — dataset bundles with thousands of parquet shards
-need this); large files fetch through `--jobs` concurrent streams as well
-(each file one HTTP stream — a single CDN connection rarely fills a fast
-link), and a finished file's digest runs on a separate hash thread while
-the streams keep downloading, so the network never idles for verification
-(`hashlib` releases the GIL; a 5 GiB shard hashes in seconds on a local
-SSD). Workers never write the ledger: results are committed on the main
-thread as digests finish, so completion order can differ from start order.
-The floor guard counts every in-flight stream at the bytes it has yet to
-land before another file begins. Only Ctrl-C abandons a running digest —
-the file stays on disk and the next run's reconcile adopts it after
-hashing; a byte or time budget lets queued digests finish, since they
-spend no network and no disk. An error on one file halts the other streams
-at their next chunk. Streams share one rate cap and one byte budget; a stop
-leaves up to `--jobs` resumable partials instead of one.
+transfer.
+
+**Concurrency.** Small files (< 8 MiB) fetch through a bounded worker
+pool (`--jobs`, default 4 — dataset bundles with thousands of parquet
+shards need this). Large files fetch through `--jobs` concurrent streams
+as well, each file one HTTP stream (a single CDN connection rarely fills a
+fast link), and a finished file's digest runs on one separate hash thread
+while the streams keep downloading, so the network never idles for
+verification (`hashlib` releases the GIL; a 5 GiB shard hashes in seconds
+on a local SSD — see [DESIGN.md](DESIGN.md#transfer-concurrency) for the
+measurements). If the disk cannot keep up with the network, fetching
+pauses at `--jobs` + 1 files awaiting digest rather than piling up
+unverified files. Workers never write the ledger: results are committed on
+the main thread as digests finish, so completion order can differ from
+start order. The floor guard counts every in-flight stream at the bytes it
+has yet to land before another file begins. Streams share one rate cap and
+one byte budget; a stop leaves up to `--jobs` resumable partials.
+
+**Stops inside the pipeline.** Only Ctrl-C abandons a running digest — the
+file stays on disk and the next run's reconcile adopts it after hashing.
+A byte or time budget lets queued digests finish, since they spend no
+network and no disk. An error on one file halts the other streams at their
+next chunk, so a 5 GiB fetch does not run to the end for a session that
+is already lost.
+
 darsay deliberately selects `hf_hub_download`'s HTTP path even
 when `hf_xet` is installed: current Xet aborts discard in-flight
 reconstruction state, while HTTP Range leaves a durable `.incomplete` file
@@ -743,7 +752,10 @@ final mega-pass.
   `hf_xet` abort behavior did not preserve a usable mid-file checkpoint in
   validation, so v0.5.0 forces the durable HTTP/Range route for archival
   transfers. This can be revisited when Xet exposes durable cross-process
-  continuation without weakening byte budgets or Ctrl-C semantics.
+  continuation without weakening byte budgets or Ctrl-C semantics; what
+  that would take, and why the case for it weakened once large files
+  gained `--jobs` streams, is in
+  [DESIGN.md](DESIGN.md#transfer-concurrency).
 - Gated repositories marked gated at pin time receive a read-authorization
   check before any ledger or payload is created. If access disappears only
   after pinning, the partial is retained and its error is recorded.
