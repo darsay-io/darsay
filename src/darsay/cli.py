@@ -252,29 +252,12 @@ def cmd_estimate(args) -> int:
     return 1 if est["disk"]["verdict"] == "insufficient" else 0
 
 
-def _base_bundle_in_vault(vault, provider, base_locator: str) -> bool:
-    """A registered full-repo bundle of the base exists here.
-
-    The R2 skip gate: byte-identical prints are skipped only when the
-    identical bytes are verified in this vault. A subset bundle of the
-    base is not enough — it may not hold the matched files.
-    """
-    from .vault import bundle_records
-
-    try:
-        canonical = provider.parse(base_locator).canonical
-    except SystemExit:
-        return False
-    for row in bundle_records(vault):
-        if row.get("partial") or row.get("include"):
-            continue
-        if row.get("source_address") == canonical:
-            return True
-    return False
-
-
 def cmd_classify(args) -> int:
-    from .classify import classify_source, print_classification
+    from .classify import (
+        base_bundle_in_vault,
+        classify_source,
+        print_classification,
+    )
     from .providers.huggingface import parse_base_model_tags
     from .sources import SourceError, get_provider, parse_source
 
@@ -310,7 +293,7 @@ def cmd_classify(args) -> int:
     base_ids, _ = parse_base_model_tags(tags)
     base_locator = base_ids[0] if base_ids else None
     base_in_vault = (
-        _base_bundle_in_vault(vault, provider, base_locator) if base_locator else False
+        base_bundle_in_vault(vault, provider, base_locator) if base_locator else False
     )
     result = classify_source(
         provider,
@@ -506,6 +489,7 @@ def cmd_archive(args) -> int:
             jobs=args.jobs,
             shard=args.shard,
             include=include,
+            full=args.full,
             confirm=confirm,
         )
     except PartialTransfer as stop:
@@ -1609,6 +1593,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--force", action="store_true", help="re-archive over an existing bundle"
+    )
+    p.add_argument(
+        "--full",
+        action="store_true",
+        help="fetch the whole repo (skip the default masters-first classification)",
     )
     _add_dry_run(
         p, "pin, reconcile, and print the transfer plan; move no payload bytes"

@@ -157,10 +157,13 @@ def _guess_version(repo_name: str, model_type: str | None) -> str | None:
     return m.group(1) if m else None
 
 
-def _warn_include_vs_pin(include: list[str] | None, ledger: dict, progress) -> None:
+def _warn_include_vs_pin(
+    include: list[str] | None, ledger: dict, progress, *, full: bool = False
+) -> None:
     from .catalog import include_key
 
-    pinned = (ledger.get("subset") or {}).get("include")
+    subset = ledger.get("subset") or {}
+    pinned = subset.get("include")
     if include_key(include) == include_key(pinned):
         return
     if pinned is None:
@@ -174,6 +177,14 @@ def _warn_include_vs_pin(include: list[str] | None, ledger: dict, progress) -> N
             "WARNING: --include differs from the pinned subset "
             f"{pinned}; resuming the pin. Use --force to re-pin."
         )
+        return
+    if full:
+        raise SystemExit(
+            f"error: this pin is a subset {pinned}; --full cannot widen it\n"
+            "  hint: --force --full re-pins the full file set"
+        )
+    if subset.get("policy"):
+        # A masters-policy pin *is* the default selection; resume silently.
         return
     raise SystemExit(
         f"error: this pin is a subset {pinned}; it is not the full repo\n"
@@ -197,10 +208,17 @@ def archive(
     jobs: int = 4,
     shard: tuple[int, int] | None = None,
     include: list[str] | None = None,
+    full: bool = False,
     progress=print,
     confirm=None,
 ) -> Path | None:
     """Archive a source through pin → reconcile → transfer → register.
+
+    A fresh model pin with no explicit ``include`` is classified and
+    pinned masters-first by default — masters, everything unclassifiable,
+    and support files are fetched; confident derivable prints are skipped
+    on the record (``source.subset.policy``). ``full=True`` pins the
+    whole repo instead; re-runs resume whatever the pin selected.
 
     ``min_free``, ``max_rate``, and ``max_offline`` are per-run overrides of
     the operator config (``config.py``); ``None`` means use the configured
@@ -272,6 +290,19 @@ def archive(
         bundle_dir = bundle_dir_for(vault, ref, snapshot.revision)
 
     payload_dir = bundle_dir / root
+
+    def _fresh_ledger() -> dict:
+        """Pin a new ledger; a model pin applies the masters policy by default."""
+        assert snapshot is not None
+        effective_include, policy = include, None
+        if ref.artifact_type == "model" and not include and not full:
+            from .classify import masters_policy
+
+            effective_include, policy = masters_policy(
+                provider, ref, snapshot, vault, progress
+            )
+        return new_ledger(snapshot, include=effective_include, policy=policy)
+
     pin_recorded = False
     with transfer_lock(bundle_dir, progress=progress):
         manifest_path = bundle_dir / "manifest.json"
@@ -295,27 +326,24 @@ def archive(
 
         if pinned is not None:
             ledger = load_ledger(bundle_dir)
-            _warn_include_vs_pin(include, ledger, progress)
+            _warn_include_vs_pin(include, ledger, progress, full=full)
         else:
             if manifest_path.exists() and dry_run and not force:
                 try:
                     ledger = load_ledger(bundle_dir)
-                    _warn_include_vs_pin(include, ledger, progress)
+                    _warn_include_vs_pin(include, ledger, progress, full=full)
                 except LedgerError:
-                    assert snapshot is not None
-                    ledger = new_ledger(snapshot, include=include)
+                    ledger = _fresh_ledger()
             elif force:
-                assert snapshot is not None
-                ledger = new_ledger(snapshot, include=include)
+                ledger = _fresh_ledger()
                 if not dry_run:  # a dry run re-plans from a fresh pin on paper only
                     save_ledger(bundle_dir, ledger)
             else:
                 try:
                     ledger = load_ledger(bundle_dir)
-                    _warn_include_vs_pin(include, ledger, progress)
+                    _warn_include_vs_pin(include, ledger, progress, full=full)
                 except LedgerError:
-                    assert snapshot is not None
-                    ledger = new_ledger(snapshot, include=include)
+                    ledger = _fresh_ledger()
                     # A dry run of a new source records the pin — and only
                     # the pin — so the plan it prints is the plan the real
                     # run continues (docs/INCREMENTAL.md §6).

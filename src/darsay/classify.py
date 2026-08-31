@@ -816,6 +816,131 @@ def print_classification(result: dict, progress=print) -> None:
     p("")
 
 
+def base_bundle_in_vault(vault, provider, base_locator: str) -> bool:
+    """A registered full-repo bundle of the base exists in this vault.
+
+    The R2 skip gate: byte-identical prints are skipped only when the
+    identical bytes are verified locally. A subset bundle of the base is
+    not enough — it may not hold the matched files.
+    """
+    from .vault import bundle_records
+
+    try:
+        canonical = provider.parse(base_locator).canonical
+    except SystemExit:
+        return False
+    for row in bundle_records(vault):
+        if row.get("partial") or row.get("include"):
+            continue
+        if row.get("source_address") == canonical:
+            return True
+    return False
+
+
+def _print_policy_preflight(result: dict, ref, progress) -> None:
+    from .readme_gen import human_size
+
+    skip, keep = result["skip"], result["keep"]
+    unknown_sets = [s for s in result["sets"] if s["verdict"] == "unknown"]
+    if not skip["bytes"] and not unknown_sets and not result["notes"]:
+        return
+    total = skip["bytes"] + keep["bytes"]
+    line = f"masters-first: fetching {human_size(keep['bytes'])} of {human_size(total)}"
+    if skip["bytes"]:
+        line += f" — skipping {human_size(skip['bytes'])} of derivable prints"
+    progress(line)
+    for weight_set in result["sets"]:
+        if weight_set["action"] == "skip":
+            progress(
+                f"  skipping  {weight_set['name']}  "
+                f"{human_size(weight_set['bytes'])}  "
+                f"{weight_set['reason']} [{weight_set['rule']}]"
+            )
+    if unknown_sets:
+        unknown_bytes = sum(s["bytes"] for s in unknown_sets)
+        progress(
+            f"  fetching {len(unknown_sets)} unclassified "
+            f"set{'s' if len(unknown_sets) != 1 else ''} "
+            f"({human_size(unknown_bytes)}) — darsay will not guess"
+        )
+    for note in result["notes"]:
+        progress(f"  note: {note}")
+    progress(
+        f"  --full fetches everything; darsay classify {ref.canonical} "
+        "shows the evidence"
+    )
+
+
+def masters_policy(
+    provider, ref, snapshot, vault, progress=print
+) -> tuple[list[str] | None, dict | None]:
+    """The archive default: classify a fresh model pin, derive its selection.
+
+    Returns ``(include patterns, policy record)`` — or ``(None, None)``
+    when nothing is skippable, the selection could not be verified, or
+    classification failed for any reason. The caller then fetches the
+    full repo; failures never raise past here.
+    """
+    from .providers.huggingface import parse_base_model_tags
+
+    try:
+        files = [
+            {
+                "path": f.path,
+                "size": f.size,
+                "sha256": f.sha256,
+                "git_sha1": f.git_sha1,
+            }
+            for f in snapshot.files
+        ]
+        tags = list((snapshot.metadata or {}).get("tags") or [])
+        base_ids, _ = parse_base_model_tags(tags)
+        base_locator = base_ids[0] if base_ids else None
+        base_in_vault = (
+            base_bundle_in_vault(vault, provider, base_locator)
+            if base_locator
+            else False
+        )
+        result = classify_source(
+            provider,
+            ref,
+            snapshot.revision,
+            files,
+            base_locator=base_locator,
+            base_in_vault=base_in_vault,
+        )
+    except Exception as exc:  # every failure degrades to the full repo
+        progress(f"WARNING: classification failed ({exc}) — fetching the full repo")
+        return None, None
+    _print_policy_preflight(result, ref, progress)
+    selection = result.get("selection")
+    if not selection:
+        return None, None
+    from . import __version__
+
+    policy = {
+        "policy": "masters",
+        "classification": {
+            "classifier": {"darsay": __version__},
+            "read": result.get("read"),
+            "sets": [
+                {
+                    "name": s["name"],
+                    "kind": s["kind"],
+                    "verdict": s["verdict"],
+                    "rule": s["rule"],
+                    "action": s["action"],
+                    "file_count": s["file_count"],
+                    "bytes": s["bytes"],
+                    "reason": s["reason"],
+                }
+                for s in result["sets"]
+            ],
+        },
+    }
+    return list(selection["include"]), policy
+
+
 def classify_source(
     provider,
     ref,

@@ -271,6 +271,8 @@ pin time to `huggingface:datasets/owner/name`.
 darsay estimate Qwen/Qwen3.8-27B --variants
 darsay estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
 darsay archive  unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
+darsay classify OBLITERATUS/Qwen3.8-27B-OBLITERATED   # master/print verdicts per weight set
+darsay archive  OBLITERATUS/Qwen3.8-27B-OBLITERATED --full   # whole repo, skipping the masters-first default
 darsay estimate datasets/saidutta69/fable-5-premium
 darsay archive  datasets/saidutta69/fable-5-premium
 darsay archive  Qwen/Qwen3.8-27B --revision v1.0      # pin a tag or commit instead of main

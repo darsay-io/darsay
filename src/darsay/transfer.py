@@ -615,13 +615,20 @@ def find_resume(
     return None
 
 
-def new_ledger(snapshot, include: list[str] | None = None) -> dict:
+def new_ledger(
+    snapshot, include: list[str] | None = None, policy: dict | None = None
+) -> dict:
     from .subset import select_subset
 
     files = list(snapshot.files)
     subset = None
     if include:
         files, subset = select_subset(files, include)
+    if subset is not None and policy is not None:
+        # A masters-policy selection records why it chose what it chose;
+        # the manifest carries this through source.subset.
+        subset["policy"] = policy["policy"]
+        subset["classification"] = policy["classification"]
     expected = []
     for spec in files:
         expected.append(
