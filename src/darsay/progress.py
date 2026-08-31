@@ -295,6 +295,10 @@ def status_text(snap: dict) -> str:
         return str(link.get("state") or "offline")
     if snap.get("retry"):
         return "retrying"
+    if snap.get("verifying"):
+        # The network is idle on purpose: the only work in flight is a
+        # digest pass over bytes that already landed.
+        return "verifying"
     return human_eta(snap.get("eta_seconds"), stalled=bool(snap.get("stalled")))
 
 
@@ -403,6 +407,10 @@ def snapshot_lines(snap: dict, *, width: int = 80, color: bool = False) -> list[
                 f"{format_percent(min(1.0, file_n / file_total))}  "
                 f"{human_size(file_n):>{file_width}} / {human_size(int(file_total))}"
             )
+            hash_rate = snap.get("hash_rate")
+            if hashing and hash_rate:
+                # Digest throughput, so a long verify is visibly alive.
+                file_part += f" · {human_rate(hash_rate).strip()}"
             name_budget = max(
                 12, width - _visible_len(files) - len(file_part) - 9 - len(prefix)
             )
@@ -417,7 +425,11 @@ def snapshot_lines(snap: dict, *, width: int = 80, color: bool = False) -> list[
     else:
         lead = max(current, key=lambda item: int(item.get("total") or 0))
         name = _truncate_end(str(lead.get("path") or ""), max(12, width - 40))
-        detail = f"{files} · {len(current)} in flight · {name}"
+        hashing_count = sum(
+            1 for item in current if (item.get("phase") or "") == "hashing"
+        )
+        verifying = f" · {hashing_count} hashing" if hashing_count else ""
+        detail = f"{files} · {len(current)} in flight{verifying} · {name}"
     line3 = f"  {_paint(detail, _DIM, enabled=color)}"
 
     def _fit(line: str) -> str:
@@ -518,11 +530,20 @@ class TransferMeter:
         self._disk_probed_at: float | None = None
         self._last_byte_at = self.started
         self._last_done = self.verified_bytes + self.partial_bytes
+        # Bytes digested this session (every hash pass, counted or not), so
+        # the panel can show verify throughput while the network is idle.
+        self._hashed_total = 0
+        self._hash_samples: deque[tuple[float, int]] = deque()
+        self._hash_rate: float | None = None
 
     def begin_hash(self, path: str, size: int | None = None) -> None:
         """Start hashing ``path``; the panel shows hash throughput, not download."""
         self._tls.hashed = 0
         self.set_current(path, size, phase="hashing")
+        with self.lock:
+            # A file that just finished downloading reads as complete; the
+            # digest pass starts over from its first byte.
+            self._inflight[path]["n"] = 0
 
     def note_hash_bytes(
         self, path: str, n: int, total: int | None = None, *, count: bool = True
@@ -538,6 +559,7 @@ class TransferMeter:
         self._tls.hashed = hashed
         delta = max(0, hashed - prev)
         with self.lock:
+            self._hashed_total += delta
             if delta and count:
                 self.session["bytes_local_sources"] = (
                     int(self.session.get("bytes_local_sources") or 0) + delta
@@ -622,6 +644,10 @@ class TransferMeter:
             cutoff = now - _SAMPLE_WINDOW_S
             while self._samples and self._samples[0][0] < cutoff:
                 self._samples.popleft()
+            self._hash_samples.append((now, self._hashed_total))
+            while self._hash_samples and self._hash_samples[0][0] < cutoff:
+                self._hash_samples.popleft()
+            self._hash_rate = self._window_rate_of(self._hash_samples)
             if (
                 self._last_eta_point is None
                 or now - self._last_eta_point >= _ETA_POINT_S
@@ -661,10 +687,14 @@ class TransferMeter:
             self._retries += 1
 
     def _window_rate_locked(self, now: float) -> float | None:
-        if len(self._samples) < 2:
+        return self._window_rate_of(self._samples)
+
+    @staticmethod
+    def _window_rate_of(samples: deque[tuple[float, int]]) -> float | None:
+        if len(samples) < 2:
             return None
-        t0, b0 = self._samples[0]
-        t1, b1 = self._samples[-1]
+        t0, b0 = samples[0]
+        t1, b1 = samples[-1]
         dt = t1 - t0
         if dt < 0.4:
             return None
@@ -700,7 +730,18 @@ class TransferMeter:
             if pace is None:
                 pace = rate
             quiet_for = now - self._last_byte_at
-            stalled = quiet_for >= _STALL_AFTER_S and remaining > 0
+            # Hashing is the only work in flight: the network is idle by
+            # design, not stuck. Uncounted hash bytes (archive digesting a
+            # file it just fetched) never move ``done``, so without this the
+            # panel would read ``stalled`` fifteen seconds into every
+            # verify. Counted ones (assemble re-hashing dest) keep ``done``
+            # moving and so keep their ETA.
+            hashing_only = bool(self._inflight) and all(
+                (info.get("phase") or "download") == "hashing"
+                for info in self._inflight.values()
+            )
+            verifying = hashing_only and quiet_for >= _ETA_FRESH_S
+            stalled = quiet_for >= _STALL_AFTER_S and remaining > 0 and not verifying
             eta = None
             if remaining == 0 and self.total_bytes:
                 eta = 0.0
@@ -751,6 +792,8 @@ class TransferMeter:
                 "rate_history": list(self._rates),
                 "eta_seconds": eta,
                 "stalled": stalled,
+                "verifying": verifying,
+                "hash_rate": self._hash_rate if hashing_only else None,
                 "files_done": min(files_done, self.total_files or files_done),
                 "files_total": self.total_files,
                 "elapsed": max(0.0, now - self.started),

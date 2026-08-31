@@ -1034,3 +1034,80 @@ def test_display_final_line_carries_the_verdict():
     display.stop(verdict="paused: disk")
     after_restore = buf.getvalue().rsplit("\033[?25h", 1)[1]
     assert after_restore.strip().endswith("elapsed · paused: disk")
+
+
+def test_meter_reads_verifying_not_stalled_while_only_hashing():
+    """archive digests a file it just fetched: the network is idle on purpose."""
+    session = {"bytes_network": 0, "bytes_local_sources": 0, "files_completed": 0}
+    clock = Clock(0.0)
+    meter = _meter(session=session, clock=clock, total_bytes=10_000)
+    for step in range(1, 6):
+        clock.t = float(step)
+        session["bytes_network"] = step * 1000
+        meter.note()
+    held = meter.snapshot()["eta_seconds"]
+    assert held is not None
+    # The download is done; the hash pass runs alone for half a minute.
+    meter.begin_hash("weights.safetensors", 5000)
+    assert meter.snapshot()["current"][0]["n"] == 0
+    for tick in range(1, 31):
+        clock.t = 5.0 + tick
+        meter.note_hash_bytes("weights.safetensors", tick * 100, 5000, count=False)
+    snap = meter.snapshot()
+    assert snap["verifying"] is True
+    assert snap["stalled"] is False
+    assert snap["eta_seconds"] == pytest.approx(held)
+    assert snap["hash_rate"] == pytest.approx(100.0)
+    assert snap["current"] == [
+        {
+            "path": "weights.safetensors",
+            "n": 3000,
+            "total": 5000,
+            "phase": "hashing",
+        }
+    ]
+    lines = snapshot_lines(snap, width=100, color=False)
+    assert "verifying" in lines[1]
+    assert "stalled" not in lines[1]
+    assert "hashing weights.safetensors" in lines[2]
+    assert "100 B/s" in lines[2]
+    assert "verifying" in snapshot_log_line(snap)
+    # Hashing ends with nothing else in flight: an idle network is a stall again.
+    meter.clear_current("weights.safetensors")
+    clock.t = 60.0
+    idle = meter.snapshot()
+    assert idle["verifying"] is False
+    assert idle["stalled"] is True
+    assert idle["hash_rate"] is None
+
+
+def test_meter_counted_hashing_keeps_its_eta():
+    """assemble re-hashing dest moves the bar, so it keeps an ETA, not a label."""
+    session = {"bytes_network": 0, "bytes_local_sources": 0, "files_completed": 0}
+    clock = Clock(0.0)
+    meter = _meter(session=session, clock=clock, total_bytes=10_000)
+    meter.begin_hash("weights.safetensors", 10_000)
+    for tick in range(1, 40):
+        clock.t = float(tick)
+        meter.note_hash_bytes("weights.safetensors", tick * 100, 10_000)
+    snap = meter.snapshot()
+    assert snap["verifying"] is False
+    assert snap["stalled"] is False
+    assert snap["eta_seconds"] is not None
+    assert "verifying" not in snapshot_lines(snap, width=100, color=False)[1]
+
+
+def test_meter_hashing_beside_a_download_is_not_verifying():
+    session = {"bytes_network": 0, "bytes_local_sources": 0, "files_completed": 0}
+    clock = Clock(0.0)
+    meter = _meter(session=session, clock=clock, total_bytes=10_000)
+    meter.set_current("next.safetensors", 5000, phase="download")
+    meter.begin_hash("weights.safetensors", 5000)
+    for tick in range(1, 31):
+        clock.t = float(tick)
+        meter.note_hash_bytes("weights.safetensors", tick * 100, 5000, count=False)
+    snap = meter.snapshot()
+    assert snap["verifying"] is False
+    assert snap["stalled"] is True
+    line3 = snapshot_lines(snap, width=100, color=False)[2]
+    assert "2 in flight · 1 hashing" in line3

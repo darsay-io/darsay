@@ -28,6 +28,11 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Fixed
 
+- The live panel no longer reads `stalled` while `archive` digests a file it
+  just fetched. When hashing is the only work in flight the time slot says
+  `verifying`, the held ETA survives, and the file line shows digest
+  throughput (`hashing model-00001… 42.8%  2.1 GiB / 5.0 GiB · 1.4 GiB/s`).
+  `assemble` re-hashing dest keeps its ETA, since those bytes move the bar.
 - `archive --force --dry-run` no longer deletes the existing bundle's
   `manifest.json` or rewrites its ledger; a forced dry run plans from a fresh
   pin on paper only.
