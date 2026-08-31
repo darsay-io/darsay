@@ -537,13 +537,17 @@ class TransferMeter:
         self._hash_rate: float | None = None
 
     def begin_hash(self, path: str, size: int | None = None) -> None:
-        """Start hashing ``path``; the panel shows hash throughput, not download."""
+        """Start hashing ``path``; the panel shows hash throughput, not download.
+
+        The row restarts at zero: a file that just finished downloading
+        reads as complete, and the digest pass begins at its first byte.
+        """
         self._tls.hashed = 0
-        self.set_current(path, size, phase="hashing")
+        self._tls.path = path
         with self.lock:
-            # A file that just finished downloading reads as complete; the
-            # digest pass starts over from its first byte.
-            self._inflight[path]["n"] = 0
+            current = self._inflight.get(path) or {}
+            current.update({"path": path, "size": size, "phase": "hashing", "n": 0})
+            self._inflight[path] = current
 
     def note_hash_bytes(
         self, path: str, n: int, total: int | None = None, *, count: bool = True
