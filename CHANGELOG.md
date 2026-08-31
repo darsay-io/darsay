@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.2] - 2026-08-31
+
+
 ### Added
 
 - **`-n` / `--dry-run` on every command that writes.** `rm`, `export`,
