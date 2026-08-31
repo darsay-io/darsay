@@ -9,8 +9,14 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
-## [0.14.6] - 2026-08-31
+### Changed
 
+- Catalog and board refresh is livelier and faster: every row announces
+  itself before its work (`[n/total] source ...`), each network read
+  ticks a dot on the open line, and classification header files are
+  read concurrently (8 workers) instead of one at a time.
+
+## [0.14.6] - 2026-08-31
 
 ### Fixed
 

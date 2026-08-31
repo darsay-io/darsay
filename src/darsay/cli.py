@@ -491,6 +491,12 @@ def _estimate_catalog(args, vault, cat_path) -> int:
                 end="",
                 flush=True,
             )
+        tick = None
+        if not quiet:
+
+            def tick(*_args):
+                print(".", end="", flush=True)
+
         try:
             est = estimate(
                 entry["source"],
@@ -499,6 +505,7 @@ def _estimate_catalog(args, vault, cat_path) -> int:
                 include=entry.get("include"),
                 full=over_budget,
                 progress=lambda *a, **k: None,
+                on_read=tick,
             )
         except SystemExit as exc:
             if not quiet:

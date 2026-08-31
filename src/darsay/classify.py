@@ -20,6 +20,8 @@ from __future__ import annotations
 
 import json
 import re
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import PurePosixPath
 
 from .gguf_meta import DEFAULT_FETCH_CAP, GGUFError, read_kv
@@ -38,6 +40,8 @@ SOURCE_CLAIM_KEYS = (
 # Read caps, recorded in the receipt like query_limit.
 HEADER_FILE_CAP = 64
 JSON_CAP_BYTES = 10 * 1024 * 1024
+# Header files read concurrently; each is an independent bounded read.
+HEADER_READ_WORKERS = 8
 
 _TORCH_TO_ST = {
     "float64": "F64",
@@ -546,20 +550,28 @@ def collect_facts(
     gguf_fetch_cap: int = DEFAULT_FETCH_CAP,
     header_file_cap: int = HEADER_FILE_CAP,
     json_cap: int = JSON_CAP_BYTES,
+    on_read=None,
 ) -> tuple[dict, dict]:
     """Fetch the facts the rules need, through bounded range reads.
 
     Returns ``(facts, receipt)``. Every failure lands in the facts as an
     ``{"__error__": reason}`` marker — the rules turn those into
     ``unknown`` (= fetch); nothing raises past this function except a
-    programming error.
+    programming error. Header files are read concurrently
+    (``HEADER_READ_WORKERS``); ``on_read(path, length)`` fires as each
+    range request begins, so a caller can show liveness.
     """
     state = {"requests": 0, "bytes_fetched": 0}
+    state_lock = threading.Lock()
 
     def read(path: str, start: int, length: int) -> bytes:
-        state["requests"] += 1
+        if on_read is not None:
+            on_read(path, length)
+        with state_lock:
+            state["requests"] += 1
         data = provider.read_bytes(ref, revision, path, start, length)
-        state["bytes_fetched"] += len(data)
+        with state_lock:
+            state["bytes_fetched"] += len(data)
         return data
 
     by_path = {f["path"]: f for f in files}
@@ -602,35 +614,38 @@ def collect_facts(
         if _is_index(path) and _dir_of(path) in weight_dirs:
             facts["indexes"][path] = read_json(path)
 
-    header_files_read = 0
+    def _pool_map(worker, paths, into: dict) -> None:
+        if not paths:
+            return
+        with ThreadPoolExecutor(
+            max_workers=min(HEADER_READ_WORKERS, len(paths))
+        ) as pool:
+            for path, info in pool.map(worker, paths):
+                into[path] = info
 
-    def header_budget() -> bool:
-        nonlocal header_files_read
-        if header_files_read >= header_file_cap:
-            return False
-        header_files_read += 1
-        return True
+    gguf_paths = [p for p in sorted(weight_paths) if p.lower().endswith(".gguf")]
+    for path in gguf_paths[header_file_cap:]:
+        facts["gguf"][path] = {
+            "__error__": f"header file cap ({header_file_cap}) reached"
+        }
+    gguf_allowed = gguf_paths[:header_file_cap]
+    header_files_read = len(gguf_allowed)
 
-    for path in sorted(weight_paths):
-        if not path.lower().endswith(".gguf"):
-            continue
-        if not header_budget():
-            facts["gguf"][path] = {
-                "__error__": f"header file cap ({header_file_cap}) reached"
-            }
-            continue
+    def _read_gguf(path: str):
         try:
             out = read_kv(
                 lambda start, end, p=path: read(p, start, end - start),
                 fetch_cap=gguf_fetch_cap,
             )
-            facts["gguf"][path] = {
+            return path, {
                 "kv": out["kv"],
                 "tensor_count": out["tensor_count"],
                 "bytes_fetched": out["bytes_fetched"],
             }
         except (GGUFError, SourceError) as exc:
-            facts["gguf"][path] = {"__error__": str(exc)}
+            return path, {"__error__": str(exc)}
+
+    _pool_map(_read_gguf, gguf_allowed, facts["gguf"])
 
     # Membership decides which safetensors headers are worth reading:
     # every file no readable safetensors index accounts for, plus one
@@ -651,21 +666,27 @@ def collect_facts(
         )
         if not has_dtype:
             header_targets.append(weight_set["paths"][0])
-    for path in dict.fromkeys(header_targets):
-        if not header_budget():
-            facts["st_headers"][path] = {
-                "__error__": f"header file cap ({header_file_cap}) reached"
-            }
-            continue
+    st_targets = list(dict.fromkeys(header_targets))
+    remaining_cap = max(0, header_file_cap - header_files_read)
+    for path in st_targets[remaining_cap:]:
+        facts["st_headers"][path] = {
+            "__error__": f"header file cap ({header_file_cap}) reached"
+        }
+    st_allowed = st_targets[:remaining_cap]
+    header_files_read += len(st_allowed)
+
+    def _read_st(path: str):
         try:
             header = read_header_via(
                 lambda start, end, p=path: read(p, start, end - start),
                 name=_name_of(path),
                 size=by_path[path].get("size"),
             )
-            facts["st_headers"][path] = _summarize_st_header(header)
+            return path, _summarize_st_header(header)
         except (SourceError, ValueError) as exc:
-            facts["st_headers"][path] = {"__error__": str(exc)}
+            return path, {"__error__": str(exc)}
+
+    _pool_map(_read_st, st_allowed, facts["st_headers"])
 
     base_pinned = False
     if base_locator:
@@ -872,7 +893,7 @@ def _print_policy_preflight(result: dict, ref, progress) -> None:
 
 
 def masters_policy(
-    provider, ref, snapshot, vault, progress=print
+    provider, ref, snapshot, vault, progress=print, on_read=None
 ) -> tuple[list[str] | None, dict | None]:
     """The archive default: classify a fresh model pin, derive its selection.
 
@@ -908,6 +929,7 @@ def masters_policy(
             files,
             base_locator=base_locator,
             base_in_vault=base_in_vault,
+            on_read=on_read,
         )
     except Exception as exc:  # every failure degrades to the full repo
         progress(f"WARNING: classification failed ({exc}) — fetching the full repo")
@@ -949,6 +971,7 @@ def classify_source(
     *,
     base_locator: str | None = None,
     base_in_vault: bool = False,
+    on_read=None,
     **caps,
 ) -> dict:
     """Collect facts, evaluate, and attach the verified selection."""
@@ -959,6 +982,7 @@ def classify_source(
         files,
         base_locator=base_locator,
         base_in_vault=base_in_vault,
+        on_read=on_read,
         **caps,
     )
     classification = evaluate(files, facts, locator=ref.locator)

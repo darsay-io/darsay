@@ -479,3 +479,28 @@ def test_classify_source_base_identity_via_pin():
         "include": ["model.safetensors"],
         "explicit_paths": False,
     }
+
+
+def test_collect_facts_ticks_every_read(monkeypatch):
+    provider = FakeProvider()
+    provider.add_repo(
+        "acme/toy",
+        {
+            "config.json": b'{"torch_dtype": "bfloat16"}',
+            "model.safetensors": make_safetensors({"w": ("BF16", [2, 2])}),
+            "Q4_K_M.gguf": make_gguf({"general.file_type": 15}),
+            "Q8_0.gguf": make_gguf({"general.file_type": 7}),
+        },
+    )
+    ref = provider.parse("acme/toy")
+    snapshot = provider.pin(ref, None)
+    files = [
+        {"path": f.path, "size": f.size, "sha256": f.sha256} for f in snapshot.files
+    ]
+    ticks = []
+    result = classify_source(
+        provider, ref, snapshot.revision, files, on_read=lambda *a: ticks.append(a)
+    )
+    # One tick per range request, including the concurrent header reads.
+    assert len(ticks) == result["read"]["requests"]
+    assert result["read"]["requests"] >= 3

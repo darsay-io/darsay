@@ -200,6 +200,7 @@ def estimate(
     variants: bool = False,
     full: bool = False,
     progress=print,
+    on_read=None,
 ) -> dict:
     """Price what ``archive`` would do for this source.
 
@@ -218,6 +219,8 @@ def estimate(
         snapshot = provider.pin(ref, revision, require_access=False)
     except SourceError as exc:
         raise SystemExit(str(exc)) from None
+    if on_read is not None:
+        on_read("pin", 0)
     if snapshot.source.canonical != ref.canonical:
         progress(
             f"Resolved {ref.canonical} as {snapshot.source.artifact_type} "
@@ -255,7 +258,7 @@ def estimate(
             from .subset import select_subset
 
             policy_include, policy_record = masters_policy(
-                provider, ref, snapshot, vault, progress
+                provider, ref, snapshot, vault, progress, on_read=on_read
             )
             if policy_include:
                 files, subset = select_subset(files, policy_include)
