@@ -9,6 +9,13 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Changed
+
+- Kept the native release script independent of external orchestration by
+  removing its last integration-specific source comment. Repository metadata
+  remains the sole optional attachment point, and the script stays directly
+  usable on its own.
+
 ## [0.14.2] - 2026-08-31
 
 
