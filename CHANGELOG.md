@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.4] - 2026-08-31
+
+
 ### Breaking
 
 - **`darsay archive` of a model repo is masters-first by default.** It
