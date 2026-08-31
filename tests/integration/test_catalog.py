@@ -507,9 +507,11 @@ def test_estimate_catalog_writes_hints_and_list_shows_them(
     test_provider.add_repo(
         "acme/fp8",
         model_files(),
+        # Declared params sized so one copy covers the toy payload bytes:
+        # this fixture is about the quant hint, not redundancy.
         parameters={
-            "total": 16,
-            "by_dtype": {"F8_E4M3": 16},
+            "total": 200,
+            "by_dtype": {"F8_E4M3": 200},
             "dominant_dtype": "F8_E4M3",
         },
     )
@@ -532,7 +534,7 @@ def test_estimate_catalog_writes_hints_and_list_shows_them(
     )
     capsys.readouterr()
     cat_path = vault / "catalogs" / "summer" / "catalog.json"
-    assert json.loads(cat_path.read_text())["catalog_schema_version"] == "1.1.0"
+    assert json.loads(cat_path.read_text())["catalog_schema_version"] == "1.2.0"
 
     assert main([*v, "list", "summer"]) == 0
     out = capsys.readouterr().out

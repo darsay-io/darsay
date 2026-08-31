@@ -198,8 +198,16 @@ def estimate(
     vault: Path = Path("vault"),
     include: list[str] | None = None,
     variants: bool = False,
+    full: bool = False,
     progress=print,
 ) -> dict:
+    """Price what ``archive`` would do for this source.
+
+    A model source with no explicit ``include`` and no existing pin is
+    classified the way ``archive`` classifies it, and the priced payload
+    is the masters-first selection (``subset.policy``); ``full=True``
+    prices the whole repo. Bounded header reads, nothing written.
+    """
     ref = source if isinstance(source, SourceRef) else parse_source(source)
     provider = get_provider(ref.provider)
     progress(
@@ -227,6 +235,32 @@ def estimate(
         from .subset import select_subset
 
         files, subset = select_subset(files, include)
+    elif repo_type == "model" and not full:
+        # Price the default acquisition. An existing pin already decided
+        # its selection; the download block below reflects it as-is.
+        probe_dir = bundle_dir_for(vault, ref, snapshot.revision)
+        has_pin = (probe_dir / "manifest.json").is_file()
+        if not has_pin:
+            from .transfer import find_resume
+
+            try:
+                has_pin = (
+                    find_resume(vault, ref, revision, payload_root_for(repo_type))
+                    is not None
+                )
+            except SystemExit:
+                has_pin = True  # ambiguous partials; archive will explain
+        if not has_pin:
+            from .classify import masters_policy
+            from .subset import select_subset
+
+            policy_include, policy_record = masters_policy(
+                provider, ref, snapshot, vault, progress
+            )
+            if policy_include:
+                files, subset = select_subset(files, policy_include)
+                subset["policy"] = policy_record["policy"]
+                subset["classification"] = policy_record["classification"]
 
     primary_suffixes = DATA_SUFFIXES if repo_type == "dataset" else WEIGHT_SUFFIXES
     primary = [f for f in files if f["path"].lower().endswith(primary_suffixes)]
@@ -456,11 +490,19 @@ def print_estimate(est: dict, progress=print) -> None:
     p(f"  {' | '.join(str(f) for f in facts if f)}")
     if est["subset"]:
         sub = est["subset"]
-        extra = " + sidecars" if sub.get("sidecars") else ""
-        p(
-            f"  subset:       only files matching {', '.join(sub['include'])}{extra} "
-            f"(full repo: {sub['full_file_count']} files, {human_size(sub['full_total_size_bytes'])})"
-        )
+        if sub.get("policy"):
+            p(
+                f"  masters-first: {_n_files(sub['kept_file_count'])}, "
+                f"{human_size(sub['kept_total_size_bytes'])} of the full repo "
+                f"({sub['full_file_count']} files, "
+                f"{human_size(sub['full_total_size_bytes'])}) — --full prices everything"
+            )
+        else:
+            extra = " + sidecars" if sub.get("sidecars") else ""
+            p(
+                f"  subset:       only files matching {', '.join(sub['include'])}{extra} "
+                f"(full repo: {sub['full_file_count']} files, {human_size(sub['full_total_size_bytes'])})"
+            )
 
     if is_dataset:
         fmts = est["formats"] or {}
@@ -505,6 +547,18 @@ def print_estimate(est: dict, progress=print) -> None:
     p(
         f"                support {human_size(pay['support']['bytes'])} in {_n_files(pay['support']['count'])}"
     )
+    if not is_dataset and params:
+        from .catalog import expected_weight_bytes, hints_for
+
+        if "redundant" in hints_for(est):
+            expected = expected_weight_bytes(params.get("by_dtype"))
+            ratio = pay["weights"]["bytes"] / expected
+            p(
+                f"                NOTE: weights ≈ {ratio:.1f}x one "
+                f"{human_params(params['total'])}-param "
+                f"{params['dominant_dtype']} copy — several weight sets "
+                f"likely (darsay classify {ref})"
+            )
     if pay["unknown_size_count"]:
         p(
             f"                WARNING: {pay['unknown_size_count']} files have no upstream size"
@@ -585,7 +639,9 @@ def print_estimate(est: dict, progress=print) -> None:
     cmd = f"darsay archive {shlex.quote(ref)}"
     if src["revision_ref"] != "main":
         cmd += f" --revision {shlex.quote(str(src['revision_ref']))}"
-    if est["subset"]:
+    if est["subset"] and est["subset"].get("policy"):
+        p(f"\nTo archive (masters-first is the default): {cmd}\n")
+    elif est["subset"]:
         for pat in est["subset"]["include"]:
             cmd += f" --include {shlex.quote(pat)}"
         p(f"\nTo archive this subset: {cmd}\n")

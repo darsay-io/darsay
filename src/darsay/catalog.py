@@ -18,7 +18,7 @@ from .archiver import utc_now
 from .readme_gen import _curation_body, human_size
 from .sources import parse_source
 
-CATALOG_SCHEMA_VERSION = "1.1.0"
+CATALOG_SCHEMA_VERSION = "1.2.0"
 CATALOG_KIND = "darsay.catalog"
 STALE_AFTER_DAYS = 7
 CATALOGS_DIRNAME = "catalogs"
@@ -40,16 +40,38 @@ DIGEST_KEYS = frozenset(
         "dominant_dtype",
         "unknown_size_count",
         "hints",
+        "policy",
     }
 )
 # ``large``: the priced payload is at least this big — more than one sitting,
 # and often more than one disk. darsay.io's board draws the same line.
 LARGE_PAYLOAD_BYTES = 20 * 1024**3
 # The closed vocabulary of ``estimate.hints``. Sorted on write; readers ignore
-# names they do not know.
-HINTS = ("gated", "large", "quant", "subset")
+# names they do not know. Since 1.2.0: ``redundant``, and the digest's
+# ``policy`` key (``"masters"`` when the stored price is the policy subset).
+HINTS = ("gated", "large", "quant", "redundant", "subset")
 _FULL_FIDELITY_DTYPES = frozenset({"F64", "F32", "F16", "BF16"})
 _QUANT_FORMATS = frozenset({"gguf"})
+# Bytes per parameter for the redundancy expectation; an unlisted dtype
+# contributes no expectation (never a guess).
+_DTYPE_WIDTHS = {
+    "F64": 8,
+    "I64": 8,
+    "F32": 4,
+    "I32": 4,
+    "F16": 2,
+    "BF16": 2,
+    "I16": 2,
+    "U16": 2,
+    "F8_E4M3": 1,
+    "F8_E5M2": 1,
+    "I8": 1,
+    "U8": 1,
+    "BOOL": 1,
+}
+# Weight bytes at or above this multiple of one copy smell like several
+# weight sets in one repo; an exact second copy is 2.0x.
+REDUNDANT_FACTOR = 1.75
 _CATALOG_TOP_KEYS = (
     "catalog_schema_version",
     "kind",
@@ -129,6 +151,23 @@ def revisions_match(got: str, want: str) -> bool:
     return g == w or g.startswith(w) or w.startswith(g)
 
 
+def expected_weight_bytes(params_by_dtype) -> int | None:
+    """One copy's weight bytes from published parameter counts, or None.
+
+    Any dtype without a known width makes the expectation unknowable —
+    the ``redundant`` hint then stays off rather than guess.
+    """
+    if not isinstance(params_by_dtype, dict) or not params_by_dtype:
+        return None
+    total = 0
+    for dtype, count in params_by_dtype.items():
+        width = _DTYPE_WIDTHS.get(str(dtype).upper())
+        if width is None or not isinstance(count, int) or isinstance(count, bool):
+            return None
+        total += count * width
+    return total or None
+
+
 def _hints(
     *,
     payload_bytes,
@@ -136,6 +175,8 @@ def _hints(
     subset: bool,
     dominant_dtype,
     dominant_format,
+    weights_bytes=None,
+    params_by_dtype=None,
 ) -> list[str]:
     out: set[str] = set()
     if gated:
@@ -155,6 +196,14 @@ def _hints(
         and dominant_dtype.upper() not in _FULL_FIDELITY_DTYPES
     ):
         out.add("quant")
+    expected = expected_weight_bytes(params_by_dtype)
+    if (
+        expected
+        and isinstance(weights_bytes, int)
+        and not isinstance(weights_bytes, bool)
+        and weights_bytes >= expected * REDUNDANT_FACTOR
+    ):
+        out.add("redundant")
     return sorted(out)
 
 
@@ -169,30 +218,41 @@ def hints_for(est: dict) -> list[str]:
     """Closed-vocabulary facts about a priced source, from a live ``estimate()`` dict.
 
     Returns a sorted list drawn from ``HINTS`` — ``gated``, ``large``,
-    ``quant``, ``subset`` — possibly empty. Empty means "nothing notable";
-    it is not the same as a missing digest (``estimate: null``), which
-    means unknown. Nothing here is guessed from a repo name.
+    ``quant``, ``redundant``, ``subset`` — possibly empty. Empty means
+    "nothing notable"; it is not the same as a missing digest
+    (``estimate: null``), which means unknown. Nothing here is guessed
+    from a repo name.
 
     - ``gated``  — ``source.gated`` is truthy.
     - ``large``  — ``payload.total_size_bytes`` ≥ ``LARGE_PAYLOAD_BYTES``
-      (20 GiB). The priced payload is the subset when ``--include``
-      applied. An unknown size is never large.
+      (20 GiB). The priced payload is the selection when ``--include``
+      or the masters policy applied. An unknown size is never large.
     - ``quant``  — a published quantized artifact in the sense of
       QUANTIZATION.md: the weight bytes are mostly GGUF
       (``payload.dominant_format``), or the dominant safetensors dtype is
       not a full-fidelity float (F64 / F32 / F16 / BF16). Unknown dtype and
       format ⇒ no hint.
-    - ``subset`` — the estimate was priced with ``--include`` (``est["subset"]``).
+    - ``redundant`` — the priced weight bytes are ≥ ``REDUNDANT_FACTOR``×
+      one copy at the published per-dtype parameter counts: the repo
+      likely holds several weight sets. Unknown params or dtype widths ⇒
+      no hint. Live estimates only; never re-derived from a digest.
+    - ``subset`` — the estimate was priced with an explicit ``--include``.
+      A masters-policy selection is the default acquisition, not a
+      curator subset: it sets the digest's ``policy`` key instead.
     """
     payload = est.get("payload") if isinstance(est.get("payload"), dict) else {}
     source = est.get("source") if isinstance(est.get("source"), dict) else {}
     params = est.get("parameters") if isinstance(est.get("parameters"), dict) else {}
+    subset = est.get("subset") if isinstance(est.get("subset"), dict) else None
+    weights = payload.get("weights") if isinstance(payload.get("weights"), dict) else {}
     return _hints(
         payload_bytes=payload.get("total_size_bytes"),
         gated=source.get("gated"),
-        subset=est.get("subset") is not None,
+        subset=subset is not None and not subset.get("policy"),
         dominant_dtype=params.get("dominant_dtype"),
         dominant_format=payload.get("dominant_format"),
+        weights_bytes=weights.get("bytes"),
+        params_by_dtype=params.get("by_dtype"),
     )
 
 
@@ -243,6 +303,7 @@ def estimate_digest(est: dict) -> dict:
         else None,
         "unknown_size_count": est["payload"]["unknown_size_count"],
         "hints": hints_for(est),
+        "policy": (est.get("subset") or {}).get("policy"),
     }
     assert set(digest) == DIGEST_KEYS
     return digest
@@ -759,7 +820,12 @@ def row_matches_entry(row: dict, entry: dict) -> bool:
                 return False
         elif want_rev != got and want_rev != got_ref:
             return False
-    return include_key(entry.get("include")) == include_key(row.get("include"))
+    if include_key(entry.get("include")) == include_key(row.get("include")):
+        return True
+    # ``include: null`` means "the default acquisition": a masters-policy
+    # bundle is what ``archive <source>`` produces for it, so it satisfies
+    # the want (as a full-repo bundle, a superset, also does above).
+    return not entry.get("include") and bool(row.get("policy"))
 
 
 def _parse_ts(value: str | None) -> datetime | None:
@@ -893,6 +959,7 @@ def vault_as_rows(records: list[dict]) -> list[dict]:
                 "note": None,
                 "bundle_id": rec.get("bundle_id"),
                 "path": rec.get("path"),
+                "policy": rec.get("policy"),
                 "partial": rec.get("partial"),
                 "integrity": rec.get("integrity"),
                 "payload_bytes": rec.get("payload_bytes"),
@@ -1130,9 +1197,13 @@ def format_source_cell(row: dict) -> str:
     rev = row.get("revision")
     if rev:
         extras.append("@" + str(rev)[:12])
-    include = row.get("include") or []
-    if include:
-        extras.append("[" + ", ".join(include) + "]")
+    if row.get("policy"):
+        # The default acquisition; the exact selection is in the manifest.
+        extras.append(f"[{row['policy']}]")
+    else:
+        include = row.get("include") or []
+        if include:
+            extras.append("[" + ", ".join(include) + "]")
     if not extras:
         return src
     return src + "  " + " ".join(extras)

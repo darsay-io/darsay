@@ -308,7 +308,7 @@ def _live(**over):
 
 
 def test_hints_for_closed_set():
-    assert HINTS == ("gated", "large", "quant", "subset")
+    assert HINTS == ("gated", "large", "quant", "redundant", "subset")
     assert hints_for(_live()) == []
     assert hints_for(_live(**{"source.gated": True})) == ["gated"]
     assert hints_for(_live(**{"payload.total_size_bytes": LARGE_PAYLOAD_BYTES})) == [
@@ -333,6 +333,32 @@ def test_hints_for_closed_set():
     )
     assert hints_for(everything) == ["gated", "large", "quant", "subset"]
     assert estimate_digest(everything)["hints"] == ["gated", "large", "quant", "subset"]
+
+
+def test_redundant_hint_and_policy_digest():
+    # BF16 x 16 params = 32 expected bytes; 1.75x is the line.
+    heavy = _live(**{"payload.weights": {"count": 2, "bytes": 56}})
+    assert hints_for(heavy) == ["redundant"]
+    light = _live(**{"payload.weights": {"count": 1, "bytes": 55}})
+    assert hints_for(light) == []
+    # Unknown dtype width or missing params: never a guess.
+    odd = _live(
+        **{
+            "payload.weights": {"count": 2, "bytes": 10_000},
+            "parameters.by_dtype": {"MYSTERY4": 16},
+        }
+    )
+    assert hints_for(odd) == []
+    none = _live(
+        **{"payload.weights": {"count": 2, "bytes": 10_000}, "parameters": None}
+    )
+    assert hints_for(none) == []
+    # A masters-policy selection is the default acquisition, not a curator
+    # subset: no subset hint, and the digest records the policy.
+    policy = _live(subset={"include": ["model.safetensors"], "policy": "masters"})
+    assert hints_for(policy) == []
+    assert estimate_digest(policy)["policy"] == "masters"
+    assert estimate_digest(_live())["policy"] is None
 
 
 def test_hints_for_never_guesses():
@@ -394,7 +420,7 @@ def test_save_writes_the_current_schema_version(tmp_path):
     assert loaded["catalog_schema_version"] == "1.0.0"
     save_catalog(path, loaded)
     again = json.loads(path.read_text(encoding="utf-8"))
-    assert again["catalog_schema_version"] == CATALOG_SCHEMA_VERSION == "1.1.0"
+    assert again["catalog_schema_version"] == CATALOG_SCHEMA_VERSION == "1.2.0"
 
 
 def test_a_1_1_file_loads_in_a_1_0_reader(tmp_path, monkeypatch):

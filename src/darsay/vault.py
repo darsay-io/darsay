@@ -74,6 +74,7 @@ def bundle_records(vault: Path) -> list[dict]:
                         "revision": None,
                         "revision_ref": None,
                         "include": None,
+                        "policy": None,
                         "remaining_bytes": None,
                         "moved_bytes": None,
                         "percent": None,
@@ -82,7 +83,9 @@ def bundle_records(vault: Path) -> list[dict]:
                 continue
             payload_bytes = m["inventory"]["total_size_bytes"]
             src = m.get("source") or {}
-            include = (src.get("subset") or {}).get("include")
+            subset = src.get("subset") or {}
+            include = subset.get("include")
+            policy = subset.get("policy")
             rows.append(
                 {
                     "bundle_id": m["bundle_id"],
@@ -100,6 +103,7 @@ def bundle_records(vault: Path) -> list[dict]:
                     "revision": src.get("revision"),
                     "revision_ref": src.get("revision_ref"),
                     "include": include,
+                    "policy": policy,
                     "remaining_bytes": 0,
                     "moved_bytes": 0,
                     "percent": None,
@@ -125,7 +129,8 @@ def bundle_records(vault: Path) -> list[dict]:
             )
             card = ledger.get("metadata", {}).get("card_data", {})
             license_id = card.get("license") if isinstance(card, dict) else None
-            include = (ledger.get("subset") or {}).get("include")
+            subset_rec = ledger.get("subset") or {}
+            include = subset_rec.get("include")
             rows.append(
                 {
                     "bundle_id": bundle_id_for(bundle_dir),
@@ -143,6 +148,7 @@ def bundle_records(vault: Path) -> list[dict]:
                     "revision": ledger.get("revision"),
                     "revision_ref": ledger.get("revision_ref"),
                     "include": include,
+                    "policy": subset_rec.get("policy"),
                     "remaining_bytes": sizes["remaining_network"],
                     "moved_bytes": moved_bytes,
                     "percent": percent,
@@ -165,6 +171,7 @@ def bundle_records(vault: Path) -> list[dict]:
                     "revision": None,
                     "revision_ref": None,
                     "include": None,
+                    "policy": None,
                     "remaining_bytes": None,
                     "moved_bytes": None,
                     "percent": None,

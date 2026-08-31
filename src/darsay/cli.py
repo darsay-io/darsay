@@ -57,6 +57,11 @@ from pathlib import Path
 
 from . import __version__
 
+# Classification reads a catalog refresh may spend before remaining rows
+# price the full repo. Recorded in the refresh output when reached.
+REFRESH_READ_BUDGET_REQUESTS = 256
+REFRESH_READ_BUDGET_BYTES = 512 * 1024**2
+
 
 def _vault_path(args, *, announce: bool = False) -> Path:
     from .vault import announce_vault, default_vault, using_implicit_vault
@@ -243,6 +248,7 @@ def cmd_estimate(args) -> int:
         vault=vault,
         include=args.include,
         variants=args.variants,
+        full=args.full,
         progress=(lambda *a: None) if args.json else print,
     )
     if args.json:
@@ -365,10 +371,14 @@ def _estimate_catalog(args, vault, cat_path) -> int:
         n = len(selected)
         print(
             f"Refreshing {n} estimate{'s' if n != 1 else ''} in catalog {catalog['id']} "
-            "(metadata only, no download) ..."
+            "(metadata + bounded header reads, no download) ..."
         )
     failed = 0
     digests = []
+    # Classification reads across a refresh are budgeted as a whole,
+    # query_limit-style; rows past the budget price the full repo.
+    spent = {"requests": 0, "bytes": 0}
+    budget_noted = False
     for entry in selected:
         parsed = try_parse_source(entry["source"])
         if parsed is None:
@@ -378,18 +388,35 @@ def _estimate_catalog(args, vault, cat_path) -> int:
             )
             failed += 1
             continue
+        over_budget = (
+            spent["requests"] >= REFRESH_READ_BUDGET_REQUESTS
+            or spent["bytes"] >= REFRESH_READ_BUDGET_BYTES
+        )
+        if over_budget and not budget_noted and not quiet:
+            print(
+                f"read budget reached ({REFRESH_READ_BUDGET_REQUESTS} requests / "
+                f"{REFRESH_READ_BUDGET_BYTES // 1024**2} MiB) — remaining rows "
+                "priced as the full repo",
+                file=sys.stderr,
+            )
+            budget_noted = True
         try:
             est = estimate(
                 entry["source"],
                 revision=entry.get("revision"),
                 vault=vault,
                 include=entry.get("include"),
+                full=over_budget,
                 progress=lambda *a, **k: None,
             )
         except SystemExit as exc:
             print(f"warning: {warning_detail(exc)}", file=sys.stderr)
             failed += 1
             continue
+        read = ((est.get("subset") or {}).get("classification") or {}).get("read")
+        if read:
+            spent["requests"] += read.get("requests") or 0
+            spent["bytes"] += read.get("bytes_fetched") or 0
         digest = estimate_digest(est)
         adopt_resolved_source(catalog, entry, est["source"]["address"])
         entry["estimate"] = digest
@@ -1547,6 +1574,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--variants",
         action="store_true",
         help="also list upstream quantized variants of this model, with sizes",
+    )
+    p.add_argument(
+        "--full",
+        action="store_true",
+        help="price the whole repo (skip the default masters-first classification)",
     )
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument(
