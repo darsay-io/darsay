@@ -1,7 +1,7 @@
 api_version: rivet/v1alpha1
 
 compatibility:
-  minimum_rivet_version: v0.4.182
+  minimum_rivet_version: v0.4.187
 
 upstreams:
   ruff-stable:
@@ -39,6 +39,13 @@ releases:
     tags:
       - id: release
         primary: true
+    verify:
+      publication:
+        - id: pypi
+          uses: pypi.release
+          project: darsay
+          distributions: [sdist, wheel]
+          wait: 10m
     prepare:
       actions:
         - id: release-files
