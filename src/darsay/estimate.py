@@ -212,7 +212,7 @@ def estimate(
     provider = get_provider(ref.provider)
     progress(
         f"Resolving {ref.canonical} @ {revision or provider.default_revision} "
-        "(metadata only, no download) ..."
+        "(metadata + bounded header reads, no download) ..."
     )
     try:
         snapshot = provider.pin(ref, revision, require_access=False)

@@ -17,6 +17,22 @@ from tests.conftest import silent
 TINY = "sshleifer/tiny-gpt2"
 
 
+def test_tiny_gpt2_classify_shape(tmp_path, capsys):
+    """Live classify: verdicts render, receipts recorded, nothing guessed."""
+    import json
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    assert main(["--vault", str(vault), "classify", TINY, "--json"]) == 0
+    out = capsys.readouterr().out
+    data = json.loads(out[out.index("{") :])
+    assert data["policy"] == "masters"
+    assert data["sets"], "at least one set classified"
+    verdicts = {s["verdict"] for s in data["sets"]}
+    assert verdicts <= {"master", "print", "support", "unknown"}
+    assert data["read"]["caps"]["header_file_cap"] == 64
+
+
 def test_tiny_gpt2_estimate_archive_verify_export_import(tmp_path, capsys):
     vault = tmp_path / "vault"
     vault.mkdir()
