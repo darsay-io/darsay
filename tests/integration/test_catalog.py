@@ -542,8 +542,10 @@ def test_estimate_catalog_writes_hints_and_list_shows_them(
 
     assert main([*v, "estimate", "summer"]) == 0
     out = capsys.readouterr().out
-    assert "test:acme/locked  " in out and "gated" in out
+    assert "test:acme/locked ..." in out and "gated" in out
     assert "GATED" not in out
+    # Every row announces itself before its (possibly slow) refresh.
+    assert "[1/5] " in out and "[5/5] " in out
     catalog = json.loads(cat_path.read_text())
     by_key = {
         (e["source"], tuple(e["include"] or ())): e["estimate"]["hints"]

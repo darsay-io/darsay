@@ -461,7 +461,7 @@ def _estimate_catalog(args, vault, cat_path) -> int:
     # query_limit-style; rows past the budget price the full repo.
     spent = {"requests": 0, "bytes": 0}
     budget_noted = False
-    for entry in selected:
+    for index, entry in enumerate(selected, 1):
         parsed = try_parse_source(entry["source"])
         if parsed is None:
             print(
@@ -482,6 +482,15 @@ def _estimate_catalog(args, vault, cat_path) -> int:
                 file=sys.stderr,
             )
             budget_noted = True
+        extra = f"  [{', '.join(entry['include'])}]" if entry.get("include") else ""
+        if not quiet:
+            # Announce before the work: a big row costs seconds of Hub
+            # metadata and header reads, and silence reads as a hang.
+            print(
+                f"  [{index}/{len(selected)}] {entry['source']}{extra} ...",
+                end="",
+                flush=True,
+            )
         try:
             est = estimate(
                 entry["source"],
@@ -492,6 +501,8 @@ def _estimate_catalog(args, vault, cat_path) -> int:
                 progress=lambda *a, **k: None,
             )
         except SystemExit as exc:
+            if not quiet:
+                print(" failed", flush=True)
             print(f"warning: {warning_detail(exc)}", file=sys.stderr)
             failed += 1
             continue
@@ -507,7 +518,6 @@ def _estimate_catalog(args, vault, cat_path) -> int:
         )
         if quiet:
             continue
-        extra = f"  [{', '.join(entry['include'])}]" if entry.get("include") else ""
         hints = f"  {', '.join(digest['hints'])}" if digest.get("hints") else ""
         params = ""
         if digest.get("parameters"):
@@ -516,8 +526,9 @@ def _estimate_catalog(args, vault, cat_path) -> int:
             )
             params = f"  {human_params(digest['parameters'])}{dtype}"
         print(
-            f"  {entry['source']}{extra}  {human_size(digest['payload_bytes'])}  "
-            f"{digest.get('license') or '?'}{hints}{params}"
+            f" {human_size(digest['payload_bytes'])}  "
+            f"{digest.get('license') or '?'}{hints}{params}",
+            flush=True,
         )
     dry_run = bool(getattr(args, "dry_run", False))
     if not dry_run:
