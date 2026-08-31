@@ -9,6 +9,16 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Fixed
+
+- Board requests identify themselves (`User-Agent: darsay/<version>`):
+  Cloudflare's Browser Integrity Check bans the default Python-urllib
+  signature outright (403, error 1010), which broke every board round
+  trip against darsay.io.
+- A push to a board whose site predates catalog import (the old worker
+  answered `POST catalog.json` with the download itself) is now a clear
+  error naming the missing deploy, not a phantom "Pushed" success.
+
 ## [0.14.5] - 2026-08-31
 
 

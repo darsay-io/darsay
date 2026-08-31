@@ -69,14 +69,23 @@ def parse_board_url(spec: str) -> Board | None:
     return Board(origin=f"{parts.scheme}://{parts.netloc}", id=match.group("id"))
 
 
+def _user_agent() -> str:
+    from . import __version__
+
+    return f"darsay/{__version__} (+https://darsay.io)"
+
+
 def _http(method: str, url: str, data: bytes | None = None) -> tuple[int, bytes]:
-    """One HTTP exchange. The seam hermetic tests replace."""
-    request = _urlrequest.Request(
-        url,
-        data=data,
-        method=method,
-        headers={"Content-Type": "application/json"} if data is not None else {},
-    )
+    """One HTTP exchange. The seam hermetic tests replace.
+
+    The CLI identifies itself: Cloudflare's Browser Integrity Check bans
+    the default ``Python-urllib`` signature outright (error 1010), and a
+    client that speaks to someone's board should say who it is anyway.
+    """
+    headers = {"User-Agent": _user_agent()}
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    request = _urlrequest.Request(url, data=data, method=method, headers=headers)
     try:
         with _urlrequest.urlopen(request, timeout=HTTP_TIMEOUT) as response:
             return response.status, response.read(MAX_RESPONSE_BYTES)
@@ -131,7 +140,16 @@ def push_catalog(board: Board, path: Path) -> dict:
         result = json.loads(body)
     except ValueError:
         result = {}
-    return result if isinstance(result, dict) else {}
+    if not isinstance(result, dict) or result.get("ok") is not True:
+        # An older worker answered the POST with the catalog download
+        # itself; reporting that as a push would be a phantom success.
+        raise SystemExit(
+            f"error: the board at {board.page_url} does not support catalog "
+            "import yet (the site predates the round trip) — deploy the "
+            f"darsay.io update, then re-run.\n"
+            f"  The refreshed catalog is kept at {path} — nothing was lost."
+        )
+    return result
 
 
 def fetch_entries(board: Board) -> list[dict]:
