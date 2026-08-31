@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from darsay.safetensors_meta import read_header, summarize_safetensors
+from darsay.safetensors_meta import (
+    read_header,
+    read_header_via,
+    summarize_safetensors,
+)
 from tests.payloads import make_safetensors
 
 
@@ -50,3 +54,28 @@ def test_unreadable_header_is_a_value_error(tmp_path):
     garbage.write_bytes(b"\x02" + b"\x00" * 7 + b"[]")
     with pytest.raises(ValueError, match="not an object"):
         read_header(garbage)
+
+
+def test_read_header_via_remote_fetch():
+    """The remote path shares the local parse: same header, same errors."""
+    import pytest
+
+    blob = make_safetensors({"w": ("BF16", [2, 3])})
+
+    def fetch(start, end):
+        return blob[start:end]
+
+    header = read_header_via(fetch, name="model-00001.safetensors")
+    assert header["w"]["dtype"] == "BF16"
+    assert header["w"]["shape"] == [2, 3]
+
+    truncated = blob[: len(blob) // 4]
+    with pytest.raises(ValueError, match="exceeds the file"):
+        read_header_via(lambda s, e: truncated[s:e])
+    with pytest.raises(ValueError, match="too short"):
+        read_header_via(lambda s, e: b"\x01"[s:e])
+    import struct
+
+    absurd = struct.pack("<Q", 10**12)
+    with pytest.raises(ValueError, match="unreasonable"):
+        read_header_via(lambda s, e: (absurd + b"\x00" * 8)[s:e])
