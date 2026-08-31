@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.5] - 2026-08-31
+
+
 ### Added
 
 - **darsay.io boards are catalog addresses.** A board URL
