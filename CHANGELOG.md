@@ -9,6 +9,13 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Fixed
+
+- `archive --next <board-url>` hands its claim back when the archive
+  refuses before transfer starts (a gated repo, a bad revision) instead
+  of leaving the row claimed until the 24 h staleness expiry. A clean
+  pause and Ctrl-C still keep the claim — those runs resume.
+
 ## [0.14.7] - 2026-08-31
 
 
