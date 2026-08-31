@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.6] - 2026-08-31
+
+
 ### Fixed
 
 - Board requests identify themselves (`User-Agent: darsay/<version>`):
