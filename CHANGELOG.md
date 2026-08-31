@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.7] - 2026-08-31
+
+
 ### Changed
 
 - Catalog and board refresh is livelier and faster: every row announces
