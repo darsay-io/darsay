@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.8] - 2026-08-31
+
+
 ### Added
 
 - Classification rule R15: a weight set byte-identical, file for file
