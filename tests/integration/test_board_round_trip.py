@@ -233,3 +233,102 @@ def test_archive_next_releases_claim_when_archive_refuses(
         main(["--vault", str(vault), "archive", "--next", BOARD_URL, "--jobs", "1"])
     assert server.releases == [9]
     assert 9 not in server.claimed_by
+
+
+def test_archive_board_flag_claims_the_chosen_source(
+    vault, test_provider, board_server, capsys
+):
+    test_provider.add_repo("acme/one", model_files())
+    test_provider.add_repo("acme/two", model_files())
+    server = board_server(
+        [
+            {"id": 1, "source": "test:acme/one", "desire": 9},
+            {"id": 2, "source": "test:acme/two", "desire": 5},
+        ]
+    )
+    # The chosen source wins over the board's priority row.
+    assert (
+        main(
+            [
+                "--vault",
+                str(vault),
+                "archive",
+                "test:acme/two",
+                "--board",
+                BOARD_URL,
+                "--jobs",
+                "1",
+            ]
+        )
+        == 0
+    )
+    out = capsys.readouterr().out
+    assert "Claimed test:acme/two" in out
+    states = [c["state"] for c in server.claims if c["entry_id"] == 2]
+    assert states[0] == "archiving" and states[-1] == "done"
+    assert not any(c["entry_id"] == 1 for c in server.claims)
+
+
+def test_archive_board_flag_warns_off_board_and_refuses_taken_rows(
+    vault, test_provider, board_server, capsys
+):
+    test_provider.add_repo("acme/offboard", model_files())
+    test_provider.add_repo("acme/one", model_files())
+    server = board_server([{"id": 1, "source": "test:acme/one"}])
+    assert (
+        main(
+            [
+                "--vault",
+                str(vault),
+                "archive",
+                "test:acme/offboard",
+                "--board",
+                BOARD_URL,
+                "--jobs",
+                "1",
+            ]
+        )
+        == 0
+    )
+    err = capsys.readouterr().err
+    assert "not a row on" in err
+    assert server.claims == []
+
+    server.claimed_by[1] = {
+        "client": "usb-carrier",
+        "state": "archiving",
+        "percent": 10,
+    }
+    with pytest.raises(SystemExit, match="claimed by usb-carrier"):
+        main(
+            [
+                "--vault",
+                str(vault),
+                "archive",
+                "test:acme/one",
+                "--board",
+                BOARD_URL,
+                "--jobs",
+                "1",
+            ]
+        )
+
+
+def test_archive_board_flag_dry_run_releases(vault, test_provider, board_server):
+    test_provider.add_repo("acme/one", model_files())
+    server = board_server([{"id": 1, "source": "test:acme/one"}])
+    assert (
+        main(
+            [
+                "--vault",
+                str(vault),
+                "archive",
+                "test:acme/one",
+                "--board",
+                BOARD_URL,
+                "--dry-run",
+            ]
+        )
+        == 0
+    )
+    assert server.releases == [1]

@@ -9,6 +9,14 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Added
+
+- `darsay archive SOURCE --board <board-url>` — you pick the source,
+  the board still gets the claim and the progress gauge. A source with
+  no matching row archives unclaimed with a warning; a row another
+  client holds is refused with the holder named. `--next` remains the
+  let-the-board-pick form.
+
 ## [0.14.8] - 2026-08-31
 
 

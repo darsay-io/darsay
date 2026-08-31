@@ -579,6 +579,13 @@ progress the board renders as a gauge:
 darsay archive --next https://darsay.io/b/<board-id>
 ```
 
+To pick the row yourself and still get the claim and the gauge, name
+the source and bring the board along with `--board`:
+
+```bash
+darsay archive MiniMaxAI/MiniMax-H3 --board https://darsay.io/b/<board-id>
+```
+
 Sign claims as something nicer than your hostname once:
 
 ```toml

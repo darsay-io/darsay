@@ -594,6 +594,8 @@ def cmd_archive(args) -> int:
     if target is None:
         return 0
     source, revision, include = target
+    if getattr(args, "board", None) and not getattr(args, "_board_progress", None):
+        _claim_on_board(args, vault, source, revision, include)
     max_bytes = (
         int(args.max_gb * 1024**3) if args.max_gb is not None else args.max_bytes
     )
@@ -730,6 +732,11 @@ def _archive_target(args, vault) -> tuple[str, str | None, list[str] | None] | N
         raise SystemExit(
             "error: --next already applies the entry’s revision/include; drop --revision/--include"
         )
+    if getattr(args, "board", None):
+        raise SystemExit(
+            "error: --next picks the board's row itself; drop --board "
+            "(or drop --next to choose the source yourself)"
+        )
     if next_flag != "" and source:
         raise SystemExit(
             "error: --next already chose the catalog; do not also pass SOURCE"
@@ -764,6 +771,47 @@ def _archive_target(args, vault) -> tuple[str, str | None, list[str] | None] | N
             f"(desire {nxt.get('desire') or '—'}, want): {source}{extra}"
         )
     return source, revision, include
+
+
+def _claim_on_board(args, vault, source, revision, include) -> None:
+    """``archive SOURCE --board URL``: claim the matching row before fetching.
+
+    The chosen source, not the board's priority, decides what is fetched;
+    the board still gets the claim and the progress gauge. A source with
+    no matching row archives unclaimed, with a warning — archiving must
+    never silently edit a board.
+    """
+    from .board import claim, client_id, fetch_entries, parse_board_url
+
+    board = parse_board_url(args.board)
+    if board is None:
+        raise SystemExit(
+            f"error: --board expects a board URL, got {args.board!r}\n"
+            "  hint: https://darsay.io/b/<board-id>"
+        )
+    entries = fetch_entries(board)
+    from .board import entry_id_for
+
+    entry_id = entry_id_for(entries, source, revision, include)
+    if entry_id is None:
+        print(
+            f"WARNING: {source} is not a row on {board.page_url} — "
+            "archiving without a claim",
+            file=sys.stderr,
+        )
+        return
+    client = client_id(vault)
+    ok, other = claim(board, entry_id, client)
+    if not ok:
+        holder = other.get("client") or "another client"
+        pct = f" ({other.get('percent')}%)" if other.get("percent") is not None else ""
+        raise SystemExit(
+            f"error: {source} is claimed by {holder}{pct} on {board.page_url}\n"
+            "  A claim expires 24h after its last progress report; release "
+            "it from the board page if it is stale."
+        )
+    args._board_progress = {"board": board, "entry_id": entry_id, "client": client}
+    print(f"Claimed {source} on {board.page_url} as {client}")
 
 
 def _archive_next_from_board(args, vault, board_hit):
@@ -1839,6 +1887,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--full",
         action="store_true",
         help="fetch the whole repo (skip the default masters-first classification)",
+    )
+    p.add_argument(
+        "--board",
+        metavar="URL",
+        help="claim SOURCE's row on this darsay.io board and report progress "
+        "(--next picks the board's row for you; --board lets you pick)",
     )
     _add_dry_run(
         p, "pin, reconcile, and print the transfer plan; move no payload bytes"

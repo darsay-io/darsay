@@ -183,7 +183,11 @@ pushes the refreshed catalog back. Mutating verbs push after saving;
 `--dry-run` never pushes. The board URL is the capability — treat it
 like a secret.
 
-`archive --next <board-url>` also **claims** the row it picks, signed
+`archive SOURCE --board <board-url>` claims the row for a source *you*
+chose — the board's desire ordering decides nothing, but the claim and
+the progress gauge still happen; a source with no matching row archives
+unclaimed, with a warning. `archive --next <board-url>` instead lets
+the board pick, and **claims** the row it picks, signed
 as this machine (`board.client` in config, default the hostname). A row
 another client holds a live claim on is skipped — that is how two
 people split one board without colliding. Archive boundaries (start,
