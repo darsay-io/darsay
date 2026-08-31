@@ -182,6 +182,16 @@ SETTINGS: tuple[Setting, ...] = (
         env="DARSAY_MAX_OFFLINE",
         flag="archive --max-offline",
     ),
+    Setting(
+        table="board",
+        key="client",
+        default="",
+        parse=lambda value: str(value).strip()[:80],
+        render=lambda value: str(value) or "(hostname)",
+        help="how this machine signs board claims; empty means the hostname",
+        example='"jeremy-mbp"',
+        env="DARSAY_BOARD_CLIENT",
+    ),
 )
 _BY_SLOT = {(item.table, item.key): item for item in SETTINGS}
 _TABLES = {item.table for item in SETTINGS}

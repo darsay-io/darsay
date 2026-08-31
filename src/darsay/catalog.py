@@ -365,6 +365,13 @@ def resolve_catalog(vault: Path, spec: str) -> Path:
     raw = (spec or "").strip()
     if not raw:
         raise SystemExit("error: empty catalog spec")
+    if raw.lower().startswith(("https://", "http://")):
+        raise SystemExit(
+            "error: a board URL works with estimate, list, archive --next, "
+            "and catalog add/drop/adopt\n"
+            "  hint: darsay catalog adopt <name> <board-url> makes a local "
+            "copy for everything else"
+        )
     found = try_resolve_catalog(vault, raw)
     if found is not None:
         catalog = load_catalog(found)

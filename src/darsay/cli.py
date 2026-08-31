@@ -18,6 +18,9 @@ immutable payload, recorded facts, still loadable as-is.
     darsay list CATALOG               overlay a catalog on this vault
     darsay catalog new NAME           start a shareable want-list
     darsay archive --next CATALOG     fetch the next unfinished catalog entry
+    darsay estimate <board-url>       refresh a darsay.io board in place (fetch, classify, push)
+    darsay archive --next <board-url> claim the board's next row; boundaries update its gauge
+    darsay list <board-url>           overlay a board against this vault (read-only)
     darsay rm      <bundle> […]       delete bundles (confirmation unless --yes)
     darsay du                         disk usage of bundles and .runtime
     darsay config                     effective settings and the files that set them
@@ -229,12 +232,91 @@ def _entry_label(entry: dict) -> str:
     return label
 
 
+def _board_target(spec):
+    """(Board, fetched catalog path) when ``spec`` is a board URL, else None."""
+    from .board import fetch_catalog, parse_board_url
+
+    board = parse_board_url(spec or "")
+    if board is None:
+        return None
+    import tempfile
+
+    dest = Path(tempfile.mkdtemp(prefix="darsay-board-"))
+    return board, fetch_catalog(board, dest)
+
+
+def _push_board_progress(args, *, state, bundle_dir=None, percent=None) -> None:
+    """Report an archive boundary to a claimed board row. Best-effort:
+    a board that cannot be reached never fails the archive itself."""
+    ctx = getattr(args, "_board_progress", None)
+    if not ctx:
+        return
+    from .board import claim
+
+    banked = total = None
+    if bundle_dir is not None:
+        try:
+            from .schema import payload_root_for
+            from .transfer import load_ledger, transfer_plan
+
+            ledger = load_ledger(Path(bundle_dir))
+            plan = transfer_plan(
+                Path(bundle_dir) / payload_root_for(ledger["repo_type"]), ledger
+            )
+            total = plan["bytes"]["total"]
+            banked = (
+                plan["bytes"]["verified"]
+                + plan["bytes"]["partial"]
+                + plan["bytes"].get("moved", 0)
+            )
+            if total:
+                percent = int(banked * 100 / total)
+        except Exception:
+            pass
+    try:
+        ok, _ = claim(
+            ctx["board"],
+            ctx["entry_id"],
+            ctx["client"],
+            state=state,
+            percent=percent,
+            banked_bytes=banked,
+            total_bytes=total,
+        )
+        if ok:
+            print(
+                f"Board {ctx['board'].page_url} updated: {state}"
+                + (f" ({percent}%)" if percent is not None else "")
+            )
+    except (SystemExit, Exception) as exc:  # noqa: BLE001 — never fail the archive
+        print(f"warning: could not update the board claim ({exc})", file=sys.stderr)
+
+
 def cmd_estimate(args) -> int:
     from .catalog import try_resolve_catalog
     from .estimate import estimate, print_estimate
 
     vault = _vault_path(args, announce=True)
     target = getattr(args, "target", None) or getattr(args, "source", None)
+    board_hit = _board_target(target)
+    if board_hit is not None:
+        board, board_path = board_hit
+        if not args.json:
+            print(f"Fetched board catalog {board.page_url}")
+        args.write = True
+        rc = _estimate_catalog(args, vault, board_path)
+        if rc == 0 and not args.dry_run:
+            from .board import push_catalog
+
+            result = push_catalog(board, board_path)
+            if not args.json:
+                print(
+                    f"Pushed to {board.page_url}: "
+                    f"{result.get('updated', 0)} updated, "
+                    f"{result.get('added', 0)} added, "
+                    f"{result.get('removed', 0)} removed"
+                )
+        return rc
     cat_path = try_resolve_catalog(vault, target)
     if cat_path is not None:
         return _estimate_catalog(args, vault, cat_path)
@@ -520,6 +602,7 @@ def cmd_archive(args) -> int:
             confirm=confirm,
         )
     except PartialTransfer as stop:
+        _push_board_progress(args, state="paused", bundle_dir=stop.bundle_dir)
         print(f"\nArchive paused cleanly ({stop.reason}: {stop.detail}).")
         print(f"Partial bundle: {stop.bundle_dir}")
         if stop.reason == "moved":
@@ -542,11 +625,21 @@ def cmd_archive(args) -> int:
     except KeyboardInterrupt:
         # Outside the transfer window (e.g. during pin) nothing durable has
         # started, so a plain interrupt exit is honest.
+        _push_board_progress(args, state="paused")
         print("\nInterrupted.", file=sys.stderr)
         return 130
     if bundle is None:  # --dry-run printed the plan and intentionally did not register
+        ctx = getattr(args, "_board_progress", None)
+        if ctx:  # a dry run holds nothing; hand the row back
+            from contextlib import suppress
+
+            from .board import release
+
+            with suppress(SystemExit, OSError):
+                release(ctx["board"], ctx["entry_id"], ctx["client"])
         _dry_run_done(args, "no payload bytes moved", "archive")
         return 0
+    _push_board_progress(args, state="done", percent=100)
     bundle_id = f"{bundle.parent.name}@{bundle.name}"
     from .archiver import load_manifest
 
@@ -613,6 +706,9 @@ def _archive_target(args, vault) -> tuple[str, str | None, list[str] | None] | N
     catalog_spec = source if next_flag == "" else next_flag
     if not catalog_spec:
         raise SystemExit("error: --next requires a catalog")
+    board_hit = _board_target(catalog_spec)
+    if board_hit is not None:
+        return _archive_next_from_board(args, vault, board_hit)
     cat_path = resolve_catalog(vault, catalog_spec)
     catalog = load_catalog(cat_path)
     rows = overlay(catalog, bundle_records(vault))
@@ -639,6 +735,64 @@ def _archive_target(args, vault) -> tuple[str, str | None, list[str] | None] | N
     return source, revision, include
 
 
+def _archive_next_from_board(args, vault, board_hit):
+    """Pick the board's next unfinished row and claim it before fetching.
+
+    A row another client holds a live claim on is skipped — that is the
+    coordination boards exist for. The claim context rides on ``args``;
+    archive boundaries report progress through it, and the board renders
+    the gauge.
+    """
+    from .board import claim, client_id, entry_id_for, fetch_entries
+    from .catalog import (
+        filter_want,
+        load_catalog,
+        next_idle_message,
+        overlay,
+        realize_from_overlay,
+        sort_rows,
+    )
+    from .vault import bundle_records
+
+    board, cat_path = board_hit
+    catalog = load_catalog(cat_path)
+    rows = overlay(catalog, bundle_records(vault))
+    candidates = sort_rows(filter_want(rows), "next")
+    if not candidates:
+        _finish_next(*next_idle_message(catalog, rows))
+        return None
+    entries = fetch_entries(board)
+    client = client_id(vault)
+    for row in candidates:
+        entry_id = entry_id_for(
+            entries, row["source"], row.get("revision"), row.get("include")
+        )
+        if entry_id is None:
+            continue
+        ok, other = claim(board, entry_id, client, percent=int(row.get("percent") or 0))
+        if not ok:
+            holder = other.get("client") or "another client"
+            pct = (
+                f" ({other.get('percent')}%)"
+                if other.get("percent") is not None
+                else ""
+            )
+            print(f"Skipping {row['source']} — claimed by {holder}{pct}")
+            continue
+        args._board_progress = {"board": board, "entry_id": entry_id, "client": client}
+        source, revision, include = realize_from_overlay(row)
+        state = "partial" if row.get("status") == "partial" else "want"
+        extra = f"  include={','.join(include)}" if include else ""
+        print(
+            f"Next from board {board.page_url} "
+            f"(desire {row.get('desire') or '—'}, {state}): {source}{extra}"
+            f"  [claimed as {client}]"
+        )
+        return source, revision, include
+    print("Every unfinished row is claimed by another client.", file=sys.stderr)
+    return None
+
+
 def cmd_verify(args) -> int:
     from .verify import verify_bundle
 
@@ -663,6 +817,9 @@ def cmd_list(args) -> int:
     records = bundle_records(vault)
     catalog_spec = getattr(args, "catalog", None)
     if catalog_spec:
+        board_hit = _board_target(catalog_spec)
+        if board_hit is not None:
+            catalog_spec = str(board_hit[1])
         return _list_catalog(args, vault, records, catalog_spec)
     return _list_vault(args, vault, records)
 
@@ -848,8 +1005,12 @@ def cmd_catalog_add(args) -> int:
     from .readme_gen import human_size
 
     vault = _vault_path(args, announce=True)
-    path = resolve_catalog(vault, args.catalog)
-    require_writable(vault, path, bool(args.write))
+    board_hit = _board_target(args.catalog)
+    if board_hit is not None:
+        board, path = board_hit
+    else:
+        board, path = None, resolve_catalog(vault, args.catalog)
+    require_writable(vault, path, bool(args.write) or board is not None)
     catalog = load_catalog(path)
     source = args.source
     digest = None
@@ -895,6 +1056,11 @@ def cmd_catalog_add(args) -> int:
         print(f"{verb} {entry['source']}{inc}{desire}{extra}")
     if args.dry_run:
         _dry_run_done(args, "nothing written", "add" if action == "added" else "update")
+    elif board is not None:
+        from .board import push_catalog
+
+        push_catalog(board, path)
+        print(f"Pushed to {board.page_url}")
     return 0
 
 
@@ -909,8 +1075,12 @@ def cmd_catalog_drop(args) -> int:
     )
 
     vault = _vault_path(args, announce=True)
-    path = resolve_catalog(vault, args.catalog)
-    require_writable(vault, path, bool(args.write))
+    board_hit = _board_target(args.catalog)
+    if board_hit is not None:
+        board, path = board_hit
+    else:
+        board, path = None, resolve_catalog(vault, args.catalog)
+    require_writable(vault, path, bool(args.write) or board is not None)
     catalog = load_catalog(path)
     if args.full and args.include:
         raise SystemExit("error: pass --full or --include, not both")
@@ -929,6 +1099,11 @@ def cmd_catalog_drop(args) -> int:
     save_catalog(path, catalog)
     write_catalog_readme(path.parent, catalog)
     print(f"Dropped {removed['source']} from {catalog['id']}")
+    if board is not None:
+        from .board import push_catalog
+
+        push_catalog(board, path)
+        print(f"Pushed to {board.page_url}")
     return 0
 
 
@@ -951,7 +1126,10 @@ def cmd_catalog_adopt(args) -> int:
         bool(args.write),
         hint="adopt into a vault catalog; then list it",
     )
-    src_path = resolve_catalog(vault, args.other)
+    other_hit = _board_target(args.other)
+    src_path = (
+        other_hit[1] if other_hit is not None else resolve_catalog(vault, args.other)
+    )
     dest = load_catalog(dest_path)
     other = load_catalog(src_path)
     new_entries, skipped = adoptable_entries(dest, other)

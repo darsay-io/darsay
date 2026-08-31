@@ -9,6 +9,26 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Added
+
+- **darsay.io boards are catalog addresses.** A board URL
+  (`https://darsay.io/b/<id>`) now works wherever a catalog slug or path
+  does: `darsay estimate <board-url>` fetches the board's catalog,
+  refreshes every row with classification, and pushes the result back —
+  one command keeps a board's prices, hints, and masters markers honest;
+  `catalog add`/`drop`/`adopt` round-trip the same way; `darsay list
+  <board-url>` overlays the board against the local vault read-only.
+  The board URL is the capability — treat it like a secret.
+- **`darsay archive --next <board-url>` claims its row.** The client
+  (config `board.client`, default the hostname) claims the board's next
+  unfinished row before fetching — rows another client holds a live
+  claim on are skipped — and reports progress at archive boundaries
+  (start, clean pause, done), which the board renders as a progress
+  gauge. Reporting done flips the row to have and teaches an empty
+  holders field the client id; a dry run hands its claim back. Claims
+  are board-side coordination and never enter catalog.json.
+- Config gains `board.client` (`DARSAY_BOARD_CLIENT`).
+
 ## [0.14.4] - 2026-08-31
 
 

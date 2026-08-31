@@ -30,6 +30,7 @@ This page is the cookbook you return to.
 | rsync bytes, then let darsay verify | [rsync then darsay](#rsync-then-darsay) |
 | Write curator notes | [Curation](#write-curator-notes) |
 | Curate a want-list and share it | [Share a catalog](#share-a-catalog) |
+| Re-price a darsay.io board, claim its next row | [Keep a board honest](#keep-a-darsayio-board-honest) |
 | Prove the bytes have not drifted | [Verify](#verify-on-a-schedule) |
 | See what a command would do first | [Dry run](#dry-run-anything-that-writes) |
 
@@ -556,6 +557,38 @@ real command would. `archive --dry-run` is the one preview that records
 something — a new source is pinned in `transfer.json`, no payload bytes —
 so the plan it shows is the plan the real run continues; `estimate` is the
 preflight that writes nothing at all.
+
+---
+
+## Keep a darsay.io board honest
+
+A board is a catalog with a URL, and the URL works wherever a catalog
+name does. One command fetches it, re-prices every row with
+classification (the board alone can only price the shipping box), and
+pushes the result back — sizes, hints, and masters markers included:
+
+```bash
+darsay estimate https://darsay.io/b/<board-id>
+```
+
+To fetch the board's next unfinished row — claiming it first, so a
+second machine on the same board picks a different row, and reporting
+progress the board renders as a gauge:
+
+```bash
+darsay archive --next https://darsay.io/b/<board-id>
+```
+
+Sign claims as something nicer than your hostname once:
+
+```toml
+# <vault>/config.toml   (or ~/.config/darsay/config.toml)
+[board]
+client = "jeremy-mbp"
+```
+
+The board URL is the capability: anyone who has it can edit the board.
+Treat it like a secret.
 
 ---
 

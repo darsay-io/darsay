@@ -163,6 +163,37 @@ Unknown bytes print as `+ ?`, never as zero. A partial that is a
 counts those moved bytes as done, not as remaining: its `remaining_network`
 is only what is still to fetch here.
 
+## Boards (darsay.io)
+
+A board on darsay.io is a catalog with a URL, and that URL is a
+**catalog address** — the third form after a vault slug and a
+filesystem path:
+
+    darsay estimate https://darsay.io/b/<board-id>     # fetch → classify → push back
+    darsay list     https://darsay.io/b/<board-id>     # overlay against this vault (read-only)
+    darsay archive --next https://darsay.io/b/<board-id>
+    darsay catalog add  <board-url> huggingface:owner/name --desire 8
+    darsay catalog drop <board-url> huggingface:owner/name --full
+    darsay catalog adopt local-name <board-url>        # pull a local copy
+
+`estimate` against a board is the round trip that keeps it honest: the
+board's own quick estimates can only price the shipping box, while the
+CLI classifies (masters-first prices, `hints`, the `policy` marker) and
+pushes the refreshed catalog back. Mutating verbs push after saving;
+`--dry-run` never pushes. The board URL is the capability — treat it
+like a secret.
+
+`archive --next <board-url>` also **claims** the row it picks, signed
+as this machine (`board.client` in config, default the hostname). A row
+another client holds a live claim on is skipped — that is how two
+people split one board without colliding. Archive boundaries (start,
+clean pause, registration) report progress, which the board renders as
+a gauge; reporting done flips the row to `have` and fills an empty
+holders field with the client id. Claims, like the board's status and
+holders columns, are board-side coordination: they never appear in
+`catalog.json`, and a stale claim (24 h without a report) simply
+expires.
+
 ## CLI
 
 ```
