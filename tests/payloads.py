@@ -110,6 +110,44 @@ def dataset_files(*, extra: dict[str, bytes] | None = None) -> dict[str, bytes]:
     return files
 
 
+def _gguf_string(text: str) -> bytes:
+    raw = text.encode("utf-8")
+    return struct.pack("<Q", len(raw)) + raw
+
+
+def _gguf_value(value) -> tuple[int, bytes]:
+    """(type id, encoded bytes) with types inferred from Python values."""
+    if isinstance(value, bool):
+        return 7, struct.pack("<?", value)
+    if isinstance(value, int):
+        if value < 0:
+            return 5, struct.pack("<i", value)
+        return 4, struct.pack("<I", value)
+    if isinstance(value, float):
+        return 6, struct.pack("<f", value)
+    if isinstance(value, str):
+        return 8, _gguf_string(value)
+    if isinstance(value, (list, tuple)):
+        if value and all(isinstance(v, str) for v in value):
+            elem_id, payload = 8, b"".join(_gguf_string(v) for v in value)
+        elif value and all(isinstance(v, float) for v in value):
+            elem_id, payload = 6, b"".join(struct.pack("<f", v) for v in value)
+        else:
+            elem_id, payload = 5, b"".join(struct.pack("<i", v) for v in value)
+        return 9, struct.pack("<IQ", elem_id, len(value)) + payload
+    raise TypeError(f"cannot encode GGUF value {value!r}")
+
+
+def make_gguf(kv: Mapping[str, object], *, tensor_count: int = 0, version: int = 3):
+    """Build a minimal GGUF header (KV table only, no tensor data)."""
+    out = bytearray(b"GGUF")
+    out += struct.pack("<IQQ", version, tensor_count, len(kv))
+    for key, value in kv.items():
+        type_id, payload = _gguf_value(value)
+        out += _gguf_string(key) + struct.pack("<I", type_id) + payload
+    return bytes(out)
+
+
 def parquet_magic_file(body: bytes = b"payload") -> bytes:
     """Enough of a parquet file for the stdlib magic-byte check (not a real table)."""
     return b"PAR1" + body + b"PAR1"
