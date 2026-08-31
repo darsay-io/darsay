@@ -65,7 +65,7 @@ required to open a bundle. Everything else is how we got there.
 | [**Incremental transfer**](INCREMENTAL.md) | Budgets, Ctrl-C, Range partials, the free-space floor and `config.toml`, `--shard N/T`, `assemble` |
 | [**Datasets**](DATASETS.md) | The source is `datasets/owner/name`; payload under `data/` |
 | [**Sources**](SOURCES.md) | Provider-qualified refs; Hugging Face is a plugin |
-| [**Quantization**](QUANTIZATION.md) | Canonical bundle vs satellite quants vs derived precision |
+| [**Quantization**](QUANTIZATION.md) | Masters-first archiving, `darsay classify`, satellite quants, derived precision |
 | [**Catalogs**](CATALOGS.md) | Shareable want-lists; the vault is the same list, realized |
 | [**Doctor**](DOCTOR.md) | Offline vault diagnostics, reversible repair, JSON contract, evidence history |
 

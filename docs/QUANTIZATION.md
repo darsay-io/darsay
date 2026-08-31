@@ -16,8 +16,11 @@ is the canonical bundle, when a quantized repo deserves archiving in its own
 right, and how "I want to run it at 4 bits" is served without archiving
 anything extra.
 
-`estimate --include` and `archive --include` pin a subset. Hydration-time
-`--quantize` is proposed. Case study: Qwen/Qwen3.8-27B.
+**This policy is mechanized.** `darsay archive` applies it by default
+(masters-first, [§4](#mechanics)); `darsay classify` shows the per-file
+evidence; `estimate --include` and `archive --include` pin an explicit
+subset; `--full` fetches everything. Hydration-time `--quantize` is
+proposed. Case study: Qwen/Qwen3.8-27B.
 
 ## 1. The two kinds of quantized artifact
 
@@ -74,18 +77,73 @@ unit; see `--include` below).
 
 ## 4. Mechanics
 
+### Implemented: masters-first acquisition (the `archive` default) and `darsay classify`
+
+A fresh `darsay archive <model>` classifies the repo's weight files from
+metadata plus **bounded header reads** — `config.json`, every
+`*.index.json`, GGUF key/value tables, safetensors headers of files no
+index accounts for; a few tens of MB against a multi-hundred-GB repo,
+every cap recorded — and fetches the artifacts that are genuinely hard
+to regenerate. Verdicts come from a closed enum:
+
+- **master** — irreplaceable: the index-selected or standalone
+  full-fidelity weights, quantized safetensors (calibration or a curated
+  layer map may be baked in), GGUFs carrying `quantize.imatrix.*` (the
+  importance matrix is a baked-in hidden input), the only weight format
+  in a repo.
+- **print** — mechanically regenerable and **skipped by default**: a
+  GGUF with no imatrix sitting beside exactly one full-fidelity weight
+  set, or a file byte-identical (LFS SHA-256) to the declared base repo
+  *when that base is archived in this vault*.
+- **support** — config, tokenizer, licenses, provenance records: always
+  fetched.
+- **unknown** — darsay will not guess, so the files are **fetched**:
+  orphaned weight sets no index selects, GGUFs whose source build cannot
+  be established (several candidate sets, or a header naming an external
+  source), legacy `.bin`/`.pt` beside safetensors, anything unreadable,
+  capped, or gated.
+
+Every skip is named in the preflight with its rule and reason, recorded
+in the manifest (`source.subset.policy` + the per-set classification,
+with the full upstream inventory and hashes), and frozen into the pin —
+re-runs resume the selection without re-reading a header; `--force`
+re-pins under current rules. `--full` fetches the whole repo;
+`--include` remains the curator's explicit override. Any classification
+failure degrades to the full fetch, never the other way.
+
+**The stated promise.** A skipped print is *functionally* regenerable
+from the kept master under a recorded toolchain — not bit-identical to
+the published bytes (`convert_hf_to_gguf.py` and `llama-quantize` drift
+across versions). Wanting the historical bytes people actually ran is §2
+policy and one `--full` away. And the single-candidate print rule rests
+on one stated assumption: an author's GGUFs derive from the
+full-fidelity weights they sit next to. When anything contradicts that —
+two differing weight sets, an external source claim, an unreadable
+header — the verdict is `unknown` and the bytes are fetched.
+
+`darsay classify <source>` is the audit view: the per-set verdict table
+with rule ids, evidence, the read receipt, and the exact selection —
+`--json` for scripts.
+
 ### Implemented: preflight sizing (`darsay estimate`)
 
-Read-only against the Hub API — no download, nothing written:
+No payload downloads, nothing written; a fresh model source is
+classified the same way `archive` classifies it, so the price quoted is
+the price paid:
 
-    darsay estimate Qwen/Qwen3.8-27B                 # size/params/disk for the master
+    darsay estimate Qwen/Qwen3.8-27B                 # the default acquisition, priced
+    darsay estimate Qwen/Qwen3.8-27B --full          # the whole repo, priced
     darsay estimate Qwen/Qwen3.8-27B --variants      # + quantized ecosystem, sized
     darsay estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'   # one quant of a pack
 
 Exact numbers (file sizes, param counts by dtype) come from upstream
 metadata; derived numbers (RAM x1.2, download scratch) are labeled
-estimates. Variant listing caps are recorded (`query_limit`,
-`detail_limit`), matching the manifest's record-don't-fabricate rule.
+estimates. Variant listing caps and classification read caps are
+recorded (`query_limit`, the read receipt), matching the manifest's
+record-don't-fabricate rule. When weight bytes far exceed one copy of
+the published parameter count, estimate says so and the catalog row
+carries the `redundant` hint — the smell that a repo ships several
+weight sets.
 
 ### Implemented: subset archiving (`archive --include`)
 
@@ -133,8 +191,10 @@ no network either, since the input is the archived payload.
 
 | You want | Do |
 |---|---|
-| Preserve the model | Archive the highest-fidelity repo (55.6 GB) |
+| Preserve the model | `darsay archive <repo>` — masters-first is the default (55.6 GB, not the 239.7 GB shipping box) |
+| Preserve every published byte of the repo | `darsay archive <repo> --full` |
 | Preserve what people actually ran | Also archive that published quant as a satellite bundle (FP8: +30.9 GB; one GGUF via `archive --include`: +16 GB) |
+| See what is irreplaceable before deciding | `darsay classify <repo>` |
 | Just run it smaller/faster locally | Proposed `hydrate --quantize <recipe>` — disposable, regenerable, zero archival cost |
 
 ## See also

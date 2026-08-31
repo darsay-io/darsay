@@ -54,7 +54,7 @@ writable.
 
 | Field | Meaning |
 |---|---|
-| `catalog_schema_version` | `"1.1.0"`. Major = breaking; 1.1 added `estimate.hints`. |
+| `catalog_schema_version` | `"1.2.0"`. Major = breaking; 1.1 added `estimate.hints`; 1.2 added the `redundant` hint and the digest `policy` key. |
 | `kind` | Always `"darsay.catalog"`. |
 | `id` | Slug. Matches the directory name when stored at `catalogs/<id>/`. Lowercase letter, then letters, digits, `.`, `_`, `-` (max 64). |
 | `title` | Human title. Defaults to `id`. |
@@ -97,6 +97,7 @@ Stale after 7 days (`*` on SIZE in `list`).
 | `dominant_dtype` | `est["parameters"]["dominant_dtype"]` if dict, else `null` |
 | `unknown_size_count` | `est["payload"]["unknown_size_count"]` |
 | `hints` | Derived once, by `hints_for(est)` — see [Hints](#hints). Since 1.1.0. |
+| `policy` | `"masters"` when the stored price is the default masters-first acquisition ([Quantization §4](QUANTIZATION.md#mechanics)); `null` for full-repo and explicit-include prices. Since 1.2.0. |
 
 Never stored: `disk.*`, `bundle.dir`, engines, completeness, variants,
 vault status, bundle ids.
@@ -114,7 +115,8 @@ Empty (`[]`) means *nothing notable*; a missing digest still means
 | `gated` | Upstream is gated (`source.gated`). Archiving needs an accepted license and `hf auth login`. |
 | `large` | The priced payload is ≥ 20 GiB (`LARGE_PAYLOAD_BYTES`) — more than one sitting, often more than one disk. With `--include`, the priced payload is the subset. An unknown size is never large. |
 | `quant` | A published quantized artifact ([Quantization](QUANTIZATION.md)): the weight bytes are mostly GGUF, or the dominant safetensors dtype is not F64 / F32 / F16 / BF16. |
-| `subset` | The entry was priced with `--include`. |
+| `redundant` | The priced weight bytes are ≥ 1.75× one copy at the published per-dtype parameter counts — the repo likely ships several weight sets (`darsay classify` shows them). Live estimates only; never re-derived from a stored digest. Since 1.2.0. |
+| `subset` | The entry was priced with an explicit `--include`. A masters-policy price sets the digest's `policy` key instead. |
 
 A 1.0.0 file carries no `hints`. Readers derive `large`, `gated`, and
 `subset` from the digest and the entry's `include` on the fly; `quant`
@@ -127,7 +129,10 @@ writes `hints`; `catalog adopt` copies it verbatim.
 
 `darsay list CATALOG` matches each entry against this vault’s
 `bundle_records` by canonical source address + optional revision + include
-set.
+set. An entry with `include: null` means *the default acquisition*: it is
+satisfied by a masters-policy bundle (what `archive <source>` produces)
+or by a full-repo bundle (a superset). An entry with explicit include
+globs matches only its globs.
 
 | Status | Meaning |
 |---|---|

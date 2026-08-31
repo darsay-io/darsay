@@ -60,8 +60,11 @@ guard, not just a printout.
 darsay archive sshleifer/tiny-gpt2
 ```
 
-That pins `main` to a commit, copies every file, hashes them, checks the
-hashes against upstream, captures the license, and writes a bundle under
+That pins `main` to a commit, copies every file worth keeping — for a
+model, the masters-first default: the irreplaceable weights and support
+files, skipping mechanically derivable quants; `--full` takes everything
+([Quantization](QUANTIZATION.md)) — hashes them, checks the hashes
+against upstream, captures the license, and writes a bundle under
 `~/darsay` (override with `--vault` or `$DARSAY_HOME`). On a real model the
 live panel is percent of the whole payload, bytes in / total, rate, and
 time remaining — archives are large enough that a per-file bar is the

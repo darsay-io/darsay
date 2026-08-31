@@ -9,6 +9,55 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Breaking
+
+- **`darsay archive` of a model repo is masters-first by default.** It
+  was: fetch the whole repo. It is now: classify the repo's weight files
+  from bounded header reads and fetch the masters, everything
+  unclassifiable, and all support files, skipping mechanically derivable
+  prints (a GGUF with no imatrix beside exactly one full-fidelity weight
+  set; files byte-identical to an archived base). Every skip is named in
+  the preflight and recorded in the manifest with the full omitted
+  inventory and hashes. Recover the old behavior per run with
+  `darsay archive <source> --full`. Existing pins are untouched:
+  re-runs resume whatever their pin selected.
+- **`darsay estimate` and stored catalog digests price the default
+  acquisition, not the shipping box.** A fresh model source is
+  classified the same way archive classifies it; `estimate --full`
+  prices the whole repo. Catalog refresh (`darsay estimate CATALOG`)
+  classifies model rows under a recorded read budget (256 requests /
+  512 MiB per run; rows past it price the full repo and say so).
+  Re-run `darsay estimate <catalog>` once to re-price existing boards.
+
+### Added
+
+- `darsay classify SOURCE` — per-weight-set master/print verdicts with
+  rule ids, evidence, a read receipt, and the exact selection
+  (`--revision`, `--include`, `--json`). Refusal is a finding: what
+  darsay cannot establish is `unknown` and fetched, never guessed.
+- Manifest schema 1.7.0 (additive): `source.subset.policy` and
+  `source.subset.classification` record a masters-first selection and
+  its rationale.
+- Catalog schema 1.2.0 (additive): the digest gains `policy`; the hint
+  vocabulary gains `redundant` (priced weight bytes ≥ 1.75× one copy at
+  the published per-dtype parameter counts). Estimate prints the
+  redundancy ratio when it fires. A null-include catalog entry is
+  satisfied by a masters-policy bundle; `list` shows such bundles as
+  `[masters]`.
+- `SourceProvider.read_bytes` — bounded remote byte-range reads,
+  implemented for Hugging Face (Range requests via the Hub session) and
+  the hermetic test provider; the base default degrades gracefully.
+- `gguf_meta` (stdlib GGUF KV header parser that leapfrogs bulk numeric
+  arrays and enforces a recorded fetch cap) and
+  `safetensors_meta.read_header_via` (the same header parse over a
+  fetch callable).
+
+### Fixed
+
+- `--include '*.safetensors'` against a sharded repo now keeps the
+  weight map: `*.index.json` and `video_preprocessor_config.json` ride
+  along as subset sidecars, so the archived subset actually loads.
+
 ## [0.14.3] - 2026-08-31
 
 

@@ -102,11 +102,18 @@ bundle root can change without the archive “changing.”
 `archive` does not mean “download `main`.” It means:
 
 1. Resolve the ref (`main`, a tag, a commit) to an **immutable revision**.
-2. Freeze the file set for that revision.
+2. Freeze the file set for that revision. For a model this is the
+   **masters-first selection** by default: the irreplaceable weights,
+   everything darsay cannot classify, and all support files —
+   mechanically derivable prints are skipped on the record
+   ([Quantization §4](QUANTIZATION.md#mechanics); `--full` freezes the
+   whole repo, `--include` freezes exactly what you say).
 3. Transfer those files, and only those files, until every one verifies.
 
-Rerunning `archive` on the same source continues *that pin*. It does not
-chase a moving `main`. To take a new snapshot, `--force` pins again.
+Rerunning `archive` on the same source continues *that pin* — the same
+files, the same selection, no re-classification. It does not chase a
+moving `main` or a moving rule set. To take a new snapshot, `--force`
+pins again.
 
 That is why resume works without a special subcommand, and why a 50 GB
 job can be ten evenings of `--max-gb 10`.

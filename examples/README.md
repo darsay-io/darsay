@@ -224,6 +224,30 @@ Design: [Incremental transfer](../docs/INCREMENTAL.md#network-loss).
 
 ---
 
+## Archive just the master (the default)
+
+Some repos ship the model *and* a pile of its own derivatives — a BF16
+master plus every GGUF quant of it. `archive` classifies a fresh model
+pin by default and fetches the artifacts that are genuinely hard to
+regenerate: masters, everything it cannot classify, and all support
+files. Mechanically derivable prints are skipped, named in the
+preflight, and recorded in the manifest with the full omitted inventory.
+
+```bash
+darsay estimate owner/model-with-quants        # prices what archive will fetch
+darsay classify owner/model-with-quants        # the per-set evidence table
+darsay archive  owner/model-with-quants        # masters-first, on the record
+darsay archive  owner/model-with-quants --full # every published byte instead
+```
+
+A skipped print is functionally regenerable from the kept master under a
+recorded toolchain — not bit-identical to the published bytes. When
+darsay cannot establish what a file is (two differing weight sets, an
+orphaned shard set, an unreadable header), it refuses to guess and
+fetches it. Policy and rules: [Quantization](../docs/QUANTIZATION.md).
+
+---
+
 ## Price one quant from a pack repo
 
 Some GGUF repos are hundreds of gigabytes of named quants. `--include`
