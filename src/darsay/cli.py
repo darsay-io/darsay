@@ -646,6 +646,19 @@ def cmd_archive(args) -> int:
         _push_board_progress(args, state="paused")
         print("\nInterrupted.", file=sys.stderr)
         return 130
+    except SystemExit:
+        # The archive refused before anything durable started (gated repo,
+        # bad revision, full disk refusal): hand a claimed board row back
+        # rather than leave the claim dangling until it goes stale.
+        ctx = getattr(args, "_board_progress", None)
+        if ctx:
+            from contextlib import suppress
+
+            from .board import release
+
+            with suppress(SystemExit, OSError):
+                release(ctx["board"], ctx["entry_id"], ctx["client"])
+        raise
     if bundle is None:  # --dry-run printed the plan and intentionally did not register
         ctx = getattr(args, "_board_progress", None)
         if ctx:  # a dry run holds nothing; hand the row back

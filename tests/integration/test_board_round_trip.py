@@ -221,3 +221,15 @@ def test_list_overlays_a_board_read_only(vault, test_provider, board_server, cap
 def test_unwired_verbs_explain_board_urls(vault, test_provider):
     with pytest.raises(SystemExit, match="board URL works with"):
         main(["--vault", str(vault), "catalog", "regen", BOARD_URL])
+
+
+def test_archive_next_releases_claim_when_archive_refuses(
+    vault, test_provider, board_server, capsys
+):
+    """A pre-transfer refusal (gated repo) must hand the claim back."""
+    test_provider.add_repo("acme/locked", model_files(), access_denied=True)
+    server = board_server([{"id": 9, "source": "test:acme/locked", "desire": 7}])
+    with pytest.raises(SystemExit):
+        main(["--vault", str(vault), "archive", "--next", BOARD_URL, "--jobs", "1"])
+    assert server.releases == [9]
+    assert 9 not in server.claimed_by
