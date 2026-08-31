@@ -182,6 +182,44 @@ def test_archive_include_records_subset_and_omits_unmatched(vault, test_provider
     assert (bundle / "model" / "Q4_K_M.gguf").read_bytes() == b"gguf-quant"
 
 
+def test_archive_include_sharded_keeps_weight_map(vault, test_provider):
+    import json as _json
+
+    from tests.payloads import make_safetensors
+
+    shard1 = make_safetensors({"a": ("F32", [2, 2])})
+    shard2 = make_safetensors({"b": ("F32", [2, 2])})
+    index = _json.dumps(
+        {
+            "metadata": {"total_size": 32},
+            "weight_map": {
+                "a": "model-00001-of-00002.safetensors",
+                "b": "model-00002-of-00002.safetensors",
+            },
+        }
+    ).encode("utf-8")
+    files = model_files(
+        extra={
+            "model-00001-of-00002.safetensors": shard1,
+            "model-00002-of-00002.safetensors": shard2,
+            "model.safetensors.index.json": index,
+            "video_preprocessor_config.json": b"{}",
+            "notes.txt": b"not a sidecar",
+        }
+    )
+    del files["model.safetensors"]
+    test_provider.add_repo("acme/sharded", files)
+    bundle = archive_quiet("test:acme/sharded", vault=vault, include=["*.safetensors"])
+    manifest = load_manifest(bundle)
+    inventory = {item["path"] for item in manifest["inventory"]["files"]}
+    # The weight map rides along as a sidecar, so the sharded subset loads.
+    assert "model/model.safetensors.index.json" in inventory
+    assert "model/video_preprocessor_config.json" in inventory
+    assert "model/model-00001-of-00002.safetensors" in inventory
+    assert "model/notes.txt" not in inventory
+    assert manifest["validation"]["completeness"]["status"] == "complete"
+
+
 def test_archive_include_no_match_exits(vault, test_provider):
     test_provider.add_repo("acme/toy", model_files())
     with pytest.raises(SystemExit, match="matched no payload files"):

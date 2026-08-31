@@ -26,6 +26,9 @@ SIDECAR_GLOBS = (
     "license.*",
     "config.json",
     "generation_config.json",
+    # Weight maps (model.safetensors.index.json, pytorch_model.bin.index.json):
+    # a sharded subset cannot load without its index.
+    "*.index.json",
     "tokenizer.json",
     "tokenizer.model",
     "tokenizer_config.json",
@@ -35,6 +38,7 @@ SIDECAR_GLOBS = (
     "added_tokens.json",
     "chat_template*",
     "preprocessor_config.json",
+    "video_preprocessor_config.json",
     "spiece.model",
     "dataset_infos.json",
 )
