@@ -4,7 +4,7 @@
 |---|---|
 | **Author** | Jeremy Norris (phase-1 validation drafted with Claude) |
 | **Date** | 2026-08-31 |
-| **Status** | Proposed — all open questions ratified 2026-08-31 (see [Open Questions](#open-questions)); awaiting final go for implementation |
+| **Status** | Implemented (unreleased) — shipped as the masters-first `archive` default, `darsay classify`, `SourceProvider.read_bytes`, manifest schema 1.7.0, catalog schema 1.2.0. User-facing docs: [QUANTIZATION.md §4](../QUANTIZATION.md#mechanics), [MANIFEST.md](../MANIFEST.md), [CATALOGS.md](../CATALOGS.md), [examples](../../examples/README.md#archive-just-the-master-the-default). All open questions ratified 2026-08-31 (see [Open Questions](#open-questions)). Verified live against the case-study repo: masters [R3], orphan unknown [R6], GGUFs unknown [R11], 88.3 MiB read against 240 GB. |
 | **Audience** | darsay CLI implementers; readers of `docs/QUANTIZATION.md` |
 | **Related** | darsay 0.14.3 · manifest schema 1.6.0 → **1.7.0** · catalog schema 1.1.0 → **1.2.0** · `transfer_version` 1 (unchanged) · MVB format (unchanged) |
 
