@@ -8,6 +8,7 @@ from __future__ import annotations
 
 COMMANDS = (
     "estimate",
+    "classify",
     "archive",
     "verify",
     "smoke",

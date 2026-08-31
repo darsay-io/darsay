@@ -693,6 +693,129 @@ def collect_facts(
     return facts, receipt
 
 
+def _display_rows(result: dict) -> list[tuple[str, str, str, str, str]]:
+    """Table rows; per-file GGUF sets sharing a verdict merge for display."""
+    from .readme_gen import human_size
+
+    weight_sets = [s for s in result["sets"] if s["kind"] != "support"]
+    support_sets = [s for s in result["sets"] if s["kind"] == "support"]
+    ggufs = [s for s in weight_sets if s["kind"] == "gguf"]
+    others = [s for s in weight_sets if s["kind"] != "gguf"]
+    merged: list[dict] = []
+    groups: dict[tuple, dict] = {}
+    for weight_set in ggufs:
+        key = (weight_set["verdict"], weight_set["rule"], weight_set["action"])
+        group = groups.get(key)
+        if group is None:
+            group = groups[key] = {**weight_set, "paths": list(weight_set["paths"])}
+            merged.append(group)
+        else:
+            group["paths"].extend(weight_set["paths"])
+            group["file_count"] += weight_set["file_count"]
+            group["bytes"] += weight_set["bytes"]
+            group["unknown_size_count"] += weight_set["unknown_size_count"]
+    for group in merged:
+        if group["file_count"] > 1:
+            group["name"] = f"*.gguf ({group['file_count']} files)"
+    display = sorted(others + merged, key=lambda s: -s["bytes"]) + support_sets
+
+    rows = []
+    for weight_set in display:
+        name = weight_set["name"]
+        if len(name) > 44:
+            name = name[:43] + "…"
+        size = human_size(weight_set["bytes"])
+        if weight_set["unknown_size_count"]:
+            size += "+?"
+        why = f"{weight_set['reason']} [{weight_set['rule']}]"
+        if weight_set["action"] == "skip":
+            why = "SKIPPED — " + why
+        rows.append(
+            (weight_set["verdict"], name, str(weight_set["file_count"]), size, why)
+        )
+    return rows
+
+
+def print_classification(result: dict, progress=print) -> None:
+    """Human view: verdict table, legend, read receipt, archive footer."""
+    from .catalog import format_archive_command
+    from .readme_gen import human_size
+
+    p = progress
+    src = result.get("source") or {}
+    if src:
+        p(f"\n{src['address']} @ {src['revision_ref']} -> {src['revision'][:12]}")
+    weight_bytes = sum(s["bytes"] for s in result["sets"] if s["kind"] != "support")
+    weight_files = sum(
+        s["file_count"] for s in result["sets"] if s["kind"] != "support"
+    )
+    p(f"  weights {human_size(weight_bytes)} in {weight_files} files\n")
+
+    rows = _display_rows(result)
+    header = ("VERDICT", "SET", "FILES", "SIZE")
+    widths = [max(len(str(row[i])) for row in [header, *rows]) for i in range(4)]
+    p("  " + "  ".join(header[i].ljust(widths[i]) for i in range(4)) + "  WHY")
+    for row in rows:
+        p(
+            "  "
+            + "  ".join(str(row[i]).ljust(widths[i]) for i in range(4))
+            + "  "
+            + row[4]
+        )
+
+    p(
+        "\n  print = functionally regenerable from kept files under a "
+        "recorded toolchain — not bit-identical."
+    )
+    unknown_sets = [s for s in result["sets"] if s["verdict"] == "unknown"]
+    if unknown_sets:
+        unknown_bytes = sum(s["bytes"] for s in unknown_sets)
+        p(
+            f"  unknown = darsay will not guess; those files are fetched. "
+            f"{len(unknown_sets)} set{'s' if len(unknown_sets) != 1 else ''} "
+            f"({human_size(unknown_bytes)}) need your decision."
+        )
+    receipt = result.get("read") or {}
+    caps = receipt.get("caps") or {}
+    if receipt:
+        p(
+            f"  read: {receipt['requests']} range requests, "
+            f"{human_size(receipt['bytes_fetched'])} fetched "
+            f"(caps: {human_size(caps.get('gguf_fetch_cap_bytes', 0))}/GGUF "
+            f"header, {caps.get('header_file_cap')} header reads) — "
+            "nothing written."
+        )
+    for note in result.get("notes") or []:
+        p(f"  note: {note}")
+
+    keep, skip = result["keep"], result["skip"]
+    selection = result.get("selection")
+    if selection and skip["bytes"]:
+        total = keep["bytes"] + skip["bytes"]
+        p(
+            f"\nmasters-first: fetch {human_size(keep['bytes'])} of "
+            f"{human_size(total)} — skip {human_size(skip['bytes'])} of "
+            "prints. darsay archive applies this by default; --full "
+            "fetches everything."
+        )
+        if src.get("address"):
+            revision = (
+                src.get("revision_ref")
+                if src.get("revision_ref") not in (None, "main")
+                else None
+            )
+            p(
+                "To pin exactly this selection: "
+                + format_archive_command(src["address"], revision, selection["include"])
+            )
+    else:
+        p(
+            "\nNothing here is mechanically skippable — the masters policy "
+            "fetches the full repo."
+        )
+    p("")
+
+
 def classify_source(
     provider,
     ref,

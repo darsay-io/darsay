@@ -9,6 +9,7 @@ immutable payload, recorded facts, still loadable as-is.
 
     darsay estimate huggingface:Qwen/Qwen3-0.6B   preflight: size, params, disk — no download
     darsay estimate datasets/<owner>/<name>       Hugging Face shorthand; same for a dataset
+    darsay classify <owner>/<name>    master/print verdicts per weight set (bounded header reads)
     darsay archive huggingface:Qwen/Qwen3-0.6B    download + hash + manifest + reports
     darsay archive datasets/<owner>/<name>        archive a dataset (payload under data/)
     darsay verify  <bundle>           re-hash and compare against manifest
@@ -249,6 +250,90 @@ def cmd_estimate(args) -> int:
     else:
         print_estimate(est)
     return 1 if est["disk"]["verdict"] == "insufficient" else 0
+
+
+def _base_bundle_in_vault(vault, provider, base_locator: str) -> bool:
+    """A registered full-repo bundle of the base exists here.
+
+    The R2 skip gate: byte-identical prints are skipped only when the
+    identical bytes are verified in this vault. A subset bundle of the
+    base is not enough — it may not hold the matched files.
+    """
+    from .vault import bundle_records
+
+    try:
+        canonical = provider.parse(base_locator).canonical
+    except SystemExit:
+        return False
+    for row in bundle_records(vault):
+        if row.get("partial") or row.get("include"):
+            continue
+        if row.get("source_address") == canonical:
+            return True
+    return False
+
+
+def cmd_classify(args) -> int:
+    from .classify import classify_source, print_classification
+    from .providers.huggingface import parse_base_model_tags
+    from .sources import SourceError, get_provider, parse_source
+
+    vault = _vault_path(args)
+    ref = parse_source(args.source)
+    provider = get_provider(ref.provider)
+    progress = (lambda *a, **k: None) if args.json else print
+    progress(
+        f"Resolving {ref.canonical} @ {args.revision or provider.default_revision} "
+        "(metadata + bounded header reads, no download) ..."
+    )
+    try:
+        snapshot = provider.pin(ref, args.revision, require_access=False)
+    except SourceError as exc:
+        raise SystemExit(str(exc)) from None
+    if snapshot.source.canonical != ref.canonical:
+        ref = snapshot.source
+    if ref.artifact_type != "model":
+        raise SystemExit(
+            f"error: classify applies to models — {ref.canonical} is a "
+            f"{ref.artifact_type}"
+        )
+    files = [
+        {"path": f.path, "size": f.size, "sha256": f.sha256, "git_sha1": f.git_sha1}
+        for f in snapshot.files
+    ]
+    subset = None
+    if args.include:
+        from .subset import select_subset
+
+        files, subset = select_subset(files, args.include)
+    tags = list((snapshot.metadata or {}).get("tags") or [])
+    base_ids, _ = parse_base_model_tags(tags)
+    base_locator = base_ids[0] if base_ids else None
+    base_in_vault = (
+        _base_bundle_in_vault(vault, provider, base_locator) if base_locator else False
+    )
+    result = classify_source(
+        provider,
+        ref,
+        snapshot.revision,
+        files,
+        base_locator=base_locator,
+        base_in_vault=base_in_vault,
+    )
+    result["source"] = {
+        "provider": ref.provider,
+        "address": ref.canonical,
+        "revision": snapshot.revision,
+        "revision_ref": snapshot.revision_ref,
+        "base_model": base_locator,
+        "base_in_vault": base_in_vault,
+    }
+    result["subset"] = subset
+    if args.json:
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        print_classification(result)
+    return 0
 
 
 def _estimate_catalog(args, vault, cat_path) -> int:
@@ -1487,6 +1572,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_dry_run(p, "with a catalog, print the refreshed sizes; save nothing")
     p.set_defaults(func=cmd_estimate)
+
+    p = add_cmd(
+        "classify",
+        help="master/print verdicts for a model's weight files (bounded header reads)",
+    )
+    p.add_argument(
+        "source", help="e.g. huggingface:Qwen/Qwen3-0.6B or a huggingface.co URL"
+    )
+    p.add_argument("--revision", help="branch, tag, or commit (default: main)")
+    p.add_argument(
+        "--include",
+        action="append",
+        metavar="GLOB",
+        help="classify only payload files matching GLOB (repeatable)",
+    )
+    p.add_argument("--json", action="store_true", help="machine-readable output")
+    p.set_defaults(func=cmd_classify)
 
     p = add_cmd("archive", help="download and archive a model or dataset as a bundle")
     p.add_argument(
