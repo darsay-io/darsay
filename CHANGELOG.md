@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.9] - 2026-09-01
+
+
 ### Added
 
 - `darsay mv BUNDLE VAULT` — move a registered bundle into another vault.
