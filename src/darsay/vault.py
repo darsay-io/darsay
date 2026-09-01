@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import sys
+from contextlib import suppress
 from pathlib import Path
 
 DEFAULT_VAULT_NAME = "darsay"
@@ -182,6 +183,20 @@ def bundle_records(vault: Path) -> list[dict]:
                 }
             )
     return rows
+
+
+def prune_empty_parent(bundle_dir: Path) -> None:
+    """Drop the ``<vault>/<name>/`` shell a removed bundle left behind.
+
+    Bundles sit two levels deep, so removing the last revision of a name
+    leaves an empty directory that shows up in every ``find`` and confuses
+    "is it gone?". Best effort: a name that still holds another revision (or
+    a parent that will not go) is left exactly as it is.
+    """
+    parent = bundle_dir.parent
+    with suppress(OSError):
+        if parent.is_dir() and not any(parent.iterdir()):
+            parent.rmdir()
 
 
 def iter_bundle_dirs(vault: Path) -> list[Path]:

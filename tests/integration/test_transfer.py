@@ -523,6 +523,7 @@ def test_assemble_move_skeletonizes_source_and_never_refetches(
     # dissolves — exactly what a plain mv would have left.
     assemble_partials([skeleton], big, progress=silent, handoff=True)
     assert not skeleton.exists()
+    assert not skeleton.parent.exists(), "empty <vault>/<name>/ left behind"
 
     # The big vault now has every file verified; archive registers with no
     # payload network bytes.

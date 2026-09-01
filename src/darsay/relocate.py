@@ -344,19 +344,11 @@ def _stamp_replica(bundle_dir: Path, *, home: Path, other: Path, now: str) -> No
     write_bundle_readme(bundle_dir, manifest)
 
 
-def _remove_source_parent(bundle_dir: Path) -> None:
-    """Drop the now-empty ``<vault>/<name>/`` directory a bundle left behind."""
-    parent = bundle_dir.parent
-    try:
-        if parent.is_dir() and not any(parent.iterdir()):
-            parent.rmdir()
-    except OSError:
-        pass
-
-
 def _remove_source(bundle_dir: Path) -> None:
+    from .vault import prune_empty_parent
+
     shutil.rmtree(bundle_dir)
-    _remove_source_parent(bundle_dir)
+    prune_empty_parent(bundle_dir)
 
 
 def move_bundle(
@@ -378,6 +370,7 @@ def move_bundle(
     touches nothing.
     """
     from .transfer import transfer_lock
+    from .vault import prune_empty_parent
     from .verify import refresh_verification_md
 
     bundle_dir = Path(bundle_dir)
@@ -399,7 +392,7 @@ def move_bundle(
                 (dest / name).unlink(missing_ok=True)
             _stamp_new_home(dest, dest, bundle_dir, method="rename")
             refresh_verification_md(dest)
-            _remove_source_parent(bundle_dir)
+            prune_empty_parent(bundle_dir)
             progress(f"Moved {plan['bundle_id']} → {dest}  (renamed; bytes untouched)")
             return dest
         report, _cloned = _copy_and_verify(

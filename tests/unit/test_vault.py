@@ -9,6 +9,7 @@ from darsay.vault import (
     bundle_id_for,
     default_vault,
     iter_bundle_dirs,
+    prune_empty_parent,
     resolve_bundle,
     using_implicit_vault,
 )
@@ -216,3 +217,24 @@ def test_resolve_miss_hints_catalog(tmp_path):
         resolve_bundle(tmp_path, "summer")
     assert "darsay archive --next summer" in str(exc.value)
     assert "catalog regen" not in str(exc.value)
+
+
+def test_prune_empty_parent_drops_only_an_empty_name(tmp_path):
+    """A removed bundle takes its now-empty ``<vault>/<name>/`` shell with it."""
+    gone = tmp_path / "acme--big" / "abc123"
+    gone.mkdir(parents=True)
+    gone.rmdir()  # what a removal leaves behind
+    prune_empty_parent(gone)
+    assert not gone.parent.exists()
+
+    # A name that still holds another revision keeps its directory.
+    kept = tmp_path / "acme--small" / "abc123"
+    kept.mkdir(parents=True)
+    sibling = kept.parent / "def456"
+    sibling.mkdir()
+    kept.rmdir()
+    prune_empty_parent(kept)
+    assert sibling.is_dir()
+
+    # A parent that is already gone is not an error.
+    prune_empty_parent(tmp_path / "never--was" / "abc123")

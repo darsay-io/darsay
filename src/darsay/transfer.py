@@ -2343,6 +2343,7 @@ def _release_sources(
     is kept as a skeleton and what it still holds or owes is reported.
     """
     from .readme_gen import human_size
+    from .vault import prune_empty_parent
 
     progress("Releasing source payload files dest already holds as verified...")
     dest_real = destination.resolve()
@@ -2377,6 +2378,7 @@ def _release_sources(
                 # the source (a copy the destination failed to verify), and
                 # those bytes must never be deleted.
                 shutil.rmtree(source_dir, ignore_errors=True)
+                prune_empty_parent(source_dir)
                 progress(
                     f"Handed off {handed_off_files} files ({human_size(handed_off_bytes)}) from "
                     f"{source_dir}; nothing left to fetch there — skeleton removed."

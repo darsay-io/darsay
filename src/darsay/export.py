@@ -25,11 +25,11 @@ import io
 import json
 import shutil
 import tarfile
-from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 
 from .hashing import bundle_hash, hash_file, iter_payload_files
+from .vault import prune_empty_parent
 
 # Bump major on incompatible layout changes; import requires a matching major.
 # Minor 1.2 adds a frozen copy of standalone_verify.py as darsay-verify.py.
@@ -322,8 +322,8 @@ def import_bundle(
         root.rename(dest)
     finally:
         shutil.rmtree(staging, ignore_errors=True)
-        with suppress(OSError):
-            staging.parent.rmdir()  # drop vault/<name>/ if a failed import left it empty
+        # Drop vault/<name>/ if a failed import left it empty.
+        prune_empty_parent(staging)
 
     # Full verify stamps VERIFICATION.md / verification.json at the new location.
     verify_bundle(dest, progress=progress)

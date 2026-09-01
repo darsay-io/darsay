@@ -278,7 +278,10 @@ def archive(
         except SourceError as exc:
             # Gated, missing, or unreachable: nothing durable has started.
             if isinstance(exc, SourceGatedError) and orphan_dir is not None:
+                from .vault import prune_empty_parent
+
                 shutil.rmtree(orphan_dir, ignore_errors=True)
+                prune_empty_parent(orphan_dir)
             raise SystemExit(str(exc)) from None
         if snapshot.source.canonical != ref.canonical:
             progress(

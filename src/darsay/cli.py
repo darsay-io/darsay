@@ -1264,7 +1264,7 @@ def cmd_rm(args) -> int:
     import shutil
 
     from .readme_gen import human_size
-    from .vault import dir_size
+    from .vault import dir_size, prune_empty_parent
 
     bundles = []
     for spec in args.bundles:
@@ -1311,12 +1311,7 @@ def cmd_rm(args) -> int:
             return 1
     for bundle in unique:
         shutil.rmtree(bundle)
-        parent = bundle.parent
-        try:
-            if parent.is_dir() and not any(parent.iterdir()):
-                parent.rmdir()
-        except OSError:
-            pass
+        prune_empty_parent(bundle)
         print(f"Removed {bundle}")
     return 0
 
