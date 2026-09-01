@@ -46,7 +46,9 @@ only what is still missing, and rewrites metadata. It does not re-download
 the majority, and it does not pull dest back over SMB to re-hash a copy.
 `darsay mv` relocates a registered bundle with that contract folded in —
 a rename on one filesystem, otherwise copy, verify at the destination,
-then remove the source — and is never required; rsync stays first-class.
+then remove the source — and `darsay cp` makes a verified second copy that
+both manifests record as a replica. Neither is required; rsync stays
+first-class.
 [Incremental transfer](INCREMENTAL.md#1-why-this-can-beat-rsync-at-fetching--and-why-rsync-still-copies-disks),
 [FAQ](FAQ.md#moving-bundles).
 

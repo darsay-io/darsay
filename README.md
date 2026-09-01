@@ -253,6 +253,7 @@ archiving**; the bundle hash covers it alone.
 | Leave bandwidth for everyone else | `darsay archive Qwen/Qwen3.8-27B --max-rate 5M` (or `max_rate = "5M"` in `config.toml`) |
 | Survive a dropped network | nothing to type — the panel reads `offline`, keeps what arrived, resumes when it is back (`--max-offline 4h` waits longer) |
 | Put it on another disk | `darsay mv qwen--qwen3-0.6b /Volumes/big` — verifies the copy, then removes the source. rsync into `<name>/<rev>/` is just as valid, always |
+| Keep a verified backup copy | `darsay cp qwen--qwen3-0.6b /Volumes/backup` — verified there; both manifests record the replica |
 | Delete a bundle | `darsay rm qwen--qwen3-0.6b --yes` |
 | Re-hash and compare | `darsay verify qwen--qwen3-0.6b` |
 | Diagnose the whole vault | `darsay doctor` (offline; `--fix` is journaled and undoable) |
@@ -291,6 +292,7 @@ darsay archive  Qwen/Qwen3.8-27B --shard 1/3 --max-gb 20
 darsay --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle>
 darsay --vault /Volumes/big assemble ~/darsay/<bundle> --handoff   # partial: hand verified files over, keep a skeleton
 darsay mv       <bundle> /Volumes/big                 # registered: rename or copy+verify, then remove the source
+darsay cp       <bundle> /Volumes/backup              # registered: verified copy; source kept, replica recorded
 darsay list --json
 darsay du
 darsay rm       <bundle> --yes
@@ -304,7 +306,7 @@ darsay dehydrate <bundle>
 darsay rm       <bundle> -n                           # -n / --dry-run: same checks, nothing written
 ```
 
-Every command that writes — `archive`, `assemble`, `import`, `export`, `mv`, `rm`,
+Every command that writes — `archive`, `assemble`, `import`, `export`, `mv`, `cp`, `rm`,
 `regen`, `hydrate`, `run`, `dehydrate`, `envs --prune`, the `catalog` verbs,
 `estimate CATALOG` — takes `-n` / `--dry-run`: the same checks, the same
 report in the conditional, nothing written, and the real command to paste.

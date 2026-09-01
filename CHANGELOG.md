@@ -22,8 +22,16 @@ Tool version (`darsay.__version__`) is independent of
   behind; everything else travels. `-n` previews. rsync into
   `<vault>/<name>/<rev>/` remains a first-class copy — `mv` is that
   contract as one verb, never a requirement.
+- `darsay cp BUNDLE VAULT` — a verified second copy of a registered bundle
+  in another vault: copy (copy-on-write clones where the filesystem offers
+  them), re-hash at the destination, rename into place, keep the source.
+  Both manifests record the replica (`archive.replicas`, `backup_status:
+  replicated`); a `--force` refresh updates the entry rather than adding
+  one. Same refusals and preview as `mv`.
 - Manifest schema 1.8.0 (additive): `archive.moves`, a list of
-  `{at, from_location, method}` written by `mv`.
+  `{at, from_location, method}` written by `mv`; `archive.replicas`
+  entries `{at, location, host}` and `backup_status: replicated`, written
+  on both sides by `cp`.
 - `docs/FAQ.md` — moving bundles, rsync's standing, `mv` versus
   `assemble --handoff`, what travels and what stays.
 

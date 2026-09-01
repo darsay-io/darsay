@@ -56,11 +56,13 @@ download, and not as an SMB dest-hash. Hash dest where it is a local disk
 `darsay mv` is this contract as one verb for a *registered* bundle: a
 rename on the same filesystem; otherwise copy into a staging directory,
 re-hash the copy where it landed, stamp the manifest's new location, and
-only then remove the source. It is sugar over what rsync already
-satisfies and will never become a requirement — nothing it records is
-needed to open, verify, run, or export the bundle. The verbs do not
-overlap: `mv` refuses a partial, `assemble --handoff` refuses a
-registered bundle, and each names the other. [FAQ](FAQ.md#moving-bundles).
+only then remove the source; `darsay cp` is the same copy-and-verify with
+the source kept and the replica recorded in both manifests. They are
+sugar over what rsync already satisfies and will never become a
+requirement — nothing they record is needed to open, verify, run, or
+export the bundle. The verbs do not overlap: `mv` and `cp` refuse a
+partial, `assemble --handoff` refuses a registered bundle, and each names
+the other. [FAQ](FAQ.md#moving-bundles).
 
 Where darsay beats rsync is the *upstream* transfer. rsync's source is
 *mutable*, so it must interrogate both sides (size/mtime quick-check, then

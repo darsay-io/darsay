@@ -31,6 +31,7 @@ immutable payload, recorded facts, still loadable as-is.
     darsay export  <bundle> [-o DIR]  pack into a single deterministic .mvb.tar
     darsay import  <file.mvb.tar>     unpack + verify into the vault
     darsay mv      <bundle> VAULT     move a registered bundle to another vault (verify, then remove)
+    darsay cp      <bundle> VAULT     copy a registered bundle into another vault (verify there, keep the source)
     darsay assemble <partial> […]     combine matching partials offline
     darsay hydrate <bundle>           build a runnable env for the bundle
     darsay run     <bundle> [PROMPT]  hydrate if needed, then generate (offline)
@@ -1530,6 +1531,21 @@ def cmd_mv(args) -> int:
     return 0
 
 
+def cmd_cp(args) -> int:
+    from .relocate import copy_bundle
+
+    bundle = _bundle_dir(args, require_manifest=False)
+    copy_bundle(
+        bundle,
+        Path(args.dest_vault).expanduser(),
+        force=args.force,
+        dry_run=args.dry_run,
+    )
+    if args.dry_run:
+        _dry_run_done(args, "nothing copied", "copy")
+    return 0
+
+
 def cmd_assemble(args) -> int:
     from .transfer import assemble_partials
 
@@ -2348,6 +2364,27 @@ def build_parser() -> argparse.ArgumentParser:
         "print where the bundle would land and how (rename, or copy + verify); move nothing",
     )
     p.set_defaults(func=cmd_mv)
+
+    p = add_cmd(
+        "cp",
+        help=(
+            "copy a registered bundle into another vault: copy, verify the "
+            "copy there, keep the source; both manifests record the replica"
+        ),
+    )
+    p.add_argument("bundle", help=bundle_help)
+    p.add_argument(
+        "dest_vault",
+        metavar="VAULT",
+        help="destination vault root; must already exist (an unmounted disk is not a vault)",
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="replace an existing bundle at the destination (refresh a backup)",
+    )
+    _add_dry_run(p, "print where the copy would land and what it costs; copy nothing")
+    p.set_defaults(func=cmd_cp)
 
     p = add_cmd(
         "assemble", help="combine matching partial bundles offline into this vault"

@@ -27,6 +27,7 @@ This page is the cookbook you return to.
 | Split a download with a friend | [Cooperative shards](#split-a-download-across-machines) |
 | Fetch a model in halves across two disks | [Archive in halves](#archive-in-halves-across-two-disks) |
 | Move a finished bundle to another disk | [Move a bundle](#move-a-bundle-to-another-vault) |
+| Keep a verified backup copy | [Copy a bundle](#copy-a-bundle-to-a-backup-disk) |
 | Move a half-finished archive to another disk | [Relocate a partial](#relocate-a-partial-bundle) |
 | rsync bytes, then let darsay verify | [rsync then darsay](#rsync-then-darsay) |
 | Write curator notes | [Curation](#write-curator-notes) |
@@ -448,7 +449,7 @@ Moving qwen--qwen3-0.6b@c1899de289a0
   how:      copy 11 files (1.5 GiB), re-hash the 7 payload files at the destination, then remove the source
   disk:     needs 1.5 GiB, free 400.2 GiB (2.0 GiB floor) at /Volumes/big — OK
   leaves:   hydration.json — vault-local; `darsay hydrate` again at the destination
-Copying 11 files (1.5 GiB) ...
+Transferring 11 files (1.5 GiB) ...
 Verifying the copy at the destination ...
 Re-hashing 7 files in /Volumes/big/qwen--qwen3-0.6b/.mv-c1899de289a0/c1899de289a0/model ...
 Verification: PASS (7 files; 0 modified, 0 missing, 0 extra)
@@ -468,6 +469,38 @@ which over the wire is a second trip of the whole payload, and it says so
 before it starts. `mv` refuses a partial — that is
 [`assemble --handoff`](#archive-in-halves-across-two-disks) or the recipe
 below. Which verb when: [FAQ](../docs/FAQ.md#moving-bundles).
+
+---
+
+## Copy a bundle to a backup disk
+
+`cp` is `mv` without the removal. The copy is verified where it landed,
+the source is kept, and both manifests record the other as a replica.
+
+```bash
+darsay cp qwen--qwen3-0.6b /Volumes/backup
+```
+
+```
+Copying qwen--qwen3-0.6b@c1899de289a0
+  from:     ~/darsay/qwen--qwen3-0.6b/c1899de289a0
+  to:       /Volumes/backup/qwen--qwen3-0.6b/c1899de289a0  (new)
+  how:      copy 11 files (1.5 GiB), re-hash the 7 payload files at the destination, and keep the source; both manifests record the replica
+  disk:     needs 1.5 GiB, free 1.8 TiB (2.0 GiB floor) at /Volumes/backup — OK
+Transferring 11 files (1.5 GiB) ...
+Verifying the copy at the destination ...
+Re-hashing 7 files in /Volumes/backup/qwen--qwen3-0.6b/.cp-c1899de289a0/c1899de289a0/model ...
+Verification: PASS (7 files; 0 modified, 0 missing, 0 extra)
+Copied qwen--qwen3-0.6b@c1899de289a0 → /Volumes/backup/qwen--qwen3-0.6b/c1899de289a0  (7 payload files verified at the destination; source kept, replica recorded in both manifests)
+```
+
+Afterwards `darsay info` on either side shows `Replicas: 1`, and the
+manifest's `archive.replicas` names the other location. Refresh the backup
+later with `--force`: the entry is keyed by location, so the timestamp
+updates instead of the disk being listed twice. On the same APFS volume
+the files arrive as copy-on-write clones and cost no space until they
+diverge. rsync into the same layout, then `darsay verify` there, is the
+same copy without the bookkeeping — and always will be.
 
 ---
 
@@ -570,6 +603,7 @@ darsay rm qwen--qwen3-0.6b -n
 darsay import /Volumes/USB/backups/qwen--qwen3-0.6b@<rev>.mvb.tar -n
 darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --handoff -n
 darsay mv qwen--qwen3-0.6b /Volumes/big -n         # rename, or copy + verify? and where it lands
+darsay cp qwen--qwen3-0.6b /Volumes/backup -n      # what the copy costs and where it lands
 darsay run qwen--qwen3-0.6b -n                  # will it install torch first?
 darsay envs --prune -n
 ```

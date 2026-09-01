@@ -55,7 +55,7 @@ or export the bundle. What `mv` does that rsync does not is bookkeeping —
 whose path is true — never a change to the payload. The design and the
 reasons are in [Incremental transfer §1](INCREMENTAL.md#1-why-this-can-beat-rsync-at-fetching--and-why-rsync-still-copies-disks);
 the tests that hold it are `tests/integration/test_transfer.py`
-(rsync then darsay) and `tests/integration/test_mv.py`.
+(rsync then darsay) and `tests/integration/test_relocate.py`.
 
 ### What is the difference between `darsay mv` and `assemble --handoff`?
 
@@ -71,6 +71,9 @@ the other's object and names the right verb.
 | Left at the source | nothing; the empty `<name>/` folder is swept | a **skeleton** — pin, expected inventory, every hash, `handed_off` records, no payload bytes — until the last file is handed over, then nothing |
 | Refuses | partials; a destination vault that does not exist; a destination already holding the bundle (unless `--force`) | registered sources — a registered payload is frozen |
 | For | a finished bundle changing disks | one pin crossing two disks that never mount together |
+
+`darsay cp` is `mv` without the removal — same copy, same verification at
+the destination, source kept, and both manifests record the replica.
 
 Full mechanics of the hand-off: [Incremental transfer §5](INCREMENTAL.md#across-disks-assemble---handoff-and-skeletons).
 
@@ -129,9 +132,9 @@ Because `/Volumes/big` with the disk unmounted is a folder on the boot
 disk. Copying 60 GB into it would succeed and be wrong. Mount the disk,
 or make the folder on purpose, and rerun.
 
-### What travels with `mv`, and what stays behind?
+### What travels with `mv` / `cp`, and what stays behind?
 
-Travels: the payload (`model/` or `data/`) untouched; `manifest.json` with
+The same set for both. Travels: the payload (`model/` or `data/`) untouched; `manifest.json` with
 `archive.location`, `archive.host`, and `archive.moves` updated;
 `curation.md` verbatim; `README.md` and `VERIFICATION.md` regenerated so
 the path they print is true; `verification.json`; `exports.json`;
@@ -150,8 +153,20 @@ the same is true after a `verify`. Export determinism is per bundle
 
 ### How do I keep a second copy on another disk?
 
-rsync into the same `<name>/<rev>/` layout on the other disk and
-`darsay verify` there. There is no `darsay cp`; rsync is the copy.
+```bash
+darsay cp qwen--qwen3-0.6b /Volumes/backup
+```
+
+`cp` is `mv` without the removal: copy into a staging directory
+(copy-on-write clones where the filesystem offers them), re-hash the
+copy at the destination, rename it into place, keep the source. Then
+*both* manifests record the other as a replica — `archive.replicas`
+gains `{at, location, host}` and `backup_status` becomes `replicated` —
+so either side can answer "where else does this live?". Refresh a
+backup with `--force`; the replica entry is keyed by location, so the
+timestamp updates rather than the disk being listed twice. Or rsync
+into the same `<name>/<rev>/` layout and `darsay verify` there — the
+bytes are equally good; only the bookkeeping differs.
 
 ## Partials
 
@@ -169,6 +184,7 @@ first disk *and* keep fetching on it, that is a hand-off:
 | Word | Means | Verb |
 |---|---|---|
 | **move** | a registered bundle changes vault; the source is gone | `darsay mv` — or rsync, `verify`, `rm` |
+| **copy** | a verified second copy of a registered bundle in another vault; both manifests list each other under `archive.replicas` | `darsay cp` — or rsync, then `verify` |
 | **hand-off** | a partial's verified files cross vaults one by one; the source keeps a skeleton | `darsay assemble … --handoff` |
 | **skeleton** | a partial whose verified bytes were handed off: pin + hashes, no payload | made by a hand-off, dissolved by the last one |
 | **relocate a partial** | copy a partial's directory to another vault and continue there | `cp -a` / rsync, then the same `archive` |

@@ -52,11 +52,11 @@ These match the list in `CLAUDE.md` / `CONTRIBUTING.md`:
   partial resumes in another vault, a copied lock is reclaimed. An rsync
   of payload bytes into dest, then `archive` / `assemble --handoff`, must not
   re-download those bytes and must not re-hash dest files the ledger
-  already marks verified (unless `--rehash`). `darsay mv` does no less
-  than rsync + verify + rm: the copy is re-hashed at the destination before
-  the source is removed, a failed verification leaves the source untouched
-  and registers nothing, and a partial is refused
-  (`tests/integration/test_mv.py`).
+  already marks verified (unless `--rehash`). `darsay mv` / `darsay cp` do
+  no less than rsync + verify (+ rm): the copy is re-hashed at the
+  destination before the source is removed or the replica is recorded, a
+  failed verification leaves the source untouched and registers nothing,
+  and a partial is refused (`tests/integration/test_relocate.py`).
 - The same bundle state exports to a byte-identical `.mvb.tar` (marker first,
   volatile files excluded, `darsay-verify.py` always the canonical copy).
 - Manifests record what was established; unknown is `null`; query caps are

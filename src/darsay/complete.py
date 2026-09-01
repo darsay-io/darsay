@@ -23,6 +23,7 @@ COMMANDS = (
     "export",
     "import",
     "mv",
+    "cp",
     "assemble",
     "rm",
     "du",
@@ -53,6 +54,7 @@ BUNDLE_COMMANDS = (
     "dehydrate",
     "export",
     "mv",
+    "cp",
     "rm",
 )
 
@@ -94,7 +96,7 @@ _darsay() {{
     return
   fi
   case $words[2] in
-    mv)
+    mv|cp)
       if (( CURRENT == 3 )); then
         _darsay_ids
       else
@@ -161,7 +163,7 @@ _darsay() {{
     return 0
   fi
   case "${{COMP_WORDS[1]}}" in
-    mv)
+    mv|cp)
       if [[ ${{COMP_CWORD}} -eq 2 ]]; then
         local ids
         ids="$(darsay list --ids 2>/dev/null)"
@@ -226,6 +228,6 @@ complete -c darsay -n "__fish_seen_subcommand_from catalog" -a "{" ".join(CATALO
 complete -c darsay -n "__fish_seen_subcommand_from doctor" -a "{" ".join(DOCTOR_COMMANDS)}"
 complete -c darsay -n "__fish_seen_subcommand_from archive" -l next -r -a "(darsay catalog --ids 2>/dev/null)"
 complete -c darsay -n "__fish_seen_subcommand_from import" -F -a "*.mvb.tar"
-complete -c darsay -n "__fish_seen_subcommand_from mv" -F
+complete -c darsay -n "__fish_seen_subcommand_from mv cp" -F
 complete -c darsay -n "__fish_seen_subcommand_from complete" -a "bash zsh fish"
 """

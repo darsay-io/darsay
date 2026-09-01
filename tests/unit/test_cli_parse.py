@@ -165,6 +165,7 @@ def test_flags_by_command_walks_every_subparser():
     assert "--handoff" in flags["assemble"]
     assert "--rehash" in flags["assemble"]
     assert "--force" in flags["mv"]
+    assert "--force" in flags["cp"]
 
 
 def test_tty_confirm_defaults_to_yes_and_restores_sigint(monkeypatch):
@@ -249,6 +250,7 @@ def test_dry_run_is_offered_by_every_writing_command():
         "export",
         "import",
         "mv",
+        "cp",
         "assemble",
         "catalog new",
         "catalog add",

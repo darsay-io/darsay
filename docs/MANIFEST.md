@@ -225,8 +225,9 @@ Both:
 |---|---|
 | `date_archived` | Creation time of the bundle. Also the fixed mtime used in exports. |
 | `archived_by` | **curator** (or automation identity). |
-| `location`, `host` | Absolute path and machine. Rewritten on import and by `darsay mv`. |
-| `storage_tier`, `backup_status`, `replicas` | Where copies live (`local-disk` / `none` / `[]` until a backup workflow records otherwise). |
+| `location`, `host` | Absolute path and machine. Rewritten on import, by `darsay mv`, and on both sides of `darsay cp`. |
+| `storage_tier` | `local-disk` until a curator or workflow records otherwise. |
+| `backup_status`, `replicas` | `none` / `[]` until `darsay cp` records a verified copy; then `backup_status` is `replicated` and `replicas` lists the *other* known locations of this bundle as `{at, location, host}`, written on both sides of the copy and keyed by location (a `--force` refresh updates the timestamp rather than adding a row). An rsync leaves no entry — it is a first-class copy darsay never sees happen. Entry shape and `replicated` since 1.8.0. |
 | `last_integrity_check`, `last_accessed` | Maintained by `verify`, `smoke`, `hydrate` / `run`, import. `info` is read-only and does not rewrite the manifest. |
 | `imported` | Present on imported bundles: `at`, `from_file`, `file_sha256`, `mvb_format_version`. |
 | `moves` | Present once `darsay mv` has relocated the bundle: a list, oldest first, of `{at, from_location, method}` where `method` is `rename` (same filesystem; bytes untouched) or `copy` (re-hashed at the destination before the source was removed). An rsync leaves no entry — it is a first-class copy that darsay never sees happen. Since 1.8.0. |

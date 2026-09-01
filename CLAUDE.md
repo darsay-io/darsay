@@ -33,9 +33,11 @@ point `darsay` (argparse, subcommands in `cli.py`).
   + env + flag layers; the transfer free-space floor, rate cap, and
   offline patience live here; config is operator preference, never bundle
   content),
-  `relocate.py` (`darsay mv`: relocate a registered bundle into another
-  vault — rename on one filesystem, else copy → verify at the destination →
-  remove the source; partials are refused, `assemble --handoff` is their verb),
+  `relocate.py` (`darsay mv` / `darsay cp`: relocate or replicate a registered
+  bundle into another vault — `mv` renames on one filesystem, else copy →
+  verify at the destination → remove the source; `cp` copies → verifies →
+  keeps the source and records the replica in both manifests; partials are
+  refused, `assemble --handoff` is their verb),
   `verify.py`, `standalone_verify.py` (stdlib-only; frozen into `.mvb.tar`
   as `darsay-verify.py` — changing it is an MVB minor bump), `smoke.py`,
   `export.py` (.mvb.tar), `readme_gen.py`,
@@ -74,7 +76,7 @@ point `darsay` (argparse, subcommands in `cli.py`).
   `docs/SOURCES.md` — acquisition providers; the public source-ref grammar;
   Hugging Face as a plugin.
   `docs/TESTING.md` — test pyramid (unit / integration / e2e) and CI.
-  `docs/FAQ.md` — moving bundles between disks, rsync's standing, `mv` vs
+  `docs/FAQ.md` — moving and copying bundles between disks, rsync's standing, `mv` vs
   `assemble --handoff`, what travels with a bundle and what stays.
   **Update these whenever manifest fields or the export format change**, and
   bump `SCHEMA_VERSION` (`__init__.py`) / `MVB_FORMAT_VERSION` (`export.py`)
@@ -100,10 +102,11 @@ point `darsay` (argparse, subcommands in `cli.py`).
   adjusts metadata. It must not re-download a file whose digest matches,
   and it must not pull dest back over a network mount to re-hash a copy.
   Hash dest where it is a local disk (`assemble --rehash` / `verify`).
-  **This stays true forever:** `darsay mv` is that same contract folded into
-  one verb (copy, verify where it landed, then remove the source; a rename
-  on one filesystem) and must never become a requirement — nothing `mv`
-  records is needed to open, verify, run, or export a bundle. Vocabulary:
+  **This stays true forever:** `darsay mv` and `darsay cp` are that same
+  contract folded into verbs (copy, verify where it landed, then remove or
+  keep the source; `mv` is a rename on one filesystem) and must never become
+  a requirement — nothing they record is needed to open, verify, run, or
+  export a bundle. Vocabulary:
   *move* = a registered bundle changes vault (`mv`); *hand-off* = a
   partial's verified files cross vaults one by one, leaving a skeleton
   (`assemble --handoff`, ledger state `handed_off`). Never call the second

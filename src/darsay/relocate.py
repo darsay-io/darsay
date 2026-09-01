@@ -1,17 +1,17 @@
-"""Relocate a registered bundle into another vault: ``darsay mv``.
+"""Relocate or replicate a registered bundle into another vault: ``mv`` / ``cp``.
 
 rsync (or ``cp -a``, a USB stick, a restic restore) into the two-level
 vault layout is, and will remain, a first-class copy of a bundle — see
-``docs/INCREMENTAL.md`` §1. ``mv`` is that same contract with the
-bookkeeping folded in: copy, re-hash the copy *where it landed*, rewrite
-the manifest's location, drop the vault-local hydration record, and only
-then remove the source. On the same filesystem it is a rename and nothing
-is re-hashed, because nothing was rewritten.
+``docs/INCREMENTAL.md`` §1. These two verbs are that same contract with
+the bookkeeping folded in: copy, re-hash the copy *where it landed*,
+rewrite the manifest, and only then touch anything else. ``mv`` removes
+the source afterwards (and is a rename on one filesystem, where nothing
+is rewritten and so nothing is re-hashed); ``cp`` keeps the source and
+records the new copy as a replica in both manifests.
 
-``mv`` relocates *registered* bundles only. A partial's verified bytes
-cross vaults with ``assemble --handoff`` (per file, leaving a skeleton);
-that verb never touches a registered payload and this one never touches a
-partial.
+Both act on *registered* bundles only. A partial's verified bytes cross
+vaults with ``assemble --handoff`` (per file, leaving a skeleton); that
+verb never touches a registered payload and these never touch a partial.
 """
 
 from __future__ import annotations
@@ -32,9 +32,21 @@ LEAVE_BEHIND = frozenset({"hydration.json", "transfer.lock"})
 # multi-gigabyte shard is not minutes of silence.
 _ANNOUNCE_BYTES = 256 * 1024**2
 
+_VERBS = {
+    "mv": {"would": "Would move", "doing": "Moving", "does": "relocates"},
+    "cp": {"would": "Would copy", "doing": "Copying", "does": "copies"},
+}
+
+
+def _copy_file(source: Path, destination: Path) -> str:
+    """One file, clonefile where the filesystem offers it; returns the method."""
+    from .transfer import _copy_local_file
+
+    return _copy_local_file(source, destination)
+
 
 def bundle_files(bundle_dir: Path) -> list[tuple[str, Path]]:
-    """Every regular file ``mv`` carries, as ``(relative posix path, path)``.
+    """Every regular file the verbs carry, as ``(relative posix path, path)``.
 
     Symlinks are refused rather than silently materialized or dropped: a
     bundle never contains one, and a hand-made one is a decision for the
@@ -45,7 +57,7 @@ def bundle_files(bundle_dir: Path) -> list[tuple[str, Path]]:
         rel = path.relative_to(bundle_dir).as_posix()
         if path.is_symlink():
             raise SystemExit(
-                f"error: {path} is a symlink — mv copies regular files only; "
+                f"error: {path} is a symlink — mv/cp copy regular files only; "
                 "relocate this bundle with rsync -a if the link is intended"
             )
         if not path.is_file() or path.name == ".DS_Store" or rel in LEAVE_BEHIND:
@@ -65,21 +77,24 @@ def _same_device(a: Path, b: Path) -> bool:
         return False
 
 
-def move_plan(bundle_dir: Path, dest_vault: Path, *, force: bool = False) -> dict:
+def relocation_plan(
+    bundle_dir: Path, dest_vault: Path, *, force: bool = False, op: str = "mv"
+) -> dict:
     """Resolve where a bundle would land and how, running every refusal.
 
     Raises ``SystemExit`` for the cases the real command would refuse, so a
-    dry run and the move itself say the same thing.
+    dry run and the command itself say the same thing.
     """
     from .archiver import load_manifest
     from .config import free_space_floor
     from .transfer import disk_verdict, is_network_filesystem
 
+    words = _VERBS[op]
     bundle_dir = Path(bundle_dir)
     if not (bundle_dir / "manifest.json").is_file():
         raise SystemExit(
-            f"error: {bundle_dir} is a partial, not a registered bundle — mv "
-            "relocates registered bundles.\n"
+            f"error: {bundle_dir} is a partial, not a registered bundle — {op} "
+            f"{words['does']} registered bundles.\n"
             "  Continue a partial in the other vault after an rsync "
             "(`darsay --vault OTHER archive SOURCE`), or hand its verified "
             f"bytes over with `darsay --vault OTHER assemble {bundle_dir} --handoff`."
@@ -94,7 +109,7 @@ def move_plan(bundle_dir: Path, dest_vault: Path, *, force: bool = False) -> dic
     if not dest_vault.is_dir():
         raise SystemExit(
             f"error: destination vault does not exist: {dest_vault}\n"
-            "  mv does not create vaults: an unmounted disk must not become a "
+            f"  {op} does not create vaults: an unmounted disk must not become a "
             "folder on this one. Create it, or mount it, and rerun."
         )
     dest = dest_vault / name / rev
@@ -112,20 +127,21 @@ def move_plan(bundle_dir: Path, dest_vault: Path, *, force: bool = False) -> dic
 
     files = bundle_files(bundle_dir)
     total = sum(path.stat().st_size for _rel, path in files)
-    same_device = _same_device(bundle_dir, dest)
+    method = "rename" if op == "mv" and _same_device(bundle_dir, dest) else "copy"
     floor = free_space_floor(dest_vault)
     probe = dest_real
     while not probe.exists():
         probe = probe.parent
     free = shutil.disk_usage(probe).free
-    needed = 0 if same_device else total
+    needed = 0 if method == "rename" else total
     return {
+        "op": op,
         "bundle_id": bundle_id,
         "source": bundle_dir,
         "dest": dest,
         "dest_exists": dest_exists,
         "force": force,
-        "method": "rename" if same_device else "copy",
+        "method": method,
         "files": len(files),
         "bytes": total,
         "payload_files": len(manifest["inventory"]["files"]),
@@ -143,11 +159,19 @@ def move_plan(bundle_dir: Path, dest_vault: Path, *, force: bool = False) -> dic
     }
 
 
-def print_move_plan(plan: dict, progress=print, *, dry_run: bool) -> None:
+def move_plan(bundle_dir: Path, dest_vault: Path, *, force: bool = False) -> dict:
+    return relocation_plan(bundle_dir, dest_vault, force=force, op="mv")
+
+
+def copy_plan(bundle_dir: Path, dest_vault: Path, *, force: bool = False) -> dict:
+    return relocation_plan(bundle_dir, dest_vault, force=force, op="cp")
+
+
+def print_relocation_plan(plan: dict, progress=print, *, dry_run: bool) -> None:
     from .readme_gen import human_size
 
-    verb = "Would move" if dry_run else "Moving"
-    progress(f"{verb} {plan['bundle_id']}")
+    words = _VERBS[plan["op"]]
+    progress(f"{words['would'] if dry_run else words['doing']} {plan['bundle_id']}")
     progress(f"  from:     {plan['source']}")
     dest_note = "  (exists — --force replaces it)" if plan["dest_exists"] else "  (new)"
     progress(f"  to:       {plan['dest']}{dest_note}")
@@ -157,10 +181,15 @@ def print_move_plan(plan: dict, progress=print, *, dry_run: bool) -> None:
             "not re-hashed"
         )
     else:
+        tail = (
+            "then remove the source"
+            if plan["op"] == "mv"
+            else "and keep the source; both manifests record the replica"
+        )
         progress(
             f"  how:      copy {plan['files']} files ({human_size(plan['bytes'])}), "
             f"re-hash the {plan['payload_files']} payload files at the "
-            "destination, then remove the source"
+            f"destination, {tail}"
         )
         disk = plan["disk"]
         floor = disk.get("min_free_bytes")
@@ -176,11 +205,23 @@ def print_move_plan(plan: dict, progress=print, *, dry_run: bool) -> None:
             "`darsay hydrate` again at the destination"
         )
     if plan["network"] and plan["method"] == "copy":
+        then_rm = ", then `darsay rm` the source" if plan["op"] == "mv" else ""
         progress(
             "  warning:  the destination is on a network mount, so verifying "
             "the copy reads every byte back over the wire. For a large bundle "
-            "prefer: rsync it, `darsay verify` on the host that owns the disk, "
-            "then `darsay rm` the source."
+            "prefer: rsync it, `darsay verify` on the host that owns the disk"
+            f"{then_rm}."
+        )
+
+
+print_move_plan = print_relocation_plan
+
+
+def _refuse_if_insufficient(plan: dict) -> None:
+    if plan["method"] == "copy" and plan["disk"]["verdict"] == "insufficient":
+        raise SystemExit(
+            "error: not enough free space at the destination for the copy "
+            "(the free-space floor is `darsay config`'s transfer.min_free)"
         )
 
 
@@ -199,54 +240,60 @@ def _try_rename(source: Path, dest: Path, *, force: bool) -> bool:
 
 
 def _copy_and_verify(
-    source: Path, dest: Path, plan: dict, *, force: bool, progress
-) -> dict:
+    source: Path, dest: Path, plan: dict, *, force: bool, progress, stamp
+) -> tuple[dict, int]:
     """Copy into a staging directory beside ``dest``, verify there, then rename.
 
     The staging directory is one level deeper than the vault's
     ``<name>/<rev>`` layout, so ``darsay list`` never sees a half-copied
     bundle; a failure removes it and leaves the source untouched.
+    ``stamp(staging)`` rewrites the copy's manifest once it has verified,
+    right before it is renamed into place. Returns the verification report
+    and how many files arrived as copy-on-write clones.
     """
     from .readme_gen import human_size
     from .verify import verify_bundle
 
     rev = dest.name
-    staging_root = dest.parent / f".mv-{rev}"
+    staging_root = dest.parent / f".{plan['op']}-{rev}"
     staging = staging_root / rev
     shutil.rmtree(staging_root, ignore_errors=True)
     staging.mkdir(parents=True)
+    cloned = 0
     try:
-        progress(f"Copying {plan['files']} files ({human_size(plan['bytes'])}) ...")
+        progress(
+            f"Transferring {plan['files']} files ({human_size(plan['bytes'])}) ..."
+        )
         for rel, path in bundle_files(source):
             size = path.stat().st_size
             if size >= _ANNOUNCE_BYTES:
                 progress(f"  {rel}  ({human_size(size)})")
-            target = staging / rel
-            target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(path, target)
+            if _copy_file(path, staging / rel) == "clonefile":
+                cloned += 1
         progress("Verifying the copy at the destination ...")
         report = verify_bundle(staging, progress=progress)
         checksum = report["checksum"]
         if checksum["status"] != "pass":
             raise SystemExit(
-                "error: verification FAILED at the destination — nothing moved, "
-                f"source untouched ({len(checksum['mismatched'])} modified, "
+                "error: verification FAILED at the destination — nothing "
+                f"{'moved' if plan['op'] == 'mv' else 'copied'}, source untouched "
+                f"({len(checksum['mismatched'])} modified, "
                 f"{len(checksum['missing'])} missing, {len(checksum['extra'])} extra)"
             )
-        _stamp_new_home(staging, dest, source, method="copy")
+        stamp(staging)
         if force and dest.exists():
             shutil.rmtree(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
         staging.rename(dest)
     finally:
         shutil.rmtree(staging_root, ignore_errors=True)
-    return report
+    return report, cloned
 
 
 def _stamp_new_home(
     bundle_dir: Path, home: Path, came_from: Path, *, method: str
 ) -> None:
-    """Record the move in the manifest and regenerate the views that name the path."""
+    """Record a move in the manifest and regenerate the views that name the path."""
     from .archiver import load_manifest, utc_now, write_manifest
     from .readme_gen import write_bundle_readme
 
@@ -265,6 +312,46 @@ def _stamp_new_home(
     archive["last_accessed"] = now
     write_manifest(bundle_dir, manifest)
     write_bundle_readme(bundle_dir, manifest)
+
+
+def _stamp_replica(bundle_dir: Path, *, home: Path, other: Path, now: str) -> None:
+    """Record that a verified copy of this bundle lives at ``other``.
+
+    Written on both sides of a ``cp``: the copy learns where it came from,
+    the source learns where its replica went. Entries are keyed by
+    location — refreshing a backup with ``--force`` updates the timestamp
+    rather than listing the same disk twice.
+    """
+    from .archiver import load_manifest, write_manifest
+    from .readme_gen import write_bundle_readme
+
+    manifest = load_manifest(bundle_dir)
+    archive = manifest["archive"]
+    home_loc = str(home.resolve())
+    other_loc = str(other.resolve())
+    replicas = [
+        entry
+        for entry in (archive.get("replicas") or [])
+        if entry.get("location") not in (home_loc, other_loc)
+    ]
+    replicas.append({"at": now, "location": other_loc, "host": socket.gethostname()})
+    archive["replicas"] = replicas
+    archive["backup_status"] = "replicated"
+    archive["location"] = home_loc
+    archive["host"] = socket.gethostname()
+    archive["last_accessed"] = now
+    write_manifest(bundle_dir, manifest)
+    write_bundle_readme(bundle_dir, manifest)
+
+
+def _remove_source_parent(bundle_dir: Path) -> None:
+    """Drop the now-empty ``<vault>/<name>/`` directory a bundle left behind."""
+    parent = bundle_dir.parent
+    try:
+        if parent.is_dir() and not any(parent.iterdir()):
+            parent.rmdir()
+    except OSError:
+        pass
 
 
 def _remove_source(bundle_dir: Path) -> None:
@@ -294,16 +381,12 @@ def move_bundle(
     from .verify import refresh_verification_md
 
     bundle_dir = Path(bundle_dir)
-    plan = move_plan(bundle_dir, dest_vault, force=force)
-    print_move_plan(plan, progress, dry_run=dry_run)
+    plan = relocation_plan(bundle_dir, dest_vault, force=force, op="mv")
+    print_relocation_plan(plan, progress, dry_run=dry_run)
     dest = plan["dest"]
     if dry_run:
         return dest
-    if plan["method"] == "copy" and plan["disk"]["verdict"] == "insufficient":
-        raise SystemExit(
-            "error: not enough free space at the destination for the copy "
-            "(the free-space floor is `darsay config`'s transfer.min_free)"
-        )
+    _refuse_if_insufficient(plan)
 
     with transfer_lock(bundle_dir, progress=progress):
         renamed = plan["method"] == "rename" and _try_rename(
@@ -319,8 +402,15 @@ def move_bundle(
             _remove_source_parent(bundle_dir)
             progress(f"Moved {plan['bundle_id']} → {dest}  (renamed; bytes untouched)")
             return dest
-        report = _copy_and_verify(
-            bundle_dir, dest, plan, force=force, progress=progress
+        report, _cloned = _copy_and_verify(
+            bundle_dir,
+            dest,
+            plan,
+            force=force,
+            progress=progress,
+            stamp=lambda staging: _stamp_new_home(
+                staging, dest, bundle_dir, method="copy"
+            ),
         )
         refresh_verification_md(dest)
         _remove_source(bundle_dir)
@@ -332,11 +422,58 @@ def move_bundle(
     return dest
 
 
-def _remove_source_parent(bundle_dir: Path) -> None:
-    """After a rename, drop the now-empty ``<vault>/<name>/`` directory."""
-    parent = bundle_dir.parent
-    try:
-        if parent.is_dir() and not any(parent.iterdir()):
-            parent.rmdir()
-    except OSError:
-        pass
+def copy_bundle(
+    bundle_dir: Path,
+    dest_vault: Path,
+    *,
+    force: bool = False,
+    progress=print,
+    dry_run: bool = False,
+) -> Path:
+    """Copy a registered bundle into ``dest_vault``; returns the copy's directory.
+
+    Copy into a staging directory (copy-on-write clones where the
+    filesystem offers them), re-hash every payload file there against the
+    manifest, rename into place, then record the replica in *both*
+    manifests (``archive.replicas``, ``backup_status: replicated``). The
+    source payload is never touched; a failed verification removes the
+    staging copy and records nothing anywhere. ``dry_run`` resolves and
+    reports and touches nothing.
+    """
+    from .archiver import utc_now
+    from .transfer import transfer_lock
+    from .verify import refresh_verification_md
+
+    bundle_dir = Path(bundle_dir)
+    plan = relocation_plan(bundle_dir, dest_vault, force=force, op="cp")
+    print_relocation_plan(plan, progress, dry_run=dry_run)
+    dest = plan["dest"]
+    if dry_run:
+        return dest
+    _refuse_if_insufficient(plan)
+
+    now = utc_now()
+    with transfer_lock(bundle_dir, progress=progress):
+        report, cloned = _copy_and_verify(
+            bundle_dir,
+            dest,
+            plan,
+            force=force,
+            progress=progress,
+            stamp=lambda staging: _stamp_replica(
+                staging, home=dest, other=bundle_dir, now=now
+            ),
+        )
+        refresh_verification_md(dest)
+        _stamp_replica(bundle_dir, home=bundle_dir, other=dest, now=now)
+    clone_note = (
+        " as copy-on-write clones — no extra space until they diverge"
+        if cloned and cloned == plan["files"]
+        else ""
+    )
+    progress(
+        f"Copied {plan['bundle_id']} → {dest}  "
+        f"({report['checksum']['files_checked']} payload files verified at the "
+        f"destination{clone_note}; source kept, replica recorded in both manifests)"
+    )
+    return dest
