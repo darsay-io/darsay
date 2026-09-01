@@ -30,10 +30,10 @@ from darsay.transfer import (
     _wait_for_link,
     add_disk_preflight,
     disk_verdict,
+    hand_off_files,
     load_ledger,
     new_ledger,
     reconcile,
-    release_moved,
     save_ledger,
     transfer_groups,
     transfer_plan,
@@ -319,7 +319,7 @@ def test_transfer_plan_complete_and_remaining(tmp_path):
 
 
 def test_transfer_plan_moved_bucket_is_fetched_not_complete(tmp_path):
-    """A moved file is done for the pin but not registerable here."""
+    """A handed-off file is done for the pin but not registerable here."""
     ledger = {
         "provider": "huggingface",
         "expected": [
@@ -328,12 +328,12 @@ def test_transfer_plan_moved_bucket_is_fetched_not_complete(tmp_path):
         ],
         "files": {
             "a": {"status": "verified"},
-            "b": {"status": "moved"},
+            "b": {"status": "handed_off"},
         },
     }
     plan = transfer_plan(tmp_path, ledger)
-    assert plan["files"]["moved"] == 1
-    assert plan["bytes"]["moved"] == 20
+    assert plan["files"]["handed_off"] == 1
+    assert plan["bytes"]["handed_off"] == 20
     # Moved bytes owe no network and do not make the bundle registerable.
     assert plan["bytes"]["remaining_network"] == 0
     assert plan["fetched"] is True
@@ -343,21 +343,21 @@ def test_transfer_plan_moved_bucket_is_fetched_not_complete(tmp_path):
 def test_print_plan_shows_a_moved_line_only_when_present(tmp_path):
     from darsay.transfer import print_plan
 
-    def plan_with(moved_files, moved_bytes):
+    def plan_with(handed_off_files, handed_off_bytes):
         return {
             "files": {
                 "verified": 1,
-                "moved": moved_files,
+                "handed_off": handed_off_files,
                 "partial": 0,
                 "missing": 0,
-                "total": 1 + moved_files,
+                "total": 1 + handed_off_files,
             },
             "bytes": {
                 "verified": 10,
-                "moved": moved_bytes,
+                "handed_off": handed_off_bytes,
                 "partial": 0,
                 "missing": 0,
-                "total": 10 + moved_bytes,
+                "total": 10 + handed_off_bytes,
                 "remaining_network": 0,
             },
             "disk": {
@@ -371,14 +371,14 @@ def test_print_plan_shows_a_moved_line_only_when_present(tmp_path):
 
     lines: list[str] = []
     print_plan(plan_with(1, 5 * 1024**2), progress=lines.append)
-    assert any("moved:" in line and "another vault" in line for line in lines)
+    assert any("handoff:" in line and "another vault" in line for line in lines)
     lines.clear()
     print_plan(plan_with(0, 0), progress=lines.append)
-    assert not any("moved:" in line for line in lines)
+    assert not any("handoff:" in line for line in lines)
 
 
 def test_reconcile_trusts_an_absent_moved_file(tmp_path):
-    """A moved record whose bytes are absent is kept, never demoted."""
+    """A handed-off record whose bytes are absent is kept, never demoted."""
     payload = tmp_path / "model"
     payload.mkdir()
     ledger = {
@@ -386,25 +386,25 @@ def test_reconcile_trusts_an_absent_moved_file(tmp_path):
         "expected": [{"path": "w.bin", "size": 4, "lfs_sha256": "deadbeef"}],
         "files": {
             "w.bin": {
-                "status": "moved",
+                "status": "handed_off",
                 "size": 4,
                 "sha256": "abc",
-                "moved_at": "2026-08-30T00:00:00+00:00",
+                "handed_off_at": "2026-08-30T00:00:00+00:00",
             }
         },
         "events": [],
     }
     session = {"files_completed": 0, "bytes_adopted": 0}
     plan = reconcile(tmp_path, payload, ledger, session, progress=silent)
-    assert ledger["files"]["w.bin"]["status"] == "moved"
-    assert plan["files"]["moved"] == 1
+    assert ledger["files"]["w.bin"]["status"] == "handed_off"
+    assert plan["files"]["handed_off"] == 1
     assert plan["fetched"] is True
     # No spurious demotion event.
     assert not any(e["event"] == "verified_file_missing" for e in ledger["events"])
 
 
 def test_reconcile_adopts_a_moved_file_that_reappears(tmp_path):
-    """If moved bytes come back, they are re-hashed and promoted to verified."""
+    """If handed-off bytes come back, they are re-hashed and promoted to verified."""
     import hashlib
 
     payload = tmp_path / "model"
@@ -422,9 +422,9 @@ def test_reconcile_adopts_a_moved_file_that_reappears(tmp_path):
         ],
         "files": {
             "w.bin": {
-                "status": "moved",
+                "status": "handed_off",
                 "size": len(data),
-                "moved_at": "2026-08-30T00:00:00+00:00",
+                "handed_off_at": "2026-08-30T00:00:00+00:00",
             }
         },
         "events": [],
@@ -432,23 +432,23 @@ def test_reconcile_adopts_a_moved_file_that_reappears(tmp_path):
     session = {"files_completed": 0, "bytes_adopted": 0}
     plan = reconcile(tmp_path, payload, ledger, session, progress=silent)
     assert ledger["files"]["w.bin"]["status"] == "verified"
-    assert "moved_at" not in ledger["files"]["w.bin"]
+    assert "handed_off_at" not in ledger["files"]["w.bin"]
     assert plan["complete"] is True
 
 
 def test_reconcile_keeps_the_moved_record_when_returned_bytes_are_wrong(tmp_path):
-    """Bad bytes at a moved path are removed, but the move is not unsaid:
+    """Bad bytes at a handed-off path are removed, but the hand-off is not unsaid:
     the verified copy lives in another vault, so nothing re-fetches it."""
     payload = tmp_path / "model"
     payload.mkdir()
     bad_digest = b"thirteen-byte"  # right size, wrong digest
     (payload / "w.bin").write_bytes(bad_digest)
     (payload / "v.bin").write_bytes(b"way-too-long")  # wrong size outright
-    moved = {
-        "status": "moved",
+    handed_off = {
+        "status": "handed_off",
         "size": len(bad_digest),
         "sha256": "0" * 64,
-        "moved_at": "2026-08-30T00:00:00+00:00",
+        "handed_off_at": "2026-08-30T00:00:00+00:00",
     }
     ledger = {
         "provider": "huggingface",
@@ -456,21 +456,21 @@ def test_reconcile_keeps_the_moved_record_when_returned_bytes_are_wrong(tmp_path
             {"path": "w.bin", "size": len(bad_digest), "lfs_sha256": "0" * 64},
             {"path": "v.bin", "size": 4, "lfs_sha256": "1" * 64},
         ],
-        "files": {"w.bin": dict(moved), "v.bin": {**moved, "size": 4}},
+        "files": {"w.bin": dict(handed_off), "v.bin": {**handed_off, "size": 4}},
         "events": [],
     }
     session = {"files_completed": 0, "bytes_adopted": 0}
     plan = reconcile(tmp_path, payload, ledger, session, progress=silent)
     for name in ("w.bin", "v.bin"):
-        assert ledger["files"][name]["status"] == "moved"
+        assert ledger["files"][name]["status"] == "handed_off"
         assert not (payload / name).exists(), "failing bytes were not removed"
-    assert plan["files"]["moved"] == 2
+    assert plan["files"]["handed_off"] == 2
     assert plan["fetched"] is True
     events = {e["event"] for e in ledger["events"]}
     assert events == {"digest_mismatch", "size_mismatch"}
 
 
-def test_release_moved_only_releases_destination_verified_bytes(tmp_path):
+def test_hand_off_files_only_releases_destination_verified_bytes(tmp_path):
     """Verify-then-delete: a file the destination did not verify stays put."""
     source_dir = tmp_path / "src"
     payload = source_dir / "model"
@@ -488,13 +488,13 @@ def test_release_moved_only_releases_destination_verified_bytes(tmp_path):
     }
     # Destination verified only a.bin; b.bin's copy is not trusted there.
     destination_ledger = {"files": {"a.bin": {"status": "verified"}}}
-    moved_files, moved_bytes = release_moved(
+    handed_off_files, handed_off_bytes = hand_off_files(
         source_dir, source_ledger, destination_ledger, "model"
     )
-    assert moved_files == 1
-    assert moved_bytes == 5
-    assert source_ledger["files"]["a.bin"]["status"] == "moved"
-    assert "moved_at" in source_ledger["files"]["a.bin"]
+    assert handed_off_files == 1
+    assert handed_off_bytes == 5
+    assert source_ledger["files"]["a.bin"]["status"] == "handed_off"
+    assert "handed_off_at" in source_ledger["files"]["a.bin"]
     assert not (payload / "a.bin").exists()
     # b.bin was never verified at the destination, so its only copy survives.
     assert source_ledger["files"]["b.bin"]["status"] == "verified"

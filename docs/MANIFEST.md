@@ -225,10 +225,11 @@ Both:
 |---|---|
 | `date_archived` | Creation time of the bundle. Also the fixed mtime used in exports. |
 | `archived_by` | **curator** (or automation identity). |
-| `location`, `host` | Absolute path and machine. Rewritten on import. |
+| `location`, `host` | Absolute path and machine. Rewritten on import and by `darsay mv`. |
 | `storage_tier`, `backup_status`, `replicas` | Where copies live (`local-disk` / `none` / `[]` until a backup workflow records otherwise). |
 | `last_integrity_check`, `last_accessed` | Maintained by `verify`, `smoke`, `hydrate` / `run`, import. `info` is read-only and does not rewrite the manifest. |
 | `imported` | Present on imported bundles: `at`, `from_file`, `file_sha256`, `mvb_format_version`. |
+| `moves` | Present once `darsay mv` has relocated the bundle: a list, oldest first, of `{at, from_location, method}` where `method` is `rename` (same filesystem; bytes untouched) or `copy` (re-hashed at the destination before the source was removed). An rsync leaves no entry — it is a first-class copy that darsay never sees happen. Since 1.8.0. |
 
 Export events are logged in the sibling file `exports.json`
 (`{"exports": [{at, file, sha256, size_bytes, mvb_format_version, written_by}]}`),

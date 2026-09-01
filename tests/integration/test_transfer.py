@@ -482,9 +482,9 @@ def test_assemble_move_skeletonizes_source_and_never_refetches(
 ):
     """Archive one pin across two disks that never mount together.
 
-    Laptop fetches a half, hands it to the big vault with ``--move`` (keeping
+    Laptop fetches a half, hands it to the big vault with ``--handoff`` (keeping
     a skeleton), fetches the rest, hands that over too, and the big vault
-    registers with zero payload network bytes — the moved half is never
+    registers with zero payload network bytes — the handed-off half is never
     re-downloaded.
     """
     files = model_files(param_shape=[64, 64])
@@ -496,28 +496,32 @@ def test_assemble_move_skeletonizes_source_and_never_refetches(
     skeleton = _archive_half("test:acme/big", vault=laptop)
 
     # First hand-over: the verified half moves out; the skeleton remains.
-    dest, _plan = assemble_partials([skeleton], big, progress=silent, move=True)
+    dest, _plan = assemble_partials([skeleton], big, progress=silent, handoff=True)
     src_ledger = load_ledger(skeleton)
-    moved = {p for p, s in src_ledger["files"].items() if s.get("status") == "moved"}
-    assert moved, "expected at least one file to move out"
-    for path in moved:
+    handed = {
+        p for p, s in src_ledger["files"].items() if s.get("status") == "handed_off"
+    }
+    assert handed, "expected at least one file to be handed off"
+    for path in handed:
         state = src_ledger["files"][path]
-        assert "moved_at" in state
-        assert not (skeleton / "model" / path).exists(), "moved bytes still on disk"
-    assert any(e["event"] == "moved_out" for e in src_ledger["events"])
+        assert "handed_off_at" in state
+        assert not (skeleton / "model" / path).exists(), (
+            "handed-off bytes still on disk"
+        )
+    assert any(e["event"] == "handoff_out" for e in src_ledger["events"])
     dest_ledger = load_ledger(dest)
-    assert any(e["event"] == "moved_in" for e in dest_ledger["events"])
+    assert any(e["event"] == "handoff_in" for e in dest_ledger["events"])
 
-    # Fetch the rest on the laptop: a moved file is never requested again.
+    # Fetch the rest on the laptop: a handed-off file is never requested again.
     test_provider.downloads.clear()
     with pytest.raises(PartialTransfer) as paused:
         archive_quiet("test:acme/big", vault=laptop)
-    assert paused.value.reason == "moved"
-    assert not (set(test_provider.downloads) & moved)
+    assert paused.value.reason == "handed_off"
+    assert not (set(test_provider.downloads) & handed)
 
     # Second hand-over drains the skeleton: it holds no payload byte, so it
     # dissolves — exactly what a plain mv would have left.
-    assemble_partials([skeleton], big, progress=silent, move=True)
+    assemble_partials([skeleton], big, progress=silent, handoff=True)
     assert not skeleton.exists()
 
     # The big vault now has every file verified; archive registers with no
@@ -531,8 +535,8 @@ def test_assemble_move_skeletonizes_source_and_never_refetches(
 
 
 def test_archive_on_a_fully_moved_skeleton_pauses_moved(vault, test_provider, tmp_path):
-    """A skeleton with every file moved out has nothing to fetch: it pauses
-    cleanly with reason 'moved' (assemble to register), never errors."""
+    """A skeleton with every file handed off has nothing to fetch: it pauses
+    cleanly with reason 'handed_off' (assemble to register), never errors."""
     from darsay.sources import parse_source
     from darsay.transfer import new_ledger, save_ledger
 
@@ -540,25 +544,25 @@ def test_archive_on_a_fully_moved_skeleton_pauses_moved(vault, test_provider, tm
     test_provider.add_repo("acme/toy", files)
     snap = test_provider.pin(parse_source("test:acme/toy"), None)
 
-    # Every expected file is verified-elsewhere (moved), none present here.
+    # Every expected file is verified-elsewhere (handed off), none present here.
     skel = tmp_path / "vault" / "test--acme--toy" / snap.revision[:12]
     (skel / "model").mkdir(parents=True)
     ledger = new_ledger(snap)
     for item in ledger["expected"]:
         ledger["files"][item["path"]] = {
-            "status": "moved",
+            "status": "handed_off",
             "size": item["size"],
             "sha256": "x",
-            "moved_at": "2026-08-30T00:00:00+00:00",
+            "handed_off_at": "2026-08-30T00:00:00+00:00",
         }
     save_ledger(skel, ledger)
 
     with pytest.raises(PartialTransfer) as paused:
         archive_quiet("test:acme/toy", vault=(tmp_path / "vault"))
-    assert paused.value.reason == "moved"
+    assert paused.value.reason == "handed_off"
     # Nothing was fetched; the skeleton is untouched.
     assert test_provider.downloads == []
-    assert load_ledger(skel)["sessions"][-1]["end_reason"] == "moved"
+    assert load_ledger(skel)["sessions"][-1]["end_reason"] == "handed_off"
 
 
 def test_assemble_move_keeps_skeleton_when_a_copy_fails_to_verify(
@@ -576,12 +580,12 @@ def test_assemble_move_keeps_skeleton_when_a_copy_fails_to_verify(
     big = vault
 
     # First half over, then fetch the rest: the skeleton now holds only
-    # verified files (the second half) beside its moved records.
+    # verified files (the second half) beside its handed-off records.
     skeleton = _archive_half("test:acme/big", vault=laptop)
-    assemble_partials([skeleton], big, progress=silent, move=True)
+    assemble_partials([skeleton], big, progress=silent, handoff=True)
     with pytest.raises(PartialTransfer) as paused:
         archive_quiet("test:acme/big", vault=laptop)
-    assert paused.value.reason == "moved"
+    assert paused.value.reason == "handed_off"
 
     src_ledger = load_ledger(skeleton)
     victim = next(
@@ -598,22 +602,22 @@ def test_assemble_move_keeps_skeleton_when_a_copy_fails_to_verify(
         return method
 
     monkeypatch.setattr(transfer_mod, "_copy_local_file", corrupting_copy)
-    dest, _plan = assemble_partials([skeleton], big, progress=silent, move=True)
+    dest, _plan = assemble_partials([skeleton], big, progress=silent, handoff=True)
 
     # The skeleton survives and still holds the one good copy.
     assert skeleton.exists()
     src_ledger = load_ledger(skeleton)
     assert src_ledger["files"][victim]["status"] == "verified"
     assert (skeleton / "model" / victim).is_file()
-    # Everything else moved; the destination never verified the bad copy.
+    # Everything else handed off; the destination never verified the bad copy.
     others = set(src_ledger["files"]) - {victim}
-    assert all(src_ledger["files"][path]["status"] == "moved" for path in others)
+    assert all(src_ledger["files"][path]["status"] == "handed_off" for path in others)
     assert load_ledger(dest)["files"].get(victim, {}).get("status") != "verified"
 
     # A clean re-run hands the file over, drains the skeleton, and the big
     # vault registers without a single payload byte from the network.
     monkeypatch.undo()
-    assemble_partials([skeleton], big, progress=silent, move=True)
+    assemble_partials([skeleton], big, progress=silent, handoff=True)
     assert not skeleton.exists()
     test_provider.downloads.clear()
     bundle = archive_quiet("test:acme/big", vault=big)
@@ -630,11 +634,11 @@ def test_assemble_move_via_cli_reports_the_skeleton(vault, test_provider, tmp_pa
     laptop.mkdir()
     skeleton = _archive_half("test:acme/big", vault=laptop)
 
-    rc = main(["--vault", str(vault), "assemble", str(skeleton), "--move"])
+    rc = main(["--vault", str(vault), "assemble", str(skeleton), "--handoff"])
     assert rc == 0
-    # The moved half is gone from the skeleton; its ledger records the move.
+    # The handed-off half is gone from the skeleton; its ledger records the move.
     src_ledger = load_ledger(skeleton)
-    assert any(s.get("status") == "moved" for s in src_ledger["files"].values())
+    assert any(s.get("status") == "handed_off" for s in src_ledger["files"].values())
 
 
 def _plant_bundle_in_vault(source, dest_vault):
@@ -651,10 +655,10 @@ def test_assemble_move_after_rsync_copies_nothing_and_skeletonizes_source(
     """An out-of-band copy into the dest vault is the same as assemble.
 
     ``rsync srcvault/<slug>/<rev>/ dstvault/<slug>/<rev>/`` then
-    ``darsay --vault dstvault assemble src --move`` must not recopy payload
+    ``darsay --vault dstvault assemble src --handoff`` must not recopy payload
     bytes the destination already holds. It trusts dest's rsync'd ledger
     (size match), deletes the source files, and keeps the source ledger as a
-    skeleton. A second ``--move`` is a no-op for those files.
+    skeleton. A second ``--handoff`` is a no-op for those files.
     """
     import darsay.transfer as transfer_mod
     from darsay.cli import main
@@ -687,15 +691,15 @@ def test_assemble_move_after_rsync_copies_nothing_and_skeletonizes_source(
 
     monkeypatch.setattr(transfer_mod, "_copy_local_file", tracking_copy)
 
-    rc = main(["--vault", str(vault), "assemble", str(source), "--move"])
+    rc = main(["--vault", str(vault), "assemble", str(source), "--handoff"])
     assert rc == 0
     assert copied_payload == [], "destination already held the payload; recopy is waste"
 
     src_ledger = load_ledger(source)
     assert (source / "transfer.json").is_file(), "source metadata must stay"
     for path in verified_before:
-        assert src_ledger["files"][path]["status"] == "moved"
-        assert "moved_at" in src_ledger["files"][path]
+        assert src_ledger["files"][path]["status"] == "handed_off"
+        assert "handed_off_at" in src_ledger["files"][path]
         assert not (source / "model" / path).exists(), "source payload should be gone"
         assert (dest / "model" / path).read_bytes() == dest_bytes_before[path]
 
@@ -703,14 +707,14 @@ def test_assemble_move_after_rsync_copies_nothing_and_skeletonizes_source(
     for path in verified_before:
         assert dest_ledger["files"][path]["status"] == "verified"
 
-    # Same command again: dest still holds the bytes, source already moved.
+    # Same command again: dest still holds the bytes, source already handed off.
     copied_payload.clear()
-    rc = main(["--vault", str(vault), "assemble", str(source), "--move"])
+    rc = main(["--vault", str(vault), "assemble", str(source), "--handoff"])
     assert rc == 0
     assert copied_payload == []
     src_ledger = load_ledger(source)
     for path in verified_before:
-        assert src_ledger["files"][path]["status"] == "moved"
+        assert src_ledger["files"][path]["status"] == "handed_off"
         assert not (source / "model" / path).exists()
         assert (dest / "model" / path).read_bytes() == dest_bytes_before[path]
 
@@ -753,7 +757,7 @@ def test_assemble_after_rsync_does_not_rehash_verified_dest(
     hashed = _track_hashes(monkeypatch)
 
     logs: list[str] = []
-    assemble_partials([source], vault, progress=logs.append, move=True)
+    assemble_partials([source], vault, progress=logs.append, handoff=True)
     assert _hashed_under(hashed, dest / "model") == [], (
         "rsync'd verified dest files must not be re-hashed"
     )
@@ -762,7 +766,7 @@ def test_assemble_after_rsync_does_not_rehash_verified_dest(
     assert "Releasing source payload files" in text
     src_ledger = load_ledger(source)
     for path in verified:
-        assert src_ledger["files"][path]["status"] == "moved"
+        assert src_ledger["files"][path]["status"] == "handed_off"
         assert not (source / "model" / path).exists()
         assert (dest / "model" / path).is_file()
 
@@ -780,7 +784,7 @@ def test_assemble_rehash_after_rsync_hashes_dest(
     hashed = _track_hashes(monkeypatch)
 
     logs: list[str] = []
-    assemble_partials([source], vault, progress=logs.append, move=True, rehash=True)
+    assemble_partials([source], vault, progress=logs.append, handoff=True, rehash=True)
     assert _hashed_under(hashed, dest / "model"), "--rehash must hash dest files"
     assert "re-hashed dest against the pin" in "\n".join(str(item) for item in logs)
 
@@ -833,7 +837,7 @@ def test_assemble_warns_before_hashing_dest_on_a_network_mount(
 def test_assemble_move_into_registered_dest_does_not_mutate_payload(
     vault, test_provider, tmp_path, monkeypatch
 ):
-    """rsync a half, dest finishes and registers, then --move skeletonizes source."""
+    """rsync a half, dest finishes and registers, then --handoff skeletonizes source."""
     files = model_files(param_shape=[64, 64])
     test_provider.add_repo("acme/big", files)
     laptop = tmp_path / "laptop"
@@ -853,14 +857,14 @@ def test_assemble_move_into_registered_dest_does_not_mutate_payload(
     downloads_after_register = list(test_provider.downloads)
     hashed = _track_hashes(monkeypatch)
 
-    dest, _plan = assemble_partials([source], vault, progress=silent, move=True)
+    dest, _plan = assemble_partials([source], vault, progress=silent, handoff=True)
     assert (dest / "manifest.json").is_file()
     assert _hashed_under(hashed, dest / "model") == [], (
         "a registered dest is trusted by ledger + size, not re-read"
     )
     for path in verified:
         assert (dest / "model" / path).read_bytes() == dest_bytes[path]
-        assert load_ledger(source)["files"][path]["status"] == "moved"
+        assert load_ledger(source)["files"][path]["status"] == "handed_off"
         assert not (source / "model" / path).exists()
     assert test_provider.downloads == downloads_after_register
 
@@ -871,8 +875,8 @@ def test_assemble_move_refuses_registered_source(vault, test_provider, tmp_path)
     source = archive_quiet("test:acme/toy", vault=vault)
     other = tmp_path / "other"
     other.mkdir()
-    with pytest.raises(SystemExit, match="cannot --move a registered bundle"):
-        assemble_partials([source], other, progress=silent, move=True)
+    with pytest.raises(SystemExit, match="cannot --handoff a registered bundle"):
+        assemble_partials([source], other, progress=silent, handoff=True)
     assert (source / "manifest.json").is_file()
     assert (source / "model" / "config.json").is_file() or any(
         (source / "model").rglob("*")

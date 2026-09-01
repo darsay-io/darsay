@@ -26,7 +26,8 @@ This page is the cookbook you return to.
 | Put a bundle on a USB drive | [Export](#export-to-a-usb-drive) |
 | Split a download with a friend | [Cooperative shards](#split-a-download-across-machines) |
 | Fetch a model in halves across two disks | [Archive in halves](#archive-in-halves-across-two-disks) |
-| Move a half-finished archive to another disk | [Relocate a partial](#move-a-partial-bundle) |
+| Move a finished bundle to another disk | [Move a bundle](#move-a-bundle-to-another-vault) |
+| Move a half-finished archive to another disk | [Relocate a partial](#relocate-a-partial-bundle) |
 | rsync bytes, then let darsay verify | [rsync then darsay](#rsync-then-darsay) |
 | Write curator notes | [Curation](#write-curator-notes) |
 | Curate a want-list and share it | [Share a catalog](#share-a-catalog) |
@@ -362,7 +363,7 @@ Manual recovery without even that script: [MVB format](../docs/MVB-FORMAT.md).
 `--shard N/T` is a priority, not a partition. Each participant prefers
 a different byte-balanced set of whole files, but any one of them can
 finish the bundle alone. (One person, two disks that never meet? Same
-`assemble`, with [`--move`](#archive-in-halves-across-two-disks).)
+`assemble`, with [`--handoff`](#archive-in-halves-across-two-disks).)
 
 ```bash
 # alice, on her machine
@@ -389,8 +390,8 @@ network.
 Same `assemble`, one disk instead of two friends. The laptop has the
 bandwidth but not the room; the big drive has the room but is at home. They
 are never plugged in together. Fetch a half where the network is, hand it
-to the big drive with `--move`, and the laptop keeps a **skeleton** — the
-pin and the hashes, with the moved bytes deleted — so it can fetch the
+to the big drive with `--handoff`, and the laptop keeps a **skeleton** — the
+pin and the hashes, with the handed-off bytes deleted — so it can fetch the
 *other* half without re-downloading the first.
 
 ```bash
@@ -398,13 +399,13 @@ pin and the hashes, with the moved bytes deleted — so it can fetch the
 darsay archive Qwen/Qwen3.8-27B --max-gb 30
 
 # laptop plugged into the big drive — hand the half over, keep the skeleton
-darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
+darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --handoff
 
-# laptop, back at the café — the other 30 GB (the moved half is never re-fetched)
+# laptop, back at the café — the other 30 GB (the handed-off half is never re-fetched)
 darsay archive Qwen/Qwen3.8-27B --max-gb 30
 
 # big drive — the second hand-over completes it and dissolves the skeleton
-darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
+darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --handoff
 darsay --vault /Volumes/big archive Qwen/Qwen3.8-27B     # registers, zero network
 ```
 
@@ -415,21 +416,62 @@ re-hash dest over SMB:
 
 ```bash
 rsync -a ~/darsay/qwen--qwen3.8-27b/<rev>/ /Volumes/big/qwen--qwen3.8-27b/<rev>/
-darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
+darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --handoff
 ```
 
-`--move` only ever deletes a file dest has as verified, so an incomplete
+`--handoff` only ever deletes a file dest has as verified, so an incomplete
 copy never costs the laptop its only copy. Hash dest on the dest host
 (`assemble --rehash`) if you do not trust the rsync. On the laptop,
-`darsay list` shows the skeleton — `archiving: 52% (…, 27.8 GB moved out)` —
+`darsay list` shows the skeleton — `archiving: 52% (…, 27.8 GB handed off)` —
 and an `archive` run there stops cleanly with `assemble to register` once
-everything left is either verified locally or already moved away. A skeleton
-with every file moved out is removed, leaving exactly what a plain `mv`
-would have. Full design: [Incremental transfer](../docs/INCREMENTAL.md#across-disks-assemble---move-and-skeletons).
+everything left is either verified locally or already handed off. A skeleton
+with every file handed off is removed, leaving exactly what a plain `mv`
+would have. Full design: [Incremental transfer](../docs/INCREMENTAL.md#across-disks-assemble---handoff-and-skeletons).
 
 ---
 
-## Move a partial bundle
+## Move a bundle to another vault
+
+A registered bundle changes disks with `mv`. The destination is a vault
+root that already exists (an unmounted disk must not become a folder on
+this one). Same filesystem: a rename. Different filesystem: copy, re-hash
+the copy at the destination, then remove the source.
+
+```bash
+darsay mv qwen--qwen3-0.6b /Volumes/big
+```
+
+```
+Moving qwen--qwen3-0.6b@c1899de289a0
+  from:     ~/darsay/qwen--qwen3-0.6b/c1899de289a0
+  to:       /Volumes/big/qwen--qwen3-0.6b/c1899de289a0  (new)
+  how:      copy 11 files (1.5 GiB), re-hash the 7 payload files at the destination, then remove the source
+  disk:     needs 1.5 GiB, free 400.2 GiB (2.0 GiB floor) at /Volumes/big — OK
+  leaves:   hydration.json — vault-local; `darsay hydrate` again at the destination
+Copying 11 files (1.5 GiB) ...
+Verifying the copy at the destination ...
+Re-hashing 7 files in /Volumes/big/qwen--qwen3-0.6b/.mv-c1899de289a0/c1899de289a0/model ...
+Verification: PASS (7 files; 0 modified, 0 missing, 0 extra)
+Moved qwen--qwen3-0.6b@c1899de289a0 → /Volumes/big/qwen--qwen3-0.6b/c1899de289a0  (7 payload files verified at the destination before the source was removed)
+```
+
+rsync is the same move without the verb, and always will be:
+
+```bash
+rsync -a ~/darsay/qwen--qwen3-0.6b/<rev>/ /Volumes/big/qwen--qwen3-0.6b/<rev>/
+darsay --vault /Volumes/big verify qwen--qwen3-0.6b     # on the host that owns the disk
+darsay rm qwen--qwen3-0.6b --yes
+```
+
+Over SMB or NFS, prefer that form: `mv` verifies by reading the copy back,
+which over the wire is a second trip of the whole payload, and it says so
+before it starts. `mv` refuses a partial — that is
+[`assemble --handoff`](#archive-in-halves-across-two-disks) or the recipe
+below. Which verb when: [FAQ](../docs/FAQ.md#moving-bundles).
+
+---
+
+## Relocate a partial bundle
 
 Partial bytes are portable. Copy the entire
 `<repo-slug>/<revision12>/` directory — including any payload `.cache`
@@ -460,7 +502,7 @@ rsync -a ~/darsay/qwen--qwen3.8-27b/<rev>/ /Volumes/big/qwen--qwen3.8-27b/<rev>/
 darsay --vault /Volumes/big archive Qwen/Qwen3.8-27B
 
 # or free the laptop after the copy (trust dest ledger + size, delete source payload)
-darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
+darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --handoff
 ```
 
 Hash dest where it is a local disk — `assemble --rehash` or `darsay
@@ -468,7 +510,9 @@ verify` on the NAS, not from a laptop over SMB (that reads the whole
 payload back over the wire). `assemble` warns before it hashes a dest
 that sits on a network mount.
 A registered payload is frozen: rsync it, verify dest on the dest host,
-then `darsay rm` the source. `--move` is the verb for partials.
+then `darsay rm` the source — or [`darsay mv`](#move-a-bundle-to-another-vault),
+which is those three steps with the refusals built in. `--handoff` is the
+verb for partials.
 
 ---
 
@@ -524,7 +568,8 @@ ends with the real command to paste.
 ```bash
 darsay rm qwen--qwen3-0.6b -n
 darsay import /Volumes/USB/backups/qwen--qwen3-0.6b@<rev>.mvb.tar -n
-darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move -n
+darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --handoff -n
+darsay mv qwen--qwen3-0.6b /Volumes/big -n         # rename, or copy + verify? and where it lands
 darsay run qwen--qwen3-0.6b -n                  # will it install torch first?
 darsay envs --prune -n
 ```
@@ -538,7 +583,7 @@ Dry run: nothing removed. To remove:
   darsay rm qwen--qwen3-0.6b
 ```
 
-And `assemble --move -n`, before a laptop hands its half to the big drive:
+And `assemble --handoff -n`, before a laptop hands its half to the big drive:
 
 ```
 Would assemble into /Volumes/big/qwen--qwen3.8-27b/<rev>  (existing partial)
@@ -546,9 +591,9 @@ Would assemble into /Volumes/big/qwen--qwen3.8-27b/<rev>  (existing partial)
   verify:   4 files against the pin (4 copied)
   disk:     needs 12.1 GiB, free 400.2 GiB (2.0 GiB floor) at /Volumes/big — OK
   after:    7/9 files verified; 2 files (4.4 GiB) still to fetch — continue with `darsay archive`
-  --move:   ~/darsay/qwen--qwen3.8-27b/<rev>  — release 7 files (26.2 GiB) once verified at dest → skeleton (pin + hashes stay)
+  --handoff:   ~/darsay/qwen--qwen3.8-27b/<rev>  — release 7 files (26.2 GiB) once verified at dest → skeleton (pin + hashes stay)
 Dry run: nothing copied, nothing released. To assemble:
-  darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
+  darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --handoff
 ```
 
 A refusal is the same refusal: `import -n` of a bundle the vault already

@@ -132,6 +132,30 @@ def write_verification_report(
     return report
 
 
+def refresh_verification_md(bundle_dir: Path) -> None:
+    """Rewrite ``VERIFICATION.md`` from ``verification.json`` in place.
+
+    The Markdown is a derived view that names the bundle's path (its
+    re-run line); after ``darsay mv`` the path changed and nothing else
+    did, so the record is kept and only the view is regenerated.
+    """
+    from .archiver import load_manifest
+
+    history_path = bundle_dir / "verification.json"
+    if not history_path.is_file():
+        return
+    data = json.loads(history_path.read_text(encoding="utf-8"))
+    report = data.get("latest")
+    if not report:
+        return
+    _write_verification_md(
+        bundle_dir,
+        load_manifest(bundle_dir),
+        report,
+        run_count=len(data.get("history", [])),
+    )
+
+
 def _write_verification_md(
     bundle_dir: Path, manifest: dict, report: dict, run_count: int
 ) -> None:

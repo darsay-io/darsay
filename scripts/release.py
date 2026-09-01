@@ -74,6 +74,7 @@ CLI_DOCS = (
     "docs/GETTING-STARTED.md",
     "docs/CONCEPTS.md",
     "docs/INCREMENTAL.md",
+    "docs/FAQ.md",
     "examples/README.md",
 )
 FLAG_TOKEN = re.compile(r"(?<![\w-])--[a-z][a-z0-9-]*")

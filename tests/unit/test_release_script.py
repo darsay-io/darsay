@@ -202,6 +202,7 @@ def test_docs_flag_checks_complain(release, monkeypatch, tmp_path):
         "docs/GETTING-STARTED.md": "",
         "docs/CONCEPTS.md": "",
         "docs/INCREMENTAL.md": "",
+        "docs/FAQ.md": "",
         "examples/README.md": "",
     }
     for rel, text in docs.items():

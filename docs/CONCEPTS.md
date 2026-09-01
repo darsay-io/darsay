@@ -40,11 +40,15 @@ licenses). `info` / `run` / `verify` accept a path, a bundle id, or a
 unique prefix. `darsay du` is disk use of bundles and `.runtime` only
 (catalog JSON is curator data, not payload). `darsay rm` deletes a bundle.
 The vault is yours to rsync, restic, or put on a shelf. rsync is a
-first-class copy: the next `archive` / `assemble` / `assemble --move`
+first-class copy: the next `archive` / `assemble` / `assemble --handoff`
 trusts dest files the ledger already marks verified (size match), fetches
 only what is still missing, and rewrites metadata. It does not re-download
 the majority, and it does not pull dest back over SMB to re-hash a copy.
-[Incremental transfer](INCREMENTAL.md#1-why-this-can-beat-rsync-at-fetching--and-why-rsync-still-copies-disks).
+`darsay mv` relocates a registered bundle with that contract folded in —
+a rename on one filesystem, otherwise copy, verify at the destination,
+then remove the source — and is never required; rsync stays first-class.
+[Incremental transfer](INCREMENTAL.md#1-why-this-can-beat-rsync-at-fetching--and-why-rsync-still-copies-disks),
+[FAQ](FAQ.md#moving-bundles).
 
 `config.toml` is operator preference, not archival fact — for example the
 free-space floor an archive pauses at, a bandwidth cap, or how long to
@@ -119,12 +123,12 @@ That is why resume works without a special subcommand, and why a 50 GB
 job can be ten evenings of `--max-gb 10`.
 
 A **skeleton** is a partial pin whose verified bytes have been handed to
-another vault (`assemble --move`): the pin and every recorded hash stay,
+another vault (`assemble --handoff`): the pin and every recorded hash stay,
 the payload does not. It is how one pin crosses two disks that never mount
 together — fetch a half where there is bandwidth, hand it to the disk with
 the room, then fetch the rest without re-downloading what you carried over.
 The next `archive` fetches only what no vault has yet.
-[Incremental transfer](INCREMENTAL.md#across-disks-assemble---move-and-skeletons).
+[Incremental transfer](INCREMENTAL.md#across-disks-assemble---handoff-and-skeletons).
 
 ## Payload vs metadata
 

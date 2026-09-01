@@ -776,13 +776,13 @@ def test_cli_assemble_dry_run_creates_nothing_and_move_releases_nothing(
     assert "verify:   2 files against the pin (2 copied)" in out
     assert "disk:     needs" in out
     assert "after:    2/7 files verified; 5 files" in out
-    assert "--move:" not in out
+    assert "--handoff:" not in out
     assert out.rstrip().endswith("  " + _real(*argv))
     assert list(vault.rglob("*")) == []
 
-    assert main([*argv, "--move", "-n"]) == 0
+    assert main([*argv, "--handoff", "-n"]) == 0
     out = capsys.readouterr().out
-    assert "--move:" in out and "once verified at dest → skeleton" in out
+    assert "--handoff:" in out and "once verified at dest → skeleton" in out
     assert "Dry run: nothing copied, nothing released. To assemble:" in out
     assert list(vault.rglob("*")) == []
     assert [_tree(p) for p in partials] == sources_before

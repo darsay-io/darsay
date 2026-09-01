@@ -30,6 +30,7 @@ immutable payload, recorded facts, still loadable as-is.
     darsay regen   <bundle>           rebuild README.md after editing curation.md
     darsay export  <bundle> [-o DIR]  pack into a single deterministic .mvb.tar
     darsay import  <file.mvb.tar>     unpack + verify into the vault
+    darsay mv      <bundle> VAULT     move a registered bundle to another vault (verify, then remove)
     darsay assemble <partial> […]     combine matching partials offline
     darsay hydrate <bundle>           build a runnable env for the bundle
     darsay run     <bundle> [PROMPT]  hydrate if needed, then generate (offline)
@@ -267,7 +268,7 @@ def _push_board_progress(args, *, state, bundle_dir=None, percent=None) -> None:
             banked = (
                 plan["bytes"]["verified"]
                 + plan["bytes"]["partial"]
-                + plan["bytes"].get("moved", 0)
+                + plan["bytes"].get("handed_off", 0)
             )
             if total:
                 percent = int(banked * 100 / total)
@@ -625,13 +626,13 @@ def cmd_archive(args) -> int:
         _push_board_progress(args, state="paused", bundle_dir=stop.bundle_dir)
         print(f"\nArchive paused cleanly ({stop.reason}: {stop.detail}).")
         print(f"Partial bundle: {stop.bundle_dir}")
-        if stop.reason == "moved":
+        if stop.reason == "handed_off":
             print(
-                "Everything here is verified or already moved to another vault. "
+                "Everything here is verified or already handed off to another vault. "
                 "Assemble the halves into one vault, then run archive there to register:"
             )
             print(
-                f"  darsay --vault <vault-with-the-other-half> assemble {stop.bundle_dir} --move"
+                f"  darsay --vault <vault-with-the-other-half> assemble {stop.bundle_dir} --handoff"
             )
             return 10
         action = {
@@ -1512,6 +1513,23 @@ def cmd_import(args) -> int:
     return 0
 
 
+def cmd_mv(args) -> int:
+    from .relocate import move_bundle
+
+    # Resolve partials too, so a partial gets the verb that fits it instead
+    # of "no manifest.json"; move_plan does the refusing.
+    bundle = _bundle_dir(args, require_manifest=False)
+    move_bundle(
+        bundle,
+        Path(args.dest_vault).expanduser(),
+        force=args.force,
+        dry_run=args.dry_run,
+    )
+    if args.dry_run:
+        _dry_run_done(args, "nothing copied, nothing removed", "move")
+    return 0
+
+
 def cmd_assemble(args) -> int:
     from .transfer import assemble_partials
 
@@ -1521,22 +1539,24 @@ def cmd_assemble(args) -> int:
         plan = assemble_plan(
             [Path(path) for path in args.partials],
             _vault_path(args, announce=True),
-            move=args.move,
+            handoff=args.handoff,
             rehash=args.rehash,
         )
         print_assemble_plan(plan)
-        skipped = "nothing copied, nothing released" if args.move else "nothing copied"
+        skipped = (
+            "nothing copied, nothing released" if args.handoff else "nothing copied"
+        )
         _dry_run_done(args, skipped, "assemble")
         return 0
     bundle, plan = assemble_partials(
         [Path(path) for path in args.partials],
         _vault_path(args, announce=True),
-        move=args.move,
+        handoff=args.handoff,
         rehash=args.rehash,
     )
     if (bundle / "manifest.json").is_file():
         print(f"\nDestination is already a registered bundle: {bundle}")
-        if args.move:
+        if args.handoff:
             print(
                 "Source files dest already holds as verified were released "
                 "(the source is a skeleton, or was removed if nothing remained)."
@@ -2306,6 +2326,30 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_import)
 
     p = add_cmd(
+        "mv",
+        help=(
+            "move a registered bundle into another vault: copy, verify the "
+            "copy there, then remove the source (a rename on the same disk)"
+        ),
+    )
+    p.add_argument("bundle", help=bundle_help)
+    p.add_argument(
+        "dest_vault",
+        metavar="VAULT",
+        help="destination vault root; must already exist (an unmounted disk is not a vault)",
+    )
+    p.add_argument(
+        "--force",
+        action="store_true",
+        help="replace an existing bundle at the destination",
+    )
+    _add_dry_run(
+        p,
+        "print where the bundle would land and how (rename, or copy + verify); move nothing",
+    )
+    p.set_defaults(func=cmd_mv)
+
+    p = add_cmd(
         "assemble", help="combine matching partial bundles offline into this vault"
     )
     p.add_argument(
@@ -2315,11 +2359,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="partial bundle directories with the same pinned revision",
     )
     p.add_argument(
-        "--move",
+        "--handoff",
         action="store_true",
         help=(
-            "after dest has a file as verified (ledger + size, or hashed "
-            "under --rehash), delete the source copy and mark it moved"
+            "hand verified bytes to the destination: after dest has a file as "
+            "verified (ledger + size, or hashed under --rehash), delete the "
+            "source copy and record it handed_off — the source becomes a skeleton"
         ),
     )
     p.add_argument(

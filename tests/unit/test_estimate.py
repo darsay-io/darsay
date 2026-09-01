@@ -29,7 +29,7 @@ def _transfer(
     total=8 * 1024**3,
     verified=(0, 0),
     unverified=(0, 0),
-    moved=(0, 0),
+    handed_off=(0, 0),
     partial=(0, 0),
     missing=(0, 0),
     status="in_progress",
@@ -39,14 +39,14 @@ def _transfer(
     counts = {
         "verified": verified[0],
         "unverified": unverified[0],
-        "moved": moved[0],
+        "handed_off": handed_off[0],
         "partial": partial[0],
         "missing": missing[0],
     }
     sizes = {
         "verified": verified[1],
         "unverified": unverified[1],
-        "moved": moved[1],
+        "handed_off": handed_off[1],
         "partial": partial[1],
         "missing": missing[1],
     }
@@ -62,7 +62,7 @@ def _transfer(
             "total": total,
             **sizes,
             "banked": banked,
-            "remaining_network": max(0, total - banked - sizes["moved"]),
+            "remaining_network": max(0, total - banked - sizes["handed_off"]),
         },
         "scratch_bytes": 0,
     }
@@ -129,19 +129,21 @@ def test_download_lines_registered_bundle():
 
 def test_download_lines_skeleton_counts_moved_and_says_assemble():
     gib = 1024**3
-    # Half verified here, half moved to another vault, nothing left to fetch.
+    # Half verified here, half handed off to another vault, nothing left to fetch.
     t = _transfer(
         total=8 * gib,
         verified=(2, 4 * gib),
-        moved=(2, 4 * gib),
+        handed_off=(2, 4 * gib),
     )
     lines = _download_lines(_est(t))
     # Moved bytes count toward the pin's progress: exists-anywhere == 100%.
     assert "100.0%" in lines[0]
     assert "8.0 GiB / 8.0 GiB" in lines[0]
-    assert any("4.0 GiB in 2 files moved to another vault" in line for line in lines)
     assert any(
-        "assemble with the vault holding the moved files" in line for line in lines
+        "4.0 GiB in 2 files handed off to another vault" in line for line in lines
+    )
+    assert any(
+        "assemble with the vault holding the handed-off files" in line for line in lines
     )
 
 
@@ -149,11 +151,11 @@ def test_download_lines_skeleton_with_a_half_still_to_fetch():
     gib = 1024**3
     t = _transfer(
         total=8 * gib,
-        moved=(2, 4 * gib),
+        handed_off=(2, 4 * gib),
         missing=(2, 4 * gib),
     )
     lines = _download_lines(_est(t))
-    assert " 50.0%" in lines[0]  # moved half done, other half owed
+    assert " 50.0%" in lines[0]  # handed-off half done, other half owed
     assert any("still to fetch 4.0 GiB in 2 files" in line for line in lines)
 
 

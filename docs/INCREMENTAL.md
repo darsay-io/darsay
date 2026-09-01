@@ -10,7 +10,7 @@
 
 > **In one sentence.** `archive` is interruptible by default. Rerun the
 > same command. `--max-gb` stops cleanly. `--shard N/T` shares the work
-> across people; `assemble --move` shares it across disks that never meet.
+> across people; `assemble --handoff` shares it across disks that never meet.
 > Copy-paste: [pause and resume](../examples/README.md#pause-and-resume-a-large-archive).
 
 Companion to [QUANTIZATION.md](QUANTIZATION.md) (what to archive) — this
@@ -44,7 +44,7 @@ instead of downloading them again.
 
 rsync is the disk-to-disk copy. darsay does not replace it. An `rsync` (or
 `cp -a`, a USB, a restic restore) of payload bytes into a vault is a
-**first-class copy**: the next `archive` / `assemble` / `assemble --move`
+**first-class copy**: the next `archive` / `assemble` / `assemble --handoff`
 trusts dest files the ledger already marks `verified` (size match), fetches
 only what is still missing, and rewrites transfer metadata. It must not
 re-download a file whose digest matches, and it must not pull dest back
@@ -52,6 +52,15 @@ over the wire to re-hash a copy. Users who rsync then run darsay should
 never be astonished by a second trip of the majority — not as a Hub
 download, and not as an SMB dest-hash. Hash dest where it is a local disk
 (`assemble --rehash` / `darsay verify`).
+
+`darsay mv` is this contract as one verb for a *registered* bundle: a
+rename on the same filesystem; otherwise copy into a staging directory,
+re-hash the copy where it landed, stamp the manifest's new location, and
+only then remove the source. It is sugar over what rsync already
+satisfies and will never become a requirement — nothing it records is
+needed to open, verify, run, or export the bundle. The verbs do not
+overlap: `mv` refuses a partial, `assemble --handoff` refuses a
+registered bundle, and each names the other. [FAQ](FAQ.md#moving-bundles).
 
 Where darsay beats rsync is the *upstream* transfer. rsync's source is
 *mutable*, so it must interrogate both sides (size/mtime quick-check, then
@@ -86,7 +95,7 @@ around that one line.
    terabytes on every run — but deleting it loses nothing: reconciliation
    (§3) rebuilds it by hashing what's on disk against upstream expectations.
    The one fact the bytes cannot tell you is that a *deliberately* absent
-   file is verified in another vault (a `moved` file — a skeleton, §5); the
+   file is verified in another vault (a `handed_off` file — a skeleton, §5); the
    ledger records that, and losing it costs network, never truth. Same
    doctrine as hydration: derived state must never hold archival truth.
 3. **Verify each file once, immediately, at its freshest.** A file is hashed
@@ -105,13 +114,14 @@ around that one line.
    `<vault>/<slug>/<rev>/` layout are the same as a darsay copy. The next
    command trusts dest files already `verified` in dest's ledger whose size
    still matches (the same gate `archive` uses), downloads only what is
-   still missing, and adjusts metadata (`transfer.json`, `moved`). It does
+   still missing, and adjusts metadata (`transfer.json`, `handed_off`). It does
    not re-read dest to re-hash those files: hashing dest on an SMB mount
    from the laptop pulls the whole payload back over the wire. Hash dest
    where the bytes live (`assemble --rehash` / `darsay verify` on the dest
    host). Present dest files with no verified record are still hashed
    (adoption). A registered payload stays frozen: rsync a finished bundle,
-   `verify` dest on the dest host, `darsay rm` the source. `assemble --move`
+   `verify` dest on the dest host, `darsay rm` the source — or `darsay mv`,
+   which is those three steps with the refusals built in. `assemble --handoff`
    is the verb for partials.
 6. **Every stop is clean, every run converges.** Budgets, Ctrl-C, a
    filling disk, network loss, power loss — all leave a state a later run
@@ -144,8 +154,8 @@ ledger; classify each file:
 |---|---|---|
 | Ledger says verified, size matches on stat | `verified` | trust (or re-hash under `--rehash`) |
 | Present, size matches, no ledger entry | `unverified` | hash now; matching digest → **adopt** (zero network); mismatch → demote |
-| Ledger says moved, absent | `moved` | trust — the bytes are verified in another vault (§5); never fetch, never demote |
-| Ledger says moved, present | `unverified` | the bytes came back: hash and adopt as `verified` (matching bytes win over the hint); on mismatch, remove the bytes and keep `moved` |
+| Ledger says handed off, absent | `handed_off` | trust — the bytes are verified in another vault (§5); never fetch, never demote |
+| Ledger says handed off, present | `unverified` | the bytes came back: hash and adopt as `verified` (matching bytes win over the hint); on mismatch, remove the bytes and keep `handed_off` |
 | `.incomplete` bytes in the payload's `.cache/huggingface/` | `partial` | resume via Range from current length |
 | Absent | `missing` | fetch |
 | Present but wrong size, or hash mismatch | `mismatch` | delete, log the event, treat as missing |
@@ -239,7 +249,7 @@ pin whose reconciliation adopts every verified byte, i.e. a re-verification
 plus manifest rebuild, not a re-download.
 
 Session accounting: every run appends a session record (started, ended, end
-reason — `complete` / `budget` / `disk` / `offline` / `moved` / `interrupt` /
+reason — `complete` / `budget` / `disk` / `offline` / `handed_off` / `interrupt` /
 `assemble` / `error` — the darsay build that ran it, bytes from network,
 bytes adopted, files completed, reconnects, host).
 Ctrl-C escalates: the
@@ -255,7 +265,7 @@ the number of merged inputs.
 `10` — clean partial stop, more remains (budgets, the free-space floor or
 a full disk, a declined preflight, a network gone longer than
 `max_offline`, a skeleton whose remainder lives in another vault
-(`end_reason: moved`, §5), and interrupts), so wrappers can loop; `1` —
+(`end_reason: handed_off`, §5), and interrupts), so wrappers can loop; `1` —
 error.
 
 ```bash
@@ -287,10 +297,10 @@ Bundle-root, machine-local, excluded from `.mvb.tar` exports exactly like
     "config.json": {"status": "verified", "sha256": "…", "blake3": "…",
                     "git_sha1": "…", "verified_at": "…",
                     "source": "network", "attempts": 1},
-    // status "moved": a verified record whose bytes were handed to another
+    // status "handed_off": a verified record whose bytes were handed to another
     // vault (skeleton, §5). Every hash is kept; "moved_at" is added.
     "model-00003-of-00012.safetensors":
-                   {"status": "moved", "size": 4966786096, "sha256": "…",
+                   {"status": "handed_off", "size": 4966786096, "sha256": "…",
                     "blake3": "…", "git_sha1": null, "verified_at": "…",
                     "verified_against_upstream": true, "source": "network",
                     "attempts": 1, "moved_at": "2026-08-25T09:12:40+00:00"}
@@ -302,7 +312,7 @@ Bundle-root, machine-local, excluded from `.mvb.tar` exports exactly like
      "bytes_network": 10737418240, "bytes_adopted": 0,
      "bytes_local_sources": 4966786096, "retries": 0, "reconnects": 1,
      "files_completed": 3, "host": "…", "shard": "1/3"}
-    // end_reason also includes "moved": nothing left to fetch here, but the
+    // end_reason also includes "handed_off": nothing left to fetch here, but the
     // pin is not complete here — assemble the halves to register (§5).
   ],
   "events": [
@@ -384,7 +394,7 @@ pin merge into one verified bundle. Three shapes of the same idea:
 
 - **Across sessions** — `--max-gb` (§6). One machine, many evenings.
 - **Across people** — `--shard N/T`, below. Distinct starts, merge later.
-- **Across disks that never meet** — `assemble --move`, below. Fetch a half,
+- **Across disks that never meet** — `assemble --handoff`, below. Fetch a half,
   hand it over, keep a skeleton, fetch the rest.
 
 #### Across people: cooperative shard keys
@@ -423,10 +433,10 @@ continues any remainder—or, when assembly reached 100%, performs registration
 with zero payload network bytes. `assemble --dry-run` prints that plan first —
 what each partial would contribute, what would be hashed at dest, the disk
 verdict for the copy, how far along the pin would be afterwards, and (with
-`--move`) which source files would be released — and creates nothing, not
+`--handoff`) which source files would be released — and creates nothing, not
 even the destination directory.
 
-#### Across disks: `assemble --move` and skeletons
+#### Across disks: `assemble --handoff` and skeletons
 
 The cooperative case has every partial on hand at merge time. The two-disk
 case is the mirror image: the disk with the bandwidth and the disk with the
@@ -437,47 +447,48 @@ rest would normally re-download it: reconcile treats an absent verified file
 as `missing` (a crash between file-write and ledger-write must heal), so a
 plain `rm` is a re-fetch.
 
-`assemble --move` is the honest way to free that space. It runs an ordinary
+`assemble --handoff` is the honest way to free that space. It runs an ordinary
 assembly into the big vault, then — *only for files the destination already
 holds as `verified` (ledger + size, or hashed under `--rehash`)* — deletes
 the source's copy and rewrites the source record from `verified` to
-**`moved`**: verified, and now living in another vault. A partial with any `moved` file is a **skeleton**: the pin,
+**`handed_off`**: verified, and now living in another vault. A partial with any `handed_off` file is a **skeleton**: the pin,
 the expected inventory, and every recorded hash stay behind; the payload
 bytes do not. The laptop can then fetch the *other* half without re-fetching
-what it handed over, because a `moved` file is fetched by no one and
+what it handed over, because a `handed_off` file is fetched by no one and
 registers nowhere — it counts toward neither remaining network nor this
-bundle's completeness.
+bundle's completeness. (A *registered* bundle changing disks is a different
+operation with a different verb: `darsay mv`, or rsync — §1.)
 
 ```bash
 # laptop, at the café — the first 30 GB
 darsay archive Qwen/Qwen3.8-27B --max-gb 30
 
 # laptop plugged into the big drive — hand the half over, keep the skeleton
-darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
+darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --handoff
 
-# laptop, back at the café — the other 30 GB; the moved half is never re-fetched
+# laptop, back at the café — the other 30 GB; the handed-off half is never re-fetched
 darsay archive Qwen/Qwen3.8-27B --max-gb 30
 
 # big drive again — the second hand-over completes it and dissolves the skeleton
-darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
+darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --handoff
 darsay --vault /Volumes/big archive Qwen/Qwen3.8-27B          # registers, zero network bytes
 ```
 
 Already `rsync`'d or `cp -a`'d the partial into the destination vault? Same
-command. `assemble --move` copies nothing for files dest already holds,
+command. `assemble --handoff` copies nothing for files dest already holds,
 trusts dest files the ledger already marks `verified` (size match), then
 deletes the matching source bytes and leaves a skeleton. It does **not**
 re-hash dest: dest's `verified` records travelled with the rsync, and
 hashing dest from a laptop over SMB would pull the payload back across the
 wire. Hash dest where it is a local disk (`assemble --rehash`, or run
-assemble on the dest host). A second `--move` is a no-op for files already
-`moved`. The destination path is the usual two-level layout
+assemble on the dest host). A second `--handoff` is a no-op for files already
+`handed_off`. The destination path is the usual two-level layout
 (`<vault>/<repo-slug>/<revision12>/`); rsync the bundle there, not into the
 vault root:
 
 ```bash
 rsync -a ~/darsay/qwen--qwen3.8-27b/<rev>/ /Volumes/big/qwen--qwen3.8-27b/<rev>/
-darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --move
+darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --handoff
 ```
 
 The move is **verify-then-delete, per file**: dest must already have the
@@ -485,27 +496,27 @@ file as `verified` (ledger + size, or a dest-local `--rehash`) before the
 source copy is deleted, so an interrupted or incomplete copy leaves the
 source bytes untouched. A same-size bit-flip during rsync is the same bet
 `archive` after rsync already makes; catch it with `darsay verify` on the
-dest host, not by ingesting dest over SMB. If the moved bytes ever reappear at the source
+dest host, not by ingesting dest over SMB. If the handed-off bytes ever reappear at the source
 (restored by hand from the big vault), reconcile hashes and re-adopts them as
-`verified`: the `moved` record is a hint, and matching bytes always win. Bytes
-that come back *wrong* are removed and the record stays `moved` — a bad
+`verified`: the `handed_off` record is a hint, and matching bytes always win. Bytes
+that come back *wrong* are removed and the record stays `handed_off` — a bad
 restore never re-fetches what the other vault already holds. A source with
-every file moved out holds no payload byte and is removed, leaving exactly
+every file handed off holds no payload byte and is removed, leaving exactly
 what a plain `mv` would have. Any other source stays a skeleton and reports
 what it still owes to fetch — or still holds, when the destination could not
 verify a copy.
 
 When an `archive` run has fetched everything it can *here* but some files are
-`moved` (or when it is run on a fully-drained skeleton), it does not error and
-does not register: it pauses cleanly with `end_reason: "moved"`, exit 10, and
+`handed_off` (or when it is run on a fully-drained skeleton), it does not error and
+does not register: it pauses cleanly with `end_reason: "handed_off"`, exit 10, and
 the hint to assemble the halves into one vault. A skeleton's `list` row counts
-what exists anywhere and names the moved amount:
+what exists anywhere and names the handed-off amount:
 
 ```
-archiving: 52% (28.9/55.6 GB, 7/22 files verified, 27.8 GB moved out)
+archiving: 52% (28.9/55.6 GB, 7/22 files verified, 27.8 GB handed off)
 ```
 
-`moved` is machine-local transfer state, like every other per-file status: it
+`handed_off` is machine-local transfer state, like every other per-file status: it
 lives in `transfer.json` (§4), is excluded from `.mvb.tar` exports, never
 reaches a manifest, and — losing the ledger — degrades a skeleton to a plain
 partial that simply re-fetches. It is the CLI-side, *verified* counterpart to
@@ -715,11 +726,11 @@ final mega-pass.
 | Disk filling mid-session | Plan-phase preflight prices the free-space floor (§6), says where the transfer will stop, and asks on a terminal; the transfer pauses cleanly (`end_reason: disk`, exit 10) before a file that cannot fit above the floor, or the moment free space drops below it, leaving the margin for the rest of the machine. Clear space and rerun. With the floor disabled, a mid-session `ENOSPC` is the same clean pause with state intact. |
 | Network drops mid-session | Bytes received so far are banked in the partial; the panel reads `offline` and retries on a 2 → 30 s schedule (§6) while budgets, the floor, and Ctrl-C keep working. Back within `max_offline` (1 h): the file resumes with a Range request and the outage is one scrollback line. Longer: clean pause, `end_reason: offline`, exit 10; rerun once connected. |
 | Two concurrent runs | Second exits on the live lock. |
-| Partial bundle copied or moved | Relative ledger/cache state resumes at the new vault; an inherited lock is reclaimed only when the physical directory identity changed. rsync then `archive` / `assemble --move` trusts dest ledger + size and fetches only the remainder. Hash dest on the dest host (`--rehash` / `verify`). |
+| Partial bundle copied or moved | Relative ledger/cache state resumes at the new vault; an inherited lock is reclaimed only when the physical directory identity changed. rsync then `archive` / `assemble --handoff` trusts dest ledger + size and fetches only the remainder. Hash dest on the dest host (`--rehash` / `verify`). |
 | Cooperative inputs disagree | `assemble` rejects them before creating a destination; repo, type, full pin, and expected inventory must all match. |
-| `assemble --move`, dest does not have the file as verified | That file's source bytes are kept, not deleted (verify-then-delete, per file, §5); only files dest holds as `verified` (ledger + size, or `--rehash`) are released, and a skeleton still holding such a file is never dissolved. |
-| Moved bytes reappear at a skeleton | Reconciliation hashes and re-adopts them as `verified`; the `moved` record is only a hint. Bytes that fail the pin's checks are removed and the record stays `moved`. |
-| Skeleton ledger lost | Degrades to a plain partial: what is on disk is re-adopted, what was moved out is re-fetched. Never corrupt, only slower. |
+| `assemble --handoff`, dest does not have the file as verified | That file's source bytes are kept, not deleted (verify-then-delete, per file, §5); only files dest holds as `verified` (ledger + size, or `--rehash`) are released, and a skeleton still holding such a file is never dissolved. |
+| Handed-off bytes reappear at a skeleton | Reconciliation hashes and re-adopts them as `verified`; the `handed_off` record is only a hint. Bytes that fail the pin's checks are removed and the record stays `handed_off`. |
+| Skeleton ledger lost | Degrades to a plain partial: what is on disk is re-adopted, what was handed off is re-fetched. Never corrupt, only slower. |
 
 ## 9. Considered and rejected
 
@@ -762,12 +773,12 @@ final mega-pass.
 - Cooperative lanes and `assemble` were added during implementation. They
   operate above the same pinned expected set: order and offline aggregation
   are acceleration only and cannot change the registered payload.
-- Skeletons (`assemble --move`, the `moved` file state) reuse that same
-  machinery: `moved` is a fourth per-file status beside verified / partial /
-  missing, entered only through `assemble --move`, read by the same
+- Skeletons (`assemble --handoff`, the `handed_off` file state) reuse that same
+  machinery: `handed_off` is a fourth per-file status beside verified / partial /
+  missing, entered only through `assemble --handoff`, read by the same
   reconcile → plan → transfer loop. No new verb, no new schema, no change to
   the manifest, the export format, or the catalog — a skeleton is a partial
-  whose verified bytes moved out, and the registration bar (every file
+  whose verified bytes handed off, and the registration bar (every file
   verified *here*) does not move.
 
 ## See also

@@ -473,7 +473,7 @@ _STOP_VERDICTS = {
     "disk": "paused: disk",
     "budget": "paused: budget",
     "offline": "paused: offline",
-    "moved": "paused: moved",
+    "handed_off": "paused: handed off",
     "interrupt": "stopped: Ctrl-C",
 }
 
@@ -842,14 +842,14 @@ def reconcile(
             expected_size is None or path.stat().st_size == expected_size
         )
 
-        # A moved file whose bytes are absent is an *intended* absence: the
+        # A handed-off file whose bytes are absent is an *intended* absence: the
         # verified bytes live in another vault. Trust the record and skip it
         # (never demote to missing, never re-fetch). If the bytes have come
         # back — copied by hand, restored from the other vault — the record
         # is only a hint: fall through and the present-file adoption path
         # below re-hashes them and promotes them to ``verified``. Bytes that
-        # fail those checks are removed while the moved record is kept.
-        if state.get("status") == "moved" and not path.is_file():
+        # fail those checks are removed while the handed-off record is kept.
+        if state.get("status") == "handed_off" and not path.is_file():
             continue
 
         if state.get("status") == "verified" and size_matches:
@@ -891,8 +891,8 @@ def reconcile(
         elif path.is_file() and not size_matches:
             actual_size = path.stat().st_size
             outcome = (
-                "removed; moved record kept"
-                if state.get("status") == "moved"
+                "removed; handed-off record kept"
+                if state.get("status") == "handed_off"
                 else "removed and demoted"
             )
             record_event(
@@ -928,9 +928,9 @@ def reconcile(
             if apply:
                 _discard_payload_file(path, payload_dir)
 
-        if state.get("status") == "moved":
+        if state.get("status") == "handed_off":
             # The bytes that came back failed the pin's checks and were
-            # removed above, but that does not unsay the move: the verified
+            # removed above, but that does not unsay the hand-off: the verified
             # copy still lives in the other vault. Keep the record so
             # nothing re-fetches what that vault already holds.
             if apply:
@@ -952,8 +952,8 @@ def reconcile(
 
 
 def transfer_plan(payload_dir: Path, ledger: dict) -> dict:
-    counts = {"verified": 0, "moved": 0, "partial": 0, "missing": 0}
-    bytes_by_state = {"verified": 0, "moved": 0, "partial": 0, "missing": 0}
+    counts = {"verified": 0, "handed_off": 0, "partial": 0, "missing": 0}
+    bytes_by_state = {"verified": 0, "handed_off": 0, "partial": 0, "missing": 0}
     total = 0
     for expected in ledger["expected"]:
         size = expected.get("size") or 0
@@ -964,12 +964,12 @@ def transfer_plan(payload_dir: Path, ledger: dict) -> dict:
             counts["verified"] += 1
             bytes_by_state["verified"] += size
             continue
-        # A moved file is verified, its bytes handed to another vault. There
+        # A handed-off file is verified, its bytes handed to another vault. There
         # is nothing here to fetch and nothing here to register: it counts
         # toward neither remaining network nor completeness of this bundle.
-        if status == "moved":
-            counts["moved"] += 1
-            bytes_by_state["moved"] += size
+        if status == "handed_off":
+            counts["handed_off"] += 1
+            bytes_by_state["handed_off"] += size
             continue
         partial = (
             min(_partial_bytes(payload_dir, expected, ledger), size) if size else 0
@@ -984,7 +984,7 @@ def transfer_plan(payload_dir: Path, ledger: dict) -> dict:
         0,
         total
         - bytes_by_state["verified"]
-        - bytes_by_state["moved"]
+        - bytes_by_state["handed_off"]
         - bytes_by_state["partial"],
     )
     total_files = len(ledger["expected"])
@@ -995,7 +995,7 @@ def transfer_plan(payload_dir: Path, ledger: dict) -> dict:
         "complete": counts["verified"] == total_files,
         # ``fetched`` = nothing left to fetch here: every file is verified
         # here or verified in another vault (a fully-drained skeleton).
-        "fetched": counts["verified"] + counts["moved"] == total_files,
+        "fetched": counts["verified"] + counts["handed_off"] == total_files,
     }
 
 
@@ -1039,9 +1039,9 @@ def print_plan(plan: dict, progress=print, max_rate: int | None = None) -> None:
         f"  verified: {files['verified']}/{files['total']} files, "
         f"{human_size(sizes['verified'])}"
     )
-    if files.get("moved"):
+    if files.get("handed_off"):
         progress(
-            f"  moved:    {files['moved']} files, {human_size(sizes['moved'])} — "
+            f"  handoff:  {files['handed_off']} files, {human_size(sizes['handed_off'])} — "
             "verified in another vault (assemble to register)"
         )
     progress(
@@ -2106,7 +2106,7 @@ def transfer_all(
                 expected
                 for expected in assigned
                 if (ledger["files"].get(expected["path"]) or {}).get("status")
-                not in ("verified", "moved")
+                not in ("verified", "handed_off")
             ]
             if not remaining:
                 continue
@@ -2152,14 +2152,14 @@ def transfer_all(
 
         # Everything fetchable here is done, but some files live in another
         # vault (a skeleton). This is a clean stop, not a failure: raised
-        # inside the live panel so its closing line reads ``paused: moved``,
+        # inside the live panel so its closing line reads ``paused: handed off``,
         # and carried out through the same PartialTransfer path as a budget
         # or offline pause (exit 10 — assemble the halves to register).
         final = transfer_plan(payload_dir, ledger)
         if final["fetched"] and not final["complete"]:
             raise CleanStop(
-                "moved",
-                "every file is verified here or moved to another vault; "
+                "handed_off",
+                "every file is verified here or handed off to another vault; "
                 "assemble the halves into one vault to register",
             )
 
@@ -2180,13 +2180,13 @@ def _registered_pin_matches(destination: Path, seed: dict) -> bool:
     ) == seed.get("repo_id")
 
 
-def _refuse_move_of_registered_sources(
+def _refuse_handoff_of_registered_sources(
     sources: list[tuple[Path, dict]], destination: Path
 ) -> None:
-    """A registered payload is frozen; ``--move`` must not delete it.
+    """A registered payload is frozen; ``--handoff`` must not delete it.
 
     Relocate a finished bundle with rsync, then ``darsay rm`` the source.
-    ``assemble --move`` is the partial/skeleton verb.
+    ``assemble --handoff`` is the partial/skeleton verb.
     """
     dest_real = destination.resolve()
     for source_dir, _ledger in sources:
@@ -2194,7 +2194,7 @@ def _refuse_move_of_registered_sources(
             continue
         if (source_dir / "manifest.json").is_file():
             raise SystemExit(
-                f"error: cannot --move a registered bundle: {source_dir}\n"
+                f"error: cannot --handoff a registered bundle: {source_dir}\n"
                 "  a registered payload is frozen. rsync it into the other "
                 "vault, then `darsay rm` the source if you want the space."
             )
@@ -2283,7 +2283,7 @@ def _ledger_hosts(ledger: dict) -> list[str]:
     )
 
 
-def release_moved(
+def hand_off_files(
     source_dir: Path,
     source_ledger: dict,
     destination_ledger: dict,
@@ -2292,18 +2292,18 @@ def release_moved(
     """Hand a source's verified bytes to the destination and skeletonize it.
 
     For each file the *destination* now holds as ``verified``, delete the
-    matching bytes at the source and rewrite the source record as ``moved``
-    (keeping every hash, adding ``moved_at``). This is ``mv`` with rsync's
-    ``--remove-source-files`` guarantee: the gate is dest's own ``verified``
+    matching bytes at the source and rewrite the source record as ``handed_off``
+    (keeping every hash, adding ``handed_off_at``). This is rsync's
+    ``--remove-source-files`` guarantee, per file: the gate is dest's own ``verified``
     record (ledger + size after an rsync, or its hash under ``--rehash``),
     so a file dest cannot vouch for keeps its source bytes.
 
     The source ledger is saved after every file, so a crash mid-loop leaves
-    a consistent skeleton. Returns ``(moved_files, moved_bytes)``.
+    a consistent skeleton. Returns ``(handed_off_files, handed_off_bytes)``.
     """
     payload_dir = source_dir / root
-    moved_files = 0
-    moved_bytes = 0
+    handed_off_files = 0
+    handed_off_bytes = 0
     for expected in source_ledger["expected"]:
         relative = expected["path"]
         dest_state = destination_ledger["files"].get(relative) or {}
@@ -2318,13 +2318,13 @@ def release_moved(
         _discard_payload_file(path, payload_dir)
         source_ledger["files"][relative] = {
             **src_state,
-            "status": "moved",
-            "moved_at": _utc_now(),
+            "status": "handed_off",
+            "handed_off_at": _utc_now(),
         }
-        moved_bytes += int(src_state.get("size") or expected.get("size") or 0)
-        moved_files += 1
+        handed_off_bytes += int(src_state.get("size") or expected.get("size") or 0)
+        handed_off_files += 1
         save_ledger(source_dir, source_ledger)
-    return moved_files, moved_bytes
+    return handed_off_files, handed_off_bytes
 
 
 def _release_sources(
@@ -2337,8 +2337,8 @@ def _release_sources(
     """Skeletonize each source once its bytes are verified in the destination.
 
     A source file is deleted only when the destination holds that same file
-    as ``verified`` (see :func:`release_moved`), so an interrupted copy never
-    costs the source its only copy. A source with every file moved out is
+    as ``verified`` (see :func:`hand_off_files`), so an interrupted copy never
+    costs the source its only copy. A source with every file handed off is
     dissolved (it holds no payload byte by construction); any other source
     is kept as a skeleton and what it still holds or owes is reported.
     """
@@ -2355,38 +2355,38 @@ def _release_sources(
             # the destination just verified.
             continue
         with transfer_lock(source_dir, progress=progress):
-            moved_files, moved_bytes = release_moved(
+            handed_off_files, handed_off_bytes = hand_off_files(
                 source_dir, source_ledger, ledger, root
             )
-            if not moved_files:
+            if not handed_off_files:
                 continue
             source_hosts = _ledger_hosts(source_ledger)
             source_host = ", ".join(source_hosts) if source_hosts else host
             record_event(
                 ledger,
                 None,
-                "moved_in",
-                f"received {moved_files} files ({moved_bytes} bytes) from a "
+                "handoff_in",
+                f"received {handed_off_files} files ({handed_off_bytes} bytes) from a "
                 f"skeleton on {source_host}",
             )
             remaining = transfer_plan(source_dir / root, source_ledger)
-            if remaining["files"]["moved"] == remaining["files"]["total"]:
-                # Fully drained: every expected file is moved, so the source
+            if remaining["files"]["handed_off"] == remaining["files"]["total"]:
+                # Fully drained: every expected file is handed off, so the source
                 # holds no payload byte by construction. ``fetched`` is not
                 # enough here — it also counts files still verified only at
                 # the source (a copy the destination failed to verify), and
                 # those bytes must never be deleted.
                 shutil.rmtree(source_dir, ignore_errors=True)
                 progress(
-                    f"Moved {moved_files} files ({human_size(moved_bytes)}) out of "
+                    f"Handed off {handed_off_files} files ({human_size(handed_off_bytes)}) from "
                     f"{source_dir}; nothing left to fetch there — skeleton removed."
                 )
             else:
                 record_event(
                     source_ledger,
                     None,
-                    "moved_out",
-                    f"handed {moved_files} files ({moved_bytes} bytes) to vault "
+                    "handoff_out",
+                    f"handed {handed_off_files} files ({handed_off_bytes} bytes) to vault "
                     f"{dest_vault!r} on {host}",
                 )
                 save_ledger(source_dir, source_ledger)
@@ -2395,14 +2395,14 @@ def _release_sources(
                 )
                 if rem_files:
                     progress(
-                        f"Moved {moved_files} files ({human_size(moved_bytes)}) out of "
+                        f"Handed off {handed_off_files} files ({human_size(handed_off_bytes)}) from "
                         f"{source_dir}; {rem_files} files "
                         f"({human_size(remaining['bytes']['remaining_network'])}) "
                         "remain to fetch there."
                     )
                 else:
                     progress(
-                        f"Moved {moved_files} files ({human_size(moved_bytes)}) out of "
+                        f"Handed off {handed_off_files} files ({human_size(handed_off_bytes)}) from "
                         f"{source_dir}; {remaining['files']['verified']} files the "
                         "destination could not verify stay put there."
                     )
@@ -2503,7 +2503,7 @@ def _files_to_hash(
         state = ledger["files"].get(relative) or {}
         if state.get("status") == "verified" and not rehash:
             continue
-        if state.get("status") == "moved" and not path.is_file():
+        if state.get("status") == "handed_off" and not path.is_file():
             continue
         files.append((relative, path.stat().st_size))
     return files
@@ -2584,13 +2584,13 @@ def assemble_partials(
     vault: Path,
     progress=print,
     *,
-    move: bool = False,
+    handoff: bool = False,
     rehash: bool = False,
 ) -> tuple[Path, dict]:
     """Combine matching partial bundles offline into one resumable target.
 
-    ``move=True`` hands each source's verified bytes to the destination and
-    turns the source into a skeleton (see :func:`release_moved`): the pin and
+    ``handoff=True`` hands each source's verified bytes to the destination and
+    turns the source into a skeleton (see :func:`hand_off_files`): the pin and
     the recorded hashes stay behind, the payload bytes do not, so the source
     machine can go on to fetch the *other* half without re-downloading what
     it already handed over. A source left with nothing to fetch is removed.
@@ -2602,9 +2602,9 @@ def assemble_partials(
     hashing dest over a network mount would pull the payload back over the
     wire. ``rehash=True`` hashes them anyway (run it where dest is a local
     disk); present files with no verified record are always hashed
-    (adoption). ``move=True`` then skeletonizes the source for every file
+    (adoption). ``handoff=True`` then skeletonizes the source for every file
     dest holds as ``verified``. A destination that is already *registered*
-    is frozen — without ``--move`` that is an error; with ``--move`` dest is
+    is frozen — without ``--handoff`` that is an error; with ``--handoff`` dest is
     not rewritten and the source is skeletonized.
     """
     import copy
@@ -2644,8 +2644,8 @@ def assemble_partials(
     expected_paths = {item["path"] for item in seed["expected"]}
     dest_registered = (destination / "manifest.json").is_file()
 
-    if move:
-        _refuse_move_of_registered_sources(sources, destination)
+    if handoff:
+        _refuse_handoff_of_registered_sources(sources, destination)
 
     trust_note = (
         "re-hashed dest against the pin"
@@ -2655,7 +2655,7 @@ def assemble_partials(
     )
     progress(f"Assembling into {destination}")
     with transfer_lock(destination, progress=progress):
-        if dest_registered and not move:
+        if dest_registered and not handoff:
             raise SystemExit(
                 f"error: destination is already a registered bundle: {destination}"
             )
@@ -2770,7 +2770,7 @@ def assemble_partials(
                 destination_payload,
             )
 
-            if move:
+            if handoff:
                 _release_sources(sources, destination, ledger, root, progress)
 
             finish_session(destination, ledger, session, "assemble")
@@ -2853,13 +2853,13 @@ def assemble_plan(
     partials: list[Path],
     vault: Path,
     *,
-    move: bool = False,
+    handoff: bool = False,
     rehash: bool = False,
 ) -> dict:
     """What :func:`assemble_partials` would do — the same refusals, no lock, no write.
 
     Counts assume every file copied or adopted hashes clean at dest; the real
-    run verifies each one before it trusts it, and ``--move`` releases a source
+    run verifies each one before it trusts it, and ``--handoff`` releases a source
     file only once dest holds it as ``verified``.
     """
     import copy
@@ -2890,9 +2890,9 @@ def assemble_plan(
     root = payload_root_for(seed["repo_type"])
     destination_payload = destination / root
     dest_registered = (destination / "manifest.json").is_file()
-    if move:
-        _refuse_move_of_registered_sources(sources, destination)
-    if dest_registered and not move:
+    if handoff:
+        _refuse_handoff_of_registered_sources(sources, destination)
+    if dest_registered and not handoff:
         raise SystemExit(
             f"error: destination is already a registered bundle: {destination}"
         )
@@ -2971,14 +2971,14 @@ def assemble_plan(
         row["release_files"] = 0
         row["release_bytes"] = 0
         row["dissolves"] = False
-        if not move or row["is_destination"]:
+        if not handoff or row["is_destination"]:
             continue
         source_payload = row["path"] / root
         left = 0  # expected files the source would still hold or still owe
         for relative, size in expected.items():
             src_state = source_ledger["files"].get(relative) or {}
             status = src_state.get("status")
-            if status == "moved":
+            if status == "handed_off":
                 continue
             if (
                 status == "verified"
@@ -3000,7 +3000,7 @@ def assemble_plan(
     return {
         "destination": destination,
         "state": state,
-        "move": move,
+        "handoff": handoff,
         "rehash": rehash,
         "sources": [row for row, _ledger in rows],
         "copy": {"files": len(planned), "bytes": sum(planned.values())},
@@ -3110,8 +3110,8 @@ def print_assemble_plan(plan: dict, progress=print) -> None:
             f"({human_size(after['missing_bytes'])}) still to fetch — continue "
             "with `darsay archive`"
         )
-    if plan["move"]:
-        label = "--move:"
+    if plan["handoff"]:
+        label = "--handoff:"
         for row in plan["sources"]:
             if row["is_destination"]:
                 continue

@@ -11,6 +11,35 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Added
 
+- `darsay mv BUNDLE VAULT` — move a registered bundle into another vault.
+  Same filesystem: a rename. Otherwise: copy into a staging directory,
+  re-hash every payload file there against the manifest, stamp the new
+  `archive.location`, rename into place, and only then remove the source;
+  a failed verification removes the copy and leaves the source untouched.
+  Refuses partials (naming `assemble --handoff`), a destination vault that
+  does not exist (an unmounted disk is not a vault), and an existing
+  destination without `--force`. `hydration.json` and `transfer.lock` stay
+  behind; everything else travels. `-n` previews. rsync into
+  `<vault>/<name>/<rev>/` remains a first-class copy — `mv` is that
+  contract as one verb, never a requirement.
+- Manifest schema 1.8.0 (additive): `archive.moves`, a list of
+  `{at, from_location, method}` written by `mv`.
+- `docs/FAQ.md` — moving bundles, rsync's standing, `mv` versus
+  `assemble --handoff`, what travels and what stays.
+
+### Changed
+
+- `assemble --move` is now `assemble --handoff`, and the per-file ledger
+  state `moved` is `handed_off` (`moved_at` → `handed_off_at`; events
+  `handoff_out` / `handoff_in`; `archive` pauses with `end_reason:
+  handed_off`; `list` says `handed off`, `list --json` reports
+  `handed_off_bytes`; the plan line reads `handoff:`). *Move* now means
+  one thing — a registered bundle changes vault (`mv`) — and *hand-off*
+  the other: a partial's verified files cross vaults one by one, leaving a
+  skeleton. The mechanism is unchanged. A skeleton ledger written before
+  this release carries `moved` records; they are treated as missing and
+  re-fetched — slower, never lossy.
+
 - `darsay archive SOURCE --board <board-url>` — you pick the source,
   the board still gets the claim and the progress gauge. A source with
   no matching row archives unclaimed with a warning; a row another

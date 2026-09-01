@@ -23,7 +23,7 @@ def test_archive_default_skips_confident_prints(vault, test_provider):
     notes = []
     bundle = archive_quiet("test:acme/toy", vault=vault, progress=notes.append)
     manifest = load_manifest(bundle)
-    assert manifest["schema_version"] == SCHEMA_VERSION == "1.7.0"
+    assert manifest["schema_version"] == SCHEMA_VERSION == "1.8.0"
     subset = manifest["source"]["subset"]
     assert subset["policy"] == "masters"
     assert subset["include"] == ["model.safetensors"]

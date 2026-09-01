@@ -4,7 +4,7 @@
 |---|---|
 | **Author** | TBD |
 | **Date** | 2026-08-29 |
-| **Status** | Implemented (unreleased) — shipped as `assemble --move` + the `moved` file state. User-facing docs: [INCREMENTAL.md §5](../INCREMENTAL.md#across-disks-assemble---move-and-skeletons), [CONCEPTS.md](../CONCEPTS.md#pin), [examples](../../examples/README.md#archive-in-halves-across-two-disks). |
+| **Status** | Implemented — shipped as `assemble --move` + the `moved` file state; renamed to **`assemble --handoff`** + the **`handed_off`** state when `darsay mv` arrived, so that *move* means one thing (a whole registered bundle changes vault) and *hand-off* means the other (a partial's verified files cross vaults one by one, leaving a skeleton). The body below keeps the original vocabulary. User-facing docs: [INCREMENTAL.md §5](../INCREMENTAL.md#across-disks-assemble---move-and-skeletons), [CONCEPTS.md](../CONCEPTS.md#pin), [examples](../../examples/README.md#archive-in-halves-across-two-disks). |
 | **Audience** | darsay CLI implementers; readers of `docs/INCREMENTAL.md` |
 | **Related** | darsay 0.12.0 · `transfer_version` 1 · catalog schema 1.0.0 (unchanged) · manifest schema (unchanged) |
 

@@ -21,7 +21,7 @@
 | | Current |
 |---|---|
 | Tool | **0.14.8** |
-| Manifest schema | **1.7.0** |
+| Manifest schema | **1.8.0** |
 | Catalog schema | **1.2.0** |
 | MVB format | **1.2** |
 | License | Apache 2.0 |
@@ -43,6 +43,10 @@ payload vs metadata, why the formats outlive the tool.
 [Examples](../examples/README.md) — estimate, resume, datasets, catalogs,
 export, shards, verify. Then the spec for the command you are about to run.
 
+**A bundle is on the wrong disk, or you are not sure which verb.**
+[FAQ](FAQ.md) — moving bundles between vaults, rsync's standing (first-class,
+always), `darsay mv` versus `assemble --handoff`, what travels and what stays.
+
 **You are reading this in 2040 and the CLI is gone.**
 [Manifest](MANIFEST.md) and [MVB format](MVB-FORMAT.md) are the two
 documents that must survive to open a bundle. [Catalogs](CATALOGS.md)
@@ -62,7 +66,8 @@ required to open a bundle. Everything else is how we got there.
 | [**Concepts**](CONCEPTS.md) | You want the objects named before the flags |
 | [**Examples**](../examples/README.md) | You want a copy-paste recipe |
 | [**Hydration**](HYDRATION.md) | `hydrate` / `run` / `envs` — isolated engines, offline inference |
-| [**Incremental transfer**](INCREMENTAL.md) | Budgets, Ctrl-C, Range partials, the free-space floor and `config.toml`, `--shard N/T`, `assemble` |
+| [**Incremental transfer**](INCREMENTAL.md) | Budgets, Ctrl-C, Range partials, the free-space floor and `config.toml`, `--shard N/T`, `assemble`, `assemble --handoff` |
+| [**FAQ**](FAQ.md) | Moving a bundle to another disk (`mv`, or rsync — always valid); `mv` vs `assemble --handoff`; what travels, what stays |
 | [**Datasets**](DATASETS.md) | The source is `datasets/owner/name`; payload under `data/` |
 | [**Sources**](SOURCES.md) | Provider-qualified refs; Hugging Face is a plugin |
 | [**Quantization**](QUANTIZATION.md) | Masters-first archiving, `darsay classify`, satellite quants, derived precision |
@@ -102,6 +107,8 @@ The short list that every document, and every change, is measured against:
    ledger loss, and copying to another vault. No source-machine absolute
    paths in the ledger. rsync is a first-class copy: the next darsay
    command trusts dest ledger + size and fetches only what is still missing.
+   `darsay mv` is that contract as one verb (copy, verify where it landed,
+   then remove the source) and is never a requirement.
 3. **Export determinism.** The same bundle state produces a byte-identical
    `.mvb.tar`. Volatile machine-local files are excluded.
 4. **Record, don't fabricate.** Manifests contain only what was established.

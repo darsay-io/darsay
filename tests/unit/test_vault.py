@@ -144,13 +144,13 @@ def test_bundle_records_source_address_and_remaining(tmp_path):
     assert rows[0]["status"] == "have"
     assert rows[0]["source_address"] == "huggingface:acme/toy"
     assert rows[0]["remaining_bytes"] == 0
-    assert rows[0]["moved_bytes"] == 0
+    assert rows[0]["handed_off_bytes"] == 0
     assert rows[0]["revision"].startswith("aaaa")
 
 
 def test_bundle_records_skeleton_row_reports_moved(tmp_path):
-    """A partial with moved files reads as a skeleton: percent counts what
-    exists anywhere, and the row says how much was moved out."""
+    """A partial with handed-off files reads as a skeleton: percent counts what
+    exists anywhere, and the row says how much was handed off."""
     import json
 
     from darsay.vault import bundle_records
@@ -174,7 +174,11 @@ def test_bundle_records_skeleton_row_reports_moved(tmp_path):
                 ],
                 "files": {
                     "a.bin": {"status": "verified", "size": 40},
-                    "b.bin": {"status": "moved", "size": 60, "moved_at": "2026-08-30"},
+                    "b.bin": {
+                        "status": "handed_off",
+                        "size": 60,
+                        "handed_off_at": "2026-08-30",
+                    },
                 },
                 "metadata": {},
                 "sessions": [],
@@ -185,12 +189,12 @@ def test_bundle_records_skeleton_row_reports_moved(tmp_path):
     )
     (row,) = bundle_records(tmp_path)
     assert row["status"] == "partial"
-    assert row["moved_bytes"] == 60
-    # 40 verified here + 60 moved out = 100 of 100 bytes exist somewhere.
+    assert row["handed_off_bytes"] == 60
+    # 40 verified here + 60 handed off = 100 of 100 bytes exist somewhere.
     assert row["percent"] == 100
     # Nothing left to fetch here.
     assert row["remaining_bytes"] == 0
-    assert "60 B moved out" in row["integrity"]
+    assert "60 B handed off" in row["integrity"]
 
 
 def test_resolve_miss_hints_catalog(tmp_path):

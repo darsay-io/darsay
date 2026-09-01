@@ -99,7 +99,7 @@ def _existing_transfer(
                 "total": count,
                 "verified": count,
                 "unverified": 0,
-                "moved": 0,
+                "handed_off": 0,
                 "partial": 0,
                 "missing": 0,
             },
@@ -107,7 +107,7 @@ def _existing_transfer(
                 "total": total,
                 "verified": total,
                 "unverified": 0,
-                "moved": 0,
+                "handed_off": 0,
                 "partial": 0,
                 "missing": 0,
                 "banked": total,
@@ -142,8 +142,20 @@ def _existing_transfer(
         provider = get_provider(ref.provider)
 
     present = dict(iter_payload_files(payload_dir)) if payload_dir.is_dir() else {}
-    counts = {"verified": 0, "unverified": 0, "moved": 0, "partial": 0, "missing": 0}
-    sizes = {"verified": 0, "unverified": 0, "moved": 0, "partial": 0, "missing": 0}
+    counts = {
+        "verified": 0,
+        "unverified": 0,
+        "handed_off": 0,
+        "partial": 0,
+        "missing": 0,
+    }
+    sizes = {
+        "verified": 0,
+        "unverified": 0,
+        "handed_off": 0,
+        "partial": 0,
+        "missing": 0,
+    }
     total = 0
     scratch = 0
     for item in expected:
@@ -159,12 +171,12 @@ def _existing_transfer(
             counts[bucket] += 1
             sizes[bucket] += size
             continue
-        # A moved file's bytes are verified in another vault: not present
+        # A handed-off file's bytes are verified in another vault: not present
         # here, not this vault's to fetch. archive on the source will not
         # re-download it — assembly with the other vault registers.
-        if state.get("status") == "moved":
-            counts["moved"] += 1
-            sizes["moved"] += size
+        if state.get("status") == "handed_off":
+            counts["handed_off"] += 1
+            sizes["handed_off"] += size
             continue
         banked = min(provider.partial_bytes(payload_dir, item), size) if size else 0
         if banked:
@@ -186,7 +198,7 @@ def _existing_transfer(
             "total": total,
             **sizes,
             "banked": banked_total,
-            "remaining_network": max(0, total - banked_total - sizes["moved"]),
+            "remaining_network": max(0, total - banked_total - sizes["handed_off"]),
         },
         "scratch_bytes": scratch,
     }
@@ -415,12 +427,12 @@ def _download_lines(est: dict, *, width: int = 80, color: bool = False) -> list[
         return [label + "nothing to fetch (no sized files upstream)"]
 
     banked = transfer["bytes"]["banked"] if transfer else 0
-    moved = (transfer["bytes"].get("moved") or 0) if transfer else 0
+    handed_off = (transfer["bytes"].get("handed_off") or 0) if transfer else 0
     remaining = transfer["bytes"]["remaining_network"] if transfer else total
-    # A skeleton's moved bytes are done for this pin (verified in another
+    # A skeleton's handed-off bytes are done for this pin (verified in another
     # vault), so the bar counts them alongside what is banked here — it
     # answers "how much of this pin exists anywhere", matching `list`.
-    accounted = banked + moved
+    accounted = banked + handed_off
     fraction = min(1.0, accounted / total)
     bar_width = min(28, max(12, max(60, width) - 56))
     bar = styled_bar(fraction, bar_width, color=color)
@@ -450,17 +462,17 @@ def _download_lines(est: dict, *, width: int = 80, color: bool = False) -> list[
     ]
     if segments:
         note(f"banked {human_size(banked)} = " + " + ".join(segments))
-    if counts.get("moved"):
+    if counts.get("handed_off"):
         note(
-            f"{human_size(sizes['moved'])} in {_n_files(counts['moved'])} "
-            "moved to another vault (verified there)"
+            f"{human_size(sizes['handed_off'])} in {_n_files(counts['handed_off'])} "
+            "handed off to another vault (verified there)"
         )
     if remaining:
         fetch_files = counts["partial"] + counts["missing"]
         note(f"still to fetch {human_size(remaining)} in {_n_files(fetch_files)}")
-    elif moved:
+    elif handed_off:
         note(
-            "nothing to fetch here — assemble with the vault holding the moved "
+            "nothing to fetch here — assemble with the vault holding the handed-off "
             "files to register"
         )
     else:
