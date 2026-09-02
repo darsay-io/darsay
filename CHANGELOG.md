@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.11] - 2026-09-02
+
+
 ### Breaking
 
 - **Negatives and prints, one vocabulary.** *Master* is gone from every
