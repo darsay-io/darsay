@@ -359,11 +359,14 @@ def group_by_family(rows: list[dict], *, source_key: str = "source") -> list[dic
             if fam["publishers"]
             else None
         )
-        # Display casing: the most common spelling among members.
+        # Display casing: the most common spelling among members, counting a
+        # provider ref's spelling (the publisher's own) over a home URL's,
+        # which the web lowercases.
         spellings: dict[str, int] = {}
-        for lin, _ in fam["rows"]:
+        for lin, row in fam["rows"]:
             if lin.family:
-                spellings[lin.family] = spellings.get(lin.family, 0) + 1
+                weight = 2 if _publisher_of(row.get(source_key) or "") else 1
+                spellings[lin.family] = spellings.get(lin.family, 0) + weight
         family_name = max(spellings, key=spellings.get) if spellings else None
         out.append(
             {

@@ -115,6 +115,16 @@ def test_group_by_family_builds_the_tree_oldest_generation_first():
     assert [g["generation"] for g in kimi["generations"]] == ["K2", "K3"]
 
 
+def test_a_home_url_never_sets_the_family_spelling_over_a_repo_name():
+    rows = [
+        {"source": "https://www.qwencloud.com/models/qwen3.8-max-0902"},
+        {"source": "huggingface:Qwen/Qwen3.8-27B"},
+    ]
+    assert group_by_family(rows)[0]["family"] == "Qwen"
+    only_home = [{"source": "https://www.qwencloud.com/models/qwen3.8-max-0902"}]
+    assert group_by_family(only_home)[0]["family"] == "qwen"
+
+
 def test_lineage_is_a_frozen_value():
     a = parse_name("Qwen3-0.6B")
     b = parse_name("Qwen3-0.6B")
