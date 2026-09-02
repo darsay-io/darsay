@@ -36,7 +36,7 @@ def test_archive_model_writes_immutable_payload_and_manifest(vault, test_provide
     assert manifest["model_metadata"]["training_cutoff"] is None
     assert manifest["curation"]["historical_significance"] is None
     # Query caps are recorded, never silently truncated.
-    assert manifest["relationships"]["query_limit"] == 100
+    assert manifest["lineage"]["query_limit"] == 100
     assert manifest["security"]["integrity_status"] == "verified-against-upstream"
 
 

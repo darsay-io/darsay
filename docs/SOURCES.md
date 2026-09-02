@@ -55,6 +55,18 @@ A source string whose scheme is not a registered provider is an error, not
 a silent Hugging Face parse. Adding ModelScope later is
 `modelscope:qwen/Qwen-7B` (or that host's URL) with no CLI change.
 
+## Home URLs: closed works
+
+A catalog may also hold a work darsay cannot fetch — an API-only model,
+an announced release, a host with no provider yet — by its **home URL**
+(`https://www.qwencloud.com/models/qwen3.8-max-0902`). `estimate` and
+`archive` refuse such an address (there is nothing to fetch); `catalog
+add` accepts it as a **closed** work that holds its place in its family
+([Catalogs](CATALOGS.md#entry), [Concepts → closed works](CONCEPTS.md#closed-works)).
+The last path segment is read as the work's name, so the closed row
+lands in the same family and generation as its open siblings. When the
+weights are published, the address becomes a source ref.
+
 ## What a provider owns
 
 The interface is `SourceProvider` in `src/darsay/providers/base.py`.
@@ -68,7 +80,7 @@ Each backend implements:
 | `transient_network_error` | Classify a `download_file` failure worth waiting out (`"DNS lookup failed"`, `"connection reset"`) versus a real error; the base class reads the OS-level cause chain, a plugin adds its transport library's types |
 | `transfer_session` | Optional wrap around a transfer run (resume semantics, caches); receives the operator's `max_rate` so the transport can pace smoothly |
 | `variants` | `estimate --variants` (or `None`) |
-| `relationships` | Best-effort ecosystem snapshot at register time |
+| `lineage` | Parents as upstream declares them, and a best-effort snapshot of descendants at register time |
 | `access_record` | Gate / authorization notes for the manifest |
 
 Transfer bookkeeping — pin, reconcile, budgets, sibling-blob reuse, assemble —

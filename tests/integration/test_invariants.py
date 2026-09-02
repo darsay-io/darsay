@@ -42,7 +42,7 @@ def test_manifest_records_established_facts_only(vault, test_provider):
     assert manifest["curation"]["historical_significance"] is None
     assert manifest["runtime"]["tested_hardware"] is None
     # Query caps are explicit.
-    assert manifest["relationships"]["query_limit"] == 100
+    assert manifest["lineage"]["query_limit"] == 100
 
 
 def test_ledger_has_no_host_absolute_paths(vault, test_provider):

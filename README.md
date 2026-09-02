@@ -24,7 +24,7 @@ darsay run     qwen--qwen3-0.6b "Say hello"
   <a href="https://github.com/darsay-io/darsay/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/darsay-io/darsay/ci.yml?style=flat-square&label=CI" alt="CI"></a>
   <a href="https://github.com/darsay-io/darsay/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-38bdf8?style=flat-square" alt="Apache 2.0"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-00b4ff?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/schema-v1.6.0-0ea5e9?style=flat-square" alt="Manifest schema 1.6.0">
+  <img src="https://img.shields.io/badge/schema-v2.0.0-0ea5e9?style=flat-square" alt="Manifest schema 2.0.0">
 </p>
 
 <p align="center">
@@ -40,7 +40,7 @@ darsay run     qwen--qwen3-0.6b "Say hello"
 ## The idea in four lines
 
 You have a **vault**. It holds **bundles**. A **catalog** is a list of
-sources you intend to archive — shareable before any payload exists.
+works you intend to archive — shareable before any payload exists.
 
 Each bundle is one **pinned revision** of one source: an immutable payload
 (`model/` or `data/`), a `manifest.json` of recorded facts, and one file
@@ -138,7 +138,12 @@ darsay estimate Qwen/Qwen3.8-27B
 ```
 Qwen/Qwen3.8-27B @ main -> 1d4bf0f2ff60
   image-text-to-text | license apache-2.0
+  negatives:    the whole repo — 1 negative set (28 files, 51.7 GiB); nothing here is a print
   parameters:   27.78B BF16  [upstream safetensors metadata]
+  precision:    BF16 — 2.00 B/param: about one full-fidelity copy (16-bit)
+  family:       Qwen · generation 3.8 · member 27B  [read from the name]
+  architecture: qwen3_5  [config.json]
+  lineage:      no parents declared upstream
   payload:      32 files, 51.8 GiB
   engines:      transformers
   completeness: complete
@@ -151,7 +156,10 @@ To archive: darsay archive Qwen/Qwen3.8-27B
 ```
 
 Exits non-zero when free space is insufficient, so it doubles as a guard
-in scripts. `--variants` lists the quantized ecosystem.
+in scripts. The `precision:` line is why the size is what it is —
+parameters times bytes per parameter — and `family:` places the work in
+its lineage ([Concepts](docs/CONCEPTS.md#precision)). `--variants` lists
+the quantized ecosystem.
 `--include '*Q4_K_M*'` prices one file inside a huge GGUF pack. When a
 partial archive already exists, the download block prices the resume
 instead — verified, partial, and unverified bytes are banked, and only
@@ -222,14 +230,14 @@ archiving**; the bundle hash covers it alone.
 
 | Section | Contents |
 |---|---|
-| `identity` | name, family, publisher, version, release date, bundle id |
+| `identity` | name, publisher, release date; family, generation, member, variants, formats, size — read from the name |
 | `source` | provider, address, pinned commit, transfer accounting, mirrors, signatures, popularity + tags at archive time |
 | `licensing` | SPDX id, license files, commercial / redistribution / modification / attribution flags, patent grant, trademark terms |
 | `inventory` | per-file size + SHA-256 (+BLAKE3), upstream checksum match, deterministic bundle hash |
-| `model_metadata` | parameter count by dtype (from safetensors headers — no torch), architecture, context, tokenizer, languages |
+| `model_metadata` | parameter count by dtype (from safetensors headers — no torch), release precision and bytes per parameter, architecture, context, tokenizer, languages |
 | `runtime` | engines from shipped formats, estimated min RAM/VRAM, measured hardware from `darsay run` |
 | `validation` | checksum verification, completeness, tokenizer + inference smoke tests |
-| `relationships` | parents, finetunes, known quantizations + GGUF repos (snapshot at archive time) |
+| `lineage` | parents as upstream declares them (finetune, adapter, merge, quantized, trained-on); finetunes, quantizations, GGUF prints at archive time |
 | `archive` | date, host, storage tier, backups, last integrity check |
 | `security` | integrity status, unexpected-change flags, trust level |
 | `curation` | historical significance, capabilities, limitations, notes (via `curation.md`) |
@@ -248,6 +256,8 @@ archiving**; the bundle hash covers it alone.
 | Talk to it | `darsay run qwen--qwen3-0.6b "Say hello"` |
 | See what you have | `darsay list` (STATUS / SOURCE / HAVE; path in `--json` / `info`) |
 | Share a want-list | `darsay catalog new summer` then `list summer` / `archive --next summer` |
+| Read a catalog as a family tree | `darsay list summer --sort family` — FAMILY and PRECISION columns on every row |
+| Hold a place for an API-only model | `darsay catalog add summer https://www.qwencloud.com/models/qwen3.8-max-0902` — a closed work, in its family, no price |
 | Disk use | `darsay du` |
 | Stop before the disk fills | on by default (2 GiB floor, exit 10); `darsay config` shows it, `--min-free 10G` raises it |
 | Leave bandwidth for everyone else | `darsay archive Qwen/Qwen3.8-27B --max-rate 5M` (or `max_rate = "5M"` in `config.toml`) |
@@ -273,8 +283,8 @@ pin time to `huggingface:datasets/owner/name`.
 darsay estimate Qwen/Qwen3.8-27B --variants
 darsay estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
 darsay archive  unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
-darsay classify OBLITERATUS/Qwen3.8-27B-OBLITERATED   # master/print verdicts per weight set
-darsay archive  OBLITERATUS/Qwen3.8-27B-OBLITERATED --full   # whole repo, skipping the masters-first default
+darsay classify OBLITERATUS/Qwen3.8-27B-OBLITERATED   # negative/print verdicts per weight set
+darsay archive  OBLITERATUS/Qwen3.8-27B-OBLITERATED --full   # whole repo, not just the negatives
 darsay estimate datasets/saidutta69/fable-5-premium
 darsay archive  datasets/saidutta69/fable-5-premium
 darsay archive  Qwen/Qwen3.8-27B --revision v1.0      # pin a tag or commit instead of main
@@ -351,9 +361,10 @@ compression, recoverable with stock `tar`.
 </td>
 <td width="50%" valign="top">
 
-**Quants are history or cache, never both.**
-Archive the master. Archive published quants
-that matter. Derive the rest at run time.
+**Negatives and prints, never a third word.**
+Archive the negative. Keep the prints people
+actually ran as satellites. Derive the rest at run time.
+A size is parameters × bytes per parameter.
 [Quantization](docs/QUANTIZATION.md)
 
 </td>
@@ -374,7 +385,7 @@ venv **outside the bundle** under `<vault>/.runtime/`, and infers with
 
 | Start here | Then | When you need the spec |
 |---|---|---|
-| [**Getting started**](docs/GETTING-STARTED.md) | [Concepts](docs/CONCEPTS.md) · [Examples](examples/README.md) | [Documentation home](docs/README.md) |
+| [**Getting started**](docs/GETTING-STARTED.md) | [Concepts](docs/CONCEPTS.md) · [Examples](examples/README.md) | [Documentation home](docs/README.md) · [North star](docs/NORTH-STAR.md) |
 | [Manifest](docs/MANIFEST.md) | [MVB format](docs/MVB-FORMAT.md) | the two documents a 2040 reader still needs |
 | [Hydration](docs/HYDRATION.md) · [Incremental](docs/INCREMENTAL.md) · [Datasets](docs/DATASETS.md) | [Sources](docs/SOURCES.md) · [Quantization](docs/QUANTIZATION.md) | how the verbs actually work |
 | [Design](docs/DESIGN.md) | [Distribution](docs/DISTRIBUTION.md) · [Testing](docs/TESTING.md) | why Python, how a release is consumed, what CI keeps |

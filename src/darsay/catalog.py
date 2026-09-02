@@ -1,8 +1,14 @@
 """Catalogs: shareable want-lists the vault is a view of.
 
-A catalog is a curated list of sources. Overlay against ``bundle_records``
-yields have / partial / want / unknown. Possession is a view; ``archive``
+A catalog is a curated list of works. Overlay against ``bundle_records``
+yields have / partial / want / closed. Possession is a view; ``archive``
 does not rewrite catalog.json.
+
+A work's ``source`` is a provider ref darsay can fetch, or — for a work
+with no downloadable release yet (an API-only model, an announced
+release, a host with no provider) — its home URL. The second kind is a
+**closed** work: it holds its place in a family with no price and nothing
+to fetch, until the address becomes a source ref.
 """
 
 from __future__ import annotations
@@ -15,10 +21,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .archiver import utc_now
+from .lineage import display_generation, group_by_family, lineage_of_source
 from .readme_gen import _curation_body, human_size
 from .sources import parse_source
 
-CATALOG_SCHEMA_VERSION = "1.2.0"
+CATALOG_SCHEMA_VERSION = "2.0.0"
+CATALOG_SCHEMA_MAJOR = 2
 CATALOG_KIND = "darsay.catalog"
 STALE_AFTER_DAYS = 7
 CATALOGS_DIRNAME = "catalogs"
@@ -41,14 +49,20 @@ DIGEST_KEYS = frozenset(
         "unknown_size_count",
         "hints",
         "policy",
+        # Since 2.0.0: the release precision and what it spends per weight,
+        # the architecture, and parent edges as upstream declares them.
+        "precision",
+        "bytes_per_param",
+        "architecture",
+        "parents",
     }
 )
 # ``large``: the priced payload is at least this big — more than one sitting,
 # and often more than one disk. darsay.io's board draws the same line.
 LARGE_PAYLOAD_BYTES = 20 * 1024**3
 # The closed vocabulary of ``estimate.hints``. Sorted on write; readers ignore
-# names they do not know. Since 1.2.0: ``redundant``, and the digest's
-# ``policy`` key (``"masters"`` when the stored price is the policy subset).
+# names they do not know. The digest's ``policy`` key is ``"negatives"`` when
+# the stored price is the default acquisition — the negative set.
 HINTS = ("gated", "large", "quant", "redundant", "subset")
 _FULL_FIDELITY_DTYPES = frozenset({"F64", "F32", "F16", "BF16"})
 _QUANT_FORMATS = frozenset({"gguf"})
@@ -83,7 +97,7 @@ _CATALOG_TOP_KEYS = (
     "updated",
     "entries",
 )
-_HIDE_IF_EMPTY = frozenset({"DESIRE", "NOTE", "HINTS"})
+_HIDE_IF_EMPTY = frozenset({"DESIRE", "NOTE", "HINTS", "FAMILY", "PRECISION"})
 
 
 def catalogs_dir(vault: Path) -> Path:
@@ -128,6 +142,19 @@ def try_parse_source(ref: str):
         if "unknown source provider" in text or "no source provider for host" in text:
             return None
         raise
+
+
+def is_home(source: str) -> bool:
+    """A closed work's address: an https URL on a host with no provider."""
+    s = (source or "").strip()
+    return s.lower().startswith(("https://", "http://")) and try_parse_source(s) is None
+
+
+def canonical_source(source: str) -> str:
+    """A provider ref's canonical form; a home URL stripped of its fragment."""
+    if is_home(source):
+        return source.strip().split("#", 1)[0].rstrip("/")
+    return parse_source(source).canonical
 
 
 def include_key(include: list[str] | None) -> tuple[str, ...]:
@@ -226,7 +253,7 @@ def hints_for(est: dict) -> list[str]:
     - ``gated``  — ``source.gated`` is truthy.
     - ``large``  — ``payload.total_size_bytes`` ≥ ``LARGE_PAYLOAD_BYTES``
       (20 GiB). The priced payload is the selection when ``--include``
-      or the masters policy applied. An unknown size is never large.
+      or the negatives policy applied. An unknown size is never large.
     - ``quant``  — a published quantized artifact in the sense of
       QUANTIZATION.md: the weight bytes are mostly GGUF
       (``payload.dominant_format``), or the dominant safetensors dtype is
@@ -237,7 +264,7 @@ def hints_for(est: dict) -> list[str]:
       likely holds several weight sets. Unknown params or dtype widths ⇒
       no hint. Live estimates only; never re-derived from a digest.
     - ``subset`` — the estimate was priced with an explicit ``--include``.
-      A masters-policy selection is the default acquisition, not a
+      A negatives-policy selection is the default acquisition, not a
       curator subset: it sets the digest's ``policy`` key instead.
     """
     payload = est.get("payload") if isinstance(est.get("payload"), dict) else {}
@@ -288,6 +315,8 @@ def entry_hints(entry: dict) -> list[str]:
 def estimate_digest(est: dict) -> dict:
     """Projection of estimate() onto DIGEST_KEYS. Not a subset of the live dict."""
     params = est.get("parameters") or {}
+    precision = est.get("precision") if isinstance(est.get("precision"), dict) else {}
+    lineage = est.get("lineage") if isinstance(est.get("lineage"), dict) else {}
     digest = {
         "as_of": est["as_of"],
         "artifact_type": est["artifact_type"],
@@ -303,10 +332,38 @@ def estimate_digest(est: dict) -> dict:
         else None,
         "unknown_size_count": est["payload"]["unknown_size_count"],
         "hints": hints_for(est),
-        "policy": (est.get("subset") or {}).get("policy"),
+        # The negatives marker: the CLI classified this row and the stored
+        # price is its negative set — whether or not a print was skipped.
+        # Absent for --full / --include prices, datasets, and existing pins.
+        "policy": "negatives"
+        if isinstance(est.get("classification"), dict)
+        or (est.get("subset") or {}).get("policy")
+        else None,
+        "precision": precision.get("label"),
+        "bytes_per_param": precision.get("bytes_per_param"),
+        "architecture": lineage.get("architecture"),
+        "parents": _clean_parents(lineage.get("parents")),
     }
     assert set(digest) == DIGEST_KEYS
     return digest
+
+
+def _clean_parents(raw) -> list[dict] | None:
+    """Parent edges as ``[{source, relation}]``; anything else is dropped."""
+    if not isinstance(raw, list):
+        return None
+    out = []
+    for edge in raw:
+        if not isinstance(edge, dict) or not isinstance(edge.get("source"), str):
+            continue
+        relation = edge.get("relation")
+        out.append(
+            {
+                "source": edge["source"],
+                "relation": relation if isinstance(relation, str) else None,
+            }
+        )
+    return out or None
 
 
 def project_stored_estimate(est) -> dict | None:
@@ -321,6 +378,8 @@ def project_stored_estimate(est) -> dict | None:
     out = {k: est[k] for k in DIGEST_KEYS if k in est}
     if "hints" in out:
         out["hints"] = _clean_hints(out["hints"])
+    if "parents" in out:
+        out["parents"] = _clean_parents(out["parents"])
     return out
 
 
@@ -461,9 +520,10 @@ def load_catalog(path: Path) -> dict:
         raise SystemExit(
             f"error: unreadable catalog at {path}: catalog_schema_version {version!r}"
         ) from None
-    if major > 1:
+    if major != CATALOG_SCHEMA_MAJOR:
         raise SystemExit(
-            f"error: catalog schema {version} is newer than this darsay (supports 1.x)"
+            f"error: catalog schema {version} is not {CATALOG_SCHEMA_MAJOR}.x — this "
+            "darsay reads 2.x catalogs; re-add the entries to a new catalog"
         )
     if data.get("kind") != CATALOG_KIND:
         raise SystemExit(
@@ -652,9 +712,18 @@ def upsert_entry(
     revision: str | None = None,
     include: list[str] | None = None,
 ) -> tuple[dict, str]:
-    """Insert or update by entry key. Returns (entry, 'added'|'updated'|'unchanged')."""
-    ref = parse_source(source)
-    key = entry_key(ref.canonical, revision, include)
+    """Insert or update by entry key. Returns (entry, 'added'|'updated'|'unchanged').
+
+    A home URL (``is_home``) is accepted as a closed work; it carries no
+    revision or include, since there is nothing to fetch.
+    """
+    canonical = canonical_source(source)
+    if is_home(source) and (revision or include):
+        raise SystemExit(
+            "error: a closed work (a home URL) has nothing to pin or include — "
+            "drop --revision / --include, or give a source ref"
+        )
+    key = entry_key(canonical, revision, include)
     now = utc_now()
     for existing in catalog["entries"]:
         if (
@@ -675,7 +744,7 @@ def upsert_entry(
             catalog["updated"] = now
             return existing, "updated"
     entry = {
-        "source": ref.canonical,
+        "source": canonical,
         "revision": revision or None,
         "include": list(include) if include else None,
         "desire": desire,
@@ -720,8 +789,7 @@ def drop_entry(
     include_given: bool = False,
     revision_given: bool = False,
 ) -> dict:
-    ref = parse_source(source)
-    canonical = ref.canonical
+    canonical = canonical_source(source)
     source_matches = []
     for i, existing in enumerate(catalog["entries"]):
         parsed = try_parse_source(existing["source"])
@@ -829,7 +897,7 @@ def row_matches_entry(row: dict, entry: dict) -> bool:
             return False
     if include_key(entry.get("include")) == include_key(row.get("include")):
         return True
-    # ``include: null`` means "the default acquisition": a masters-policy
+    # ``include: null`` means "the default acquisition": a negatives-policy
     # bundle is what ``archive <source>`` produces for it, so it satisfies
     # the want (as a full-repo bundle, a superset, also does above).
     return not entry.get("include") and bool(row.get("policy"))
@@ -863,6 +931,7 @@ def _best_possession(entry: dict, matches: list[dict]) -> dict:
         payload = est.get("payload_bytes") if isinstance(est, dict) else None
         return {
             **entry,
+            **_lineage_fields(entry),
             "hints": entry_hints(entry),
             "status": "want",
             "bundle_id": None,
@@ -890,6 +959,7 @@ def _best_possession(entry: dict, matches: list[dict]) -> dict:
     remaining = 0 if status == "have" else best.get("remaining_bytes")
     return {
         **entry,
+        **_lineage_fields(entry),
         "hints": entry_hints(entry),
         "status": status,
         "bundle_id": best.get("bundle_id"),
@@ -910,22 +980,35 @@ def _best_possession(entry: dict, matches: list[dict]) -> dict:
     }
 
 
+def _lineage_fields(entry: dict) -> dict:
+    """Name-derived lineage, the digest's precision, and a closed work's home."""
+    source = entry.get("source") or ""
+    est = entry.get("estimate") if isinstance(entry.get("estimate"), dict) else {}
+    return {
+        "lineage": lineage_of_source(source).as_dict(),
+        "precision": est.get("precision"),
+        "bytes_per_param": est.get("bytes_per_param"),
+        "home": source if is_home(source) else None,
+    }
+
+
 def overlay(catalog: dict, records: list[dict], *, progress=None) -> list[dict]:
-    """View-rows: entry fields + status + matched bundle identity."""
-    warn = progress or (lambda *a, **k: print(*a, **k))
+    """View-rows: entry fields + status + matched bundle identity.
+
+    ``progress`` is accepted for callers that pass it; overlay itself has
+    nothing to report — a closed work is a row, not a warning.
+    """
     rows = []
     for entry in catalog["entries"]:
         ref = try_parse_source(entry["source"])
         if ref is None:
-            warn(
-                f"warning: unknown source provider in {entry['source']!r} — listing as unmatched",
-                file=sys.stderr,
-            )
+            # A closed work: nothing to fetch, nothing to match, a place held.
             rows.append(
                 {
                     **entry,
+                    **_lineage_fields(entry),
                     "hints": entry_hints(entry),
-                    "status": "unknown",
+                    "status": "closed",
                     "bundle_id": None,
                     "path": None,
                     "partial": False,
@@ -982,6 +1065,7 @@ def vault_as_rows(records: list[dict]) -> list[dict]:
                 "estimate": None,
                 "hints": [],
                 "artifact_type": rec.get("artifact_type"),
+                **_lineage_fields({"source": rec.get("source_address") or ""}),
             }
         )
     return rows
@@ -1023,12 +1107,14 @@ def next_idle_message(catalog: dict, rows: list[dict]) -> tuple[str, bool]:
             f"  hint: darsay catalog add {ident} huggingface:owner/name --desire 8",
             True,
         )
-    unknowns = [r for r in rows if r.get("status") == "unknown"]
+    closed = [r for r in rows if r.get("status") == "closed"]
     unfinished = [r for r in rows if r.get("status") in ("want", "partial")]
     haves = sum(1 for r in rows if r.get("status") == "have")
-    if not unfinished and unknowns:
+    if not unfinished and closed:
         return (
-            f"cannot archive from {ident} — remaining entries use an unknown source provider",
+            f"nothing to fetch from {ident} — the remaining {len(closed)} "
+            f"row{'s are' if len(closed) != 1 else ' is'} closed (no source to "
+            "fetch from yet)",
             True,
         )
     return (
@@ -1075,8 +1161,23 @@ def sort_rows(rows: list[dict], sort: str) -> list[dict]:
         )
     if sort == "name":
         return sorted(rows, key=lambda r: (r.get("source") or "").lower())
+    if sort == "family":
+        # The tree, flattened: family, then generation (oldest first), then
+        # size within a generation — the order the lineage view reads in.
+        def key(row):
+            lin = lineage_of_source(row.get("source") or "")
+            return (
+                lin.family_key is None,
+                lin.family_key or "",
+                lin.generation_key,
+                lin.size_total or 0,
+                (lin.member or "").lower(),
+                (row.get("source") or "").lower(),
+            )
+
+        return sorted(rows, key=key)
     if sort == "status":
-        order = {"have": 0, "partial": 1, "want": 2, "unknown": 3}
+        order = {"have": 0, "partial": 1, "want": 2, "closed": 3}
         return sorted(
             rows,
             key=lambda r: (
@@ -1097,7 +1198,7 @@ def overlay_stats(rows: list[dict]) -> dict:
     have = sum(1 for r in rows if r.get("status") == "have")
     partial = sum(1 for r in rows if r.get("status") == "partial")
     want = sum(1 for r in rows if r.get("status") == "want")
-    unknown = sum(1 for r in rows if r.get("status") == "unknown")
+    closed = sum(1 for r in rows if r.get("status") == "closed")
     remaining = 0
     remaining_unknown = False
     on_disk = 0
@@ -1121,7 +1222,7 @@ def overlay_stats(rows: list[dict]) -> dict:
         "have": have,
         "partial": partial,
         "want": want,
-        "unknown": unknown,
+        "closed": closed,
         "remaining_bytes": remaining,
         "remaining_unknown": remaining_unknown,
         "on_disk_bytes": on_disk,
@@ -1166,7 +1267,7 @@ def _show_remaining(stats: dict) -> bool:
 
 
 def catalog_header_line(catalog: dict, stats: dict, rows: list[dict]) -> str:
-    unknown = f" · {stats['unknown']} unknown" if stats.get("unknown") else ""
+    unknown = f" · {stats['closed']} closed" if stats.get("closed") else ""
     age = _estimate_age_label(rows, stats)
     remaining = f"  ·  {_remaining_label(stats)}" if _show_remaining(stats) else ""
     return (
@@ -1227,6 +1328,8 @@ def format_have_cell(row: dict) -> str:
 
 def format_size_cell(row: dict) -> str:
     payload = row.get("payload_bytes")
+    if row.get("status") == "closed":
+        return "closed"
     if payload is None and row.get("status") != "have":
         size = "?"
     else:
@@ -1241,6 +1344,33 @@ def format_hints_cell(row: dict) -> str:
     if hints is None:
         hints = entry_hints(row)
     return ", ".join(hints) if hints else "—"
+
+
+def family_spellings(rows: list[dict]) -> dict[str, str]:
+    """One spelling per family across a table: the majority's, as the tree uses."""
+    return {
+        fam["key"]: fam["family"]
+        for fam in group_by_family(rows)
+        if fam["key"] is not None and fam["family"]
+    }
+
+
+def format_family_cell(row: dict, spelling: dict[str, str] | None = None) -> str:
+    lin = row.get("lineage")
+    if not isinstance(lin, dict):
+        lin = lineage_of_source(row.get("source") or "").as_dict()
+    family = lin.get("family")
+    if family and spelling:
+        family = spelling.get(family.casefold(), family)
+    return display_generation(family, lin.get("generation"))
+
+
+def format_precision_cell(row: dict) -> str:
+    label = row.get("precision")
+    if not label:
+        est = row.get("estimate") if isinstance(row.get("estimate"), dict) else {}
+        label = est.get("precision")
+    return str(label) if label else "—"
 
 
 def format_desire_cell(row: dict) -> str:
@@ -1265,13 +1395,16 @@ def print_catalog_table(rows: list[dict], *, header_line: str | None = None) -> 
         print()
         print(header_line)
         print()
+    spelling = family_spellings(rows)
     specs = (
         ("STATUS", lambda r: r.get("status") or "—"),
         ("DESIRE", format_desire_cell),
         ("SOURCE", format_source_cell),
         ("TYPE", format_type_cell),
+        ("FAMILY", lambda r: format_family_cell(r, spelling)),
         ("HAVE", format_have_cell),
         ("SIZE", format_size_cell),
+        ("PRECISION", format_precision_cell),
         ("HINTS", format_hints_cell),
         ("NOTE", format_note_cell),
     )
@@ -1367,9 +1500,10 @@ def render_catalog_readme(catalog_dir: Path, catalog: dict) -> str:
     if catalog.get("note"):
         lines += [f"> {catalog['note']}", ""]
     lines += [
-        "| Desire | Source | Type | Size (cached) | Hints | License | Note |",
-        "|---|---|---|---|---|---|---|",
+        "| Desire | Source | Family | Type | Size (cached) | Precision | Hints | License | Note |",
+        "|---|---|---|---|---|---|---|---|---|",
     ]
+    spelling = family_spellings(catalog.get("entries") or [])
     for entry in catalog.get("entries") or []:
         est = entry.get("estimate") if isinstance(entry.get("estimate"), dict) else {}
         desire = entry.get("desire")
@@ -1387,7 +1521,17 @@ def render_catalog_readme(catalog_dir: Path, catalog: dict) -> str:
         if extras:
             href = href + " " + " ".join(extras)
         artifact = est.get("artifact_type") or "—"
-        if est.get("payload_bytes") is None:
+        lin = lineage_of_source(src)
+        family = display_generation(
+            spelling.get(lin.family_key or "", lin.family) if lin.family else None,
+            lin.generation,
+        )
+        precision = est.get("precision") or "—"
+        if is_home(src):
+            href = f"[{src}]({src})"
+            artifact = "closed"
+            size = "closed"
+        elif est.get("payload_bytes") is None:
             size = "?"
         else:
             as_of = (est.get("as_of") or "")[:10]
@@ -1398,8 +1542,9 @@ def render_catalog_readme(catalog_dir: Path, catalog: dict) -> str:
         hints = ", ".join(entry_hints(entry)) or "—"
         note = entry.get("note") or ""
         lines.append(
-            f"| {desire_s} | {href} | {artifact} | {size} | {hints} | {license_s} | {note} |"
+            f"| {desire_s} | {href} | {family} | {artifact} | {size} | {precision} | {hints} | {license_s} | {note} |"
         )
+    lines += _families_section(catalog.get("entries") or [])
     lines += [
         "",
         "Sizes are last-estimated facts, not live Hub queries. Overlay against a vault:",
@@ -1412,6 +1557,68 @@ def render_catalog_readme(catalog_dir: Path, catalog: dict) -> str:
     if body:
         lines += ["## Curation", "", body, ""]
     return "\n".join(lines)
+
+
+def _families_section(entries: list[dict]) -> list[str]:
+    """The lineage view of a catalog: families → generations → members."""
+    tree = [f for f in group_by_family(entries) if f["key"] is not None]
+    if not tree:
+        return []
+    lines = [
+        "",
+        "## Families",
+        "",
+        "Read from each work's name; generations oldest first.",
+        "",
+    ]
+    for fam in tree:
+        home = (
+            f" · published by {fam['home_publisher']}"
+            if fam.get("home_publisher")
+            else ""
+        )
+        lines.append(
+            f"### {fam['family']} — {fam['count']} work{'s' if fam['count'] != 1 else ''}{home}"
+        )
+        lines.append("")
+        for gen in fam["generations"]:
+            members = []
+            for entry in gen["rows"]:
+                src = entry["source"]
+                lin = lineage_of_source(src)
+                est = (
+                    entry.get("estimate")
+                    if isinstance(entry.get("estimate"), dict)
+                    else {}
+                )
+                label = lin.member or "flagship"
+                extras = list(lin.variants) + [f"{f} print" for f in lin.formats]
+                if is_home(src):
+                    extras.append("closed")
+                else:
+                    if est.get("payload_bytes") is not None:
+                        extras.append(human_size(est["payload_bytes"]))
+                    if est.get("precision"):
+                        extras.append(str(est["precision"]))
+                publisher = _publisher_of_source(src)
+                if (
+                    publisher
+                    and fam.get("home_publisher")
+                    and publisher != fam["home_publisher"]
+                ):
+                    extras.append(f"by {publisher}")
+                members.append(
+                    f"`{label}`" + (f" ({', '.join(extras)})" if extras else "")
+                )
+            gen_label = gen["generation"] or "no generation in the name"
+            lines.append(f"- **{gen_label}** — " + " · ".join(members))
+        lines.append("")
+    return lines
+
+
+def _publisher_of_source(source: str) -> str | None:
+    parsed = try_parse_source(source)
+    return parsed.publisher if parsed is not None else None
 
 
 def write_catalog_readme(

@@ -9,7 +9,7 @@ immutable payload, recorded facts, still loadable as-is.
 
     darsay estimate huggingface:Qwen/Qwen3-0.6B   preflight: size, params, disk — no download
     darsay estimate datasets/<owner>/<name>       Hugging Face shorthand; same for a dataset
-    darsay classify <owner>/<name>    master/print verdicts per weight set (bounded header reads)
+    darsay classify <owner>/<name>    negative/print verdicts per weight set (bounded header reads)
     darsay archive huggingface:Qwen/Qwen3-0.6B    download + hash + manifest + reports
     darsay archive datasets/<owner>/<name>        archive a dataset (payload under data/)
     darsay verify  <bundle>           re-hash and compare against manifest
@@ -463,14 +463,12 @@ def _estimate_catalog(args, vault, cat_path) -> int:
     # query_limit-style; rows past the budget price the full repo.
     spent = {"requests": 0, "bytes": 0}
     budget_noted = False
+    closed_rows = 0
     for index, entry in enumerate(selected, 1):
         parsed = try_parse_source(entry["source"])
         if parsed is None:
-            print(
-                f"warning: unknown source provider in {entry['source']!r}",
-                file=sys.stderr,
-            )
-            failed += 1
+            # A closed work: no source to price, nothing to refresh.
+            closed_rows += 1
             continue
         over_budget = (
             spent["requests"] >= REFRESH_READ_BUDGET_REQUESTS
@@ -550,6 +548,11 @@ def _estimate_catalog(args, vault, cat_path) -> int:
     records = bundle_records(vault)
     stats = overlay_stats(overlay(catalog, records))
     print(f"{'Would update' if dry_run else 'Updated'} {cat_path}")
+    if closed_rows:
+        print(
+            f"  {closed_rows} closed row{'s hold their' if closed_rows != 1 else ' holds its'} "
+            "place (no source to price)"
+        )
     unknown = " + ?" if stats["remaining_unknown"] else ""
     print(f"  remaining (this vault): {human_size(stats['remaining_bytes'])}{unknown}")
     if dry_run:
@@ -1007,7 +1010,7 @@ def _list_catalog(args, vault, records, spec) -> int:
         )
         return 0
     if args.ids:
-        printable = [r for r in rows if r.get("status") != "unknown"]
+        printable = [r for r in rows if r.get("status") != "closed"]
         pinned = sum(1 for r in printable if r.get("include") or r.get("revision"))
         for row in printable:
             print(row["source"])
@@ -1098,6 +1101,7 @@ def cmd_catalog_new(args) -> int:
 def cmd_catalog_add(args) -> int:
     from .catalog import (
         estimate_digest,
+        is_home,
         load_catalog,
         require_writable,
         resolve_catalog,
@@ -1119,7 +1123,13 @@ def cmd_catalog_add(args) -> int:
     source = args.source
     digest = None
     extra = ""
-    if getattr(args, "estimate", False):
+    closed = is_home(source)
+    if closed and getattr(args, "estimate", False):
+        print(
+            "note: a closed work has no source to price; --estimate ignored",
+            file=sys.stderr,
+        )
+    if getattr(args, "estimate", False) and not closed:
         est = estimate(
             source,
             revision=args.revision,
@@ -1153,8 +1163,16 @@ def cmd_catalog_add(args) -> int:
     desire = f"  desire={entry['desire']}" if entry.get("desire") is not None else ""
     if action == "added":
         verb = "Would add" if args.dry_run else "Added"
-        hint = extra or "  (no estimate yet; darsay estimate " + catalog["id"] + ")"
+        if closed:
+            hint = "  closed — a home page, not a source: holds the work's place in its family"
+        else:
+            hint = extra or "  (no estimate yet; darsay estimate " + catalog["id"] + ")"
         print(f"{verb} {entry['source']}{inc}{desire}{hint}")
+        if closed:
+            print(
+                "  when weights are published: darsay catalog add "
+                f"{catalog['id']} <source-ref>, then drop this row"
+            )
     else:
         verb = "Would update" if args.dry_run else "Updated"
         print(f"{verb} {entry['source']}{inc}{desire}{extra}")
@@ -1889,7 +1907,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--full",
         action="store_true",
-        help="price the whole repo (skip the default masters-first classification)",
+        help="price the whole repo (skip the default negatives classification)",
     )
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument(
@@ -1902,7 +1920,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = add_cmd(
         "classify",
-        help="master/print verdicts for a model's weight files (bounded header reads)",
+        help="negative/print verdicts for a model's weight files (bounded header reads)",
     )
     p.add_argument(
         "source", help="e.g. huggingface:Qwen/Qwen3-0.6B or a huggingface.co URL"
@@ -1940,7 +1958,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--full",
         action="store_true",
-        help="fetch the whole repo (skip the default masters-first classification)",
+        help="fetch the whole repo (skip the default negatives classification)",
     )
     p.add_argument(
         "--board",
@@ -2069,8 +2087,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--want", action="store_true", help="only want and partial rows")
     p.add_argument(
         "--sort",
-        choices=("next", "desire", "size", "name", "status"),
-        help="row order (default: next when a catalog is given, name for the vault)",
+        choices=("next", "desire", "size", "name", "status", "family"),
+        help="row order (default: next when a catalog is given, name for the vault); "
+        "family reads the tree: family, generation, size",
     )
     p.set_defaults(func=cmd_list)
 

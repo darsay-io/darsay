@@ -20,7 +20,8 @@ def test_extract_model_metadata_from_payload(tmp_path):
     assert meta["model_type"] == "testlm"
     assert meta["parameter_count"] == 8
     assert meta["context_length"] == 128
-    assert meta["precision"] == "float32"
+    assert meta["precision"] == "F32"
+    assert meta["bytes_per_param"] is not None
     assert meta["languages"] == ["en"]
     assert meta["training_cutoff"] is None  # never fabricated
     assert meta["tokenizer"]["chat_template_present"] is False

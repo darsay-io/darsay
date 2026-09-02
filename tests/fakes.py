@@ -302,20 +302,20 @@ class TestProvider(SourceProvider):
         except OSError:
             return 0
 
-    def relationships(self, source: SourceRef, metadata: dict) -> dict:
+    def lineage(self, source: SourceRef, metadata: dict) -> dict:
+        from darsay.providers.huggingface import parents_from_metadata
+
         return {
-            "base_models": None,
-            "base_model": None,
-            "base_model_relation": None,
-            "finetuned_from": None,
-            "training_datasets": None,
-            "quantized_versions": [],
-            "gguf_repos": None,
-            "finetunes_count": 0,
-            "adapters_count": 0,
-            "related_variants": None,
+            "parents": parents_from_metadata(metadata, canonical_prefix="test:"),
+            "descendants": {
+                "quantized": [],
+                "gguf": None,
+                "finetunes_count": 0,
+                "adapters_count": 0,
+            },
             "successors": None,
-            "ecosystem_snapshot_as_of": "2026-01-01T00:00:00+00:00",
+            "related": None,
+            "as_of": "2026-01-01T00:00:00+00:00",
             "query_limit": 100,
         }
 

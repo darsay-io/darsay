@@ -21,6 +21,13 @@ from pathlib import Path
 from .archiver import bundle_dir_for, utc_now
 from .config import free_space_floor
 from .hydrate import detect_engines
+from .lineage import lineage_of_source
+from .precision import (
+    bytes_per_param,
+    describe_bytes_per_param,
+    human_bytes_per_param,
+    precision_facts,
+)
 from .progress import color_enabled, dimmed, emphasized, format_percent, styled_bar
 from .readme_gen import human_params, human_size
 from .schema import check_completeness, payload_root_for
@@ -30,6 +37,8 @@ from .transfer import disk_verdict
 WEIGHT_SUFFIXES = (".safetensors", ".bin", ".gguf", ".pt", ".pth")
 DATA_SUFFIXES = (".parquet", ".jsonl", ".json", ".csv", ".arrow", ".txt", ".tsv")
 RAM_FACTOR = 1.2  # same heuristic as metadata.estimate_runtime
+# config.json is read whole for the precision facts; anything larger is not a config.
+CONFIG_CAP_BYTES = 1024 * 1024
 
 
 def _disk_probe(vault: Path) -> tuple[Path, int]:
@@ -204,6 +213,56 @@ def _existing_transfer(
     }
 
 
+def _read_config(
+    provider, ref: SourceRef, revision: str, files: list[dict]
+) -> dict | None:
+    """The repo's root ``config.json``, read whole through a bounded range.
+
+    Feeds the precision facts (``quantization_config``) and the architecture
+    (``model_type``). Any failure leaves both unknown — never a crash.
+    """
+    import json
+
+    spec = next((f for f in files if f["path"] == "config.json"), None)
+    if spec is None:
+        return None
+    size = spec.get("size")
+    if size is not None and size > CONFIG_CAP_BYTES:
+        return None
+    try:
+        data = provider.read_bytes(
+            ref,
+            revision,
+            "config.json",
+            0,
+            size if size is not None else CONFIG_CAP_BYTES,
+        )
+        parsed = json.loads(data)
+    except (SourceError, ValueError, OSError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _classification_summary(result: dict | None) -> dict | None:
+    """The counts a report needs from a classification, or None on failure."""
+    if not isinstance(result, dict):
+        return None
+    sets = [s for s in result.get("sets") or [] if s.get("kind") != "support"]
+    by_verdict: dict[str, dict] = {}
+    for weight_set in sets:
+        bucket = by_verdict.setdefault(
+            weight_set["verdict"], {"sets": 0, "files": 0, "bytes": 0}
+        )
+        bucket["sets"] += 1
+        bucket["files"] += weight_set["file_count"]
+        bucket["bytes"] += weight_set["bytes"]
+    return {
+        "verdicts": by_verdict,
+        "skipped_bytes": (result.get("skip") or {}).get("bytes", 0),
+        "unclassified_count": result.get("unclassified_count", 0),
+    }
+
+
 def estimate(
     source: str | SourceRef,
     revision: str | None = None,
@@ -218,7 +277,7 @@ def estimate(
 
     A model source with no explicit ``include`` and no existing pin is
     classified the way ``archive`` classifies it, and the priced payload
-    is the masters-first selection (``subset.policy``); ``full=True``
+    is the negatives selection (``subset.policy``); ``full=True``
     prices the whole repo. Bounded header reads, nothing written.
     """
     ref = source if isinstance(source, SourceRef) else parse_source(source)
@@ -246,6 +305,10 @@ def estimate(
         for f in snapshot.files
     ]
     subset = None
+    # What the negatives line reports: the classification of a fresh model
+    # pin, ``"pinned"`` when a pin already froze the selection, ``"full"``
+    # when --full or --include bypassed it, None for datasets.
+    classification: dict | str | None = "full" if repo_type == "model" else None
     if include:
         from .subset import select_subset
 
@@ -265,13 +328,15 @@ def estimate(
                 )
             except SystemExit:
                 has_pin = True  # ambiguous partials; archive will explain
+        classification = "pinned"
         if not has_pin:
-            from .classify import masters_policy
+            from .classify import negatives_policy
             from .subset import select_subset
 
-            policy_include, policy_record = masters_policy(
+            policy_include, policy_record, result = negatives_policy(
                 provider, ref, snapshot, vault, progress, on_read=on_read
             )
+            classification = _classification_summary(result)
             if policy_include:
                 files, subset = select_subset(files, policy_include)
                 subset["policy"] = policy_record["policy"]
@@ -284,6 +349,40 @@ def estimate(
     primary_bytes = sum(f["size"] or 0 for f in primary)
     largest = max(files, key=lambda f: f["size"] or 0, default=None)
     dominant_format = _dominant_format(primary)
+
+    # Precision and lineage: the two facts that make a size explain itself.
+    config = (
+        _read_config(provider, ref, snapshot.revision, files)
+        if repo_type == "model"
+        else None
+    )
+    if on_read is not None and config is not None:
+        on_read("config.json", 0)
+    params = snapshot.parameters if isinstance(snapshot.parameters, dict) else None
+    precision = (
+        precision_facts(
+            config=config,
+            dominant_dtype=params.get("dominant_dtype") if params else None,
+            dominant_format=dominant_format,
+            weight_paths=[f["path"] for f in primary],
+        )
+        if repo_type == "model"
+        else None
+    )
+    if precision is not None:
+        precision["bytes_per_param"] = bytes_per_param(
+            primary_bytes, params.get("total") if params else None
+        )
+    from .providers.huggingface import parents_from_metadata
+
+    named = lineage_of_source(ref.canonical)
+    lineage = {
+        **named.as_dict(),
+        "architecture": (config or {}).get("model_type") if config else None,
+        "parents": parents_from_metadata(
+            snapshot.metadata or {}, canonical_prefix=f"{ref.provider}:"
+        ),
+    }
 
     root = payload_root_for(repo_type)
     prospective_paths = [f"{root}/{f['path']}" for f in files]
@@ -332,7 +431,10 @@ def estimate(
             "last_modified_upstream": snapshot.last_modified,
         },
         "subset": subset,
+        "classification": classification,
         "parameters": snapshot.parameters,
+        "precision": precision,
+        "lineage": lineage,
         "formats": _format_breakdown(files) if repo_type == "dataset" else None,
         "payload": {
             "file_count": len(files),
@@ -489,6 +591,91 @@ def _download_lines(est: dict, *, width: int = 80, color: bool = False) -> list[
     return lines
 
 
+def _negatives_summary(classification) -> str:
+    """The whole-repo case, said precisely: what the repo's weight sets are."""
+    if classification == "pinned":
+        return "as pinned — the selection was frozen when the pin was made"
+    if classification == "full":
+        return "not classified — the whole repo is priced (--full or --include)"
+    if not isinstance(classification, dict):
+        return "the whole repo — classification unavailable, so everything is fetched"
+    verdicts = classification.get("verdicts") or {}
+    parts = []
+    negatives = verdicts.get("negative")
+    if negatives:
+        parts.append(
+            f"{negatives['sets']} negative set{'s' if negatives['sets'] != 1 else ''} "
+            f"({_n_files(negatives['files'])}, {human_size(negatives['bytes'])})"
+        )
+    unknown = verdicts.get("unknown")
+    if unknown:
+        parts.append(
+            f"{unknown['sets']} set{'s' if unknown['sets'] != 1 else ''} darsay will "
+            f"not guess about ({human_size(unknown['bytes'])}), fetched"
+        )
+    if not parts:
+        return "the whole repo — no weight sets to classify"
+    tail = (
+        "; darsay classify shows the evidence"
+        if unknown
+        else "; nothing here is a print"
+    )
+    return "the whole repo — " + " + ".join(parts) + tail
+
+
+def _precision_lines(est: dict) -> list[str]:
+    """``precision:    BF16 — 2.00 B/param: about one full-fidelity copy``."""
+    prec = est.get("precision") or {}
+    label = prec.get("label")
+    bpp = prec.get("bytes_per_param")
+    if not label and bpp is None:
+        return ["  precision:    not established (no config or headers upstream)"]
+    head = label or "?"
+    if prec.get("detail") and prec.get("detail") != label:
+        head += f" ({prec['detail']})"
+    parts = [head]
+    if bpp is not None:
+        parts.append(f"{human_bytes_per_param(bpp)}: {describe_bytes_per_param(bpp)}")
+    line = "  precision:    " + " — ".join(parts)
+    lines = [line]
+    if prec.get("quantized"):
+        lines.append(
+            "                a native low-precision release is the negative — "
+            "no higher-fidelity public copy exists to prefer"
+        )
+    return lines
+
+
+def _lineage_lines(est: dict) -> list[str]:
+    """``family:       Qwen · generation 3.8 · member 2.4T-A95B  [read from the name]``."""
+    lin = est.get("lineage") or {}
+    out = []
+    bits = []
+    if lin.get("family"):
+        bits.append(lin["family"])
+    if lin.get("generation"):
+        bits.append(f"generation {lin['generation']}")
+    if lin.get("member"):
+        bits.append(f"member {lin['member']}")
+    for variant in lin.get("variants") or []:
+        bits.append(variant)
+    for fmt in lin.get("formats") or []:
+        bits.append(f"format {fmt}")
+    if bits:
+        out.append(f"  family:       {' · '.join(bits)}  [read from the name]")
+    if lin.get("architecture"):
+        out.append(f"  architecture: {lin['architecture']}  [config.json]")
+    parents = lin.get("parents") or []
+    if parents:
+        edges = ", ".join(
+            f"{e.get('relation') or 'parent'} of {e.get('source')}" for e in parents
+        )
+        out.append(f"  lineage:      {edges}  [declared upstream]")
+    elif bits:
+        out.append("  lineage:      no parents declared upstream")
+    return out
+
+
 def print_estimate(est: dict, progress=print) -> None:
     p = progress
     src, pay = est["source"], est["payload"]
@@ -506,11 +693,13 @@ def print_estimate(est: dict, progress=print) -> None:
     if est["subset"]:
         sub = est["subset"]
         if sub.get("policy"):
+            skipped = sub["full_file_count"] - sub["kept_file_count"]
+            skipped_bytes = sub["full_total_size_bytes"] - sub["kept_total_size_bytes"]
             p(
-                f"  masters-first: {_n_files(sub['kept_file_count'])}, "
-                f"{human_size(sub['kept_total_size_bytes'])} of the full repo "
-                f"({sub['full_file_count']} files, "
-                f"{human_size(sub['full_total_size_bytes'])}) — --full prices everything"
+                f"  negatives:    {_n_files(sub['kept_file_count'])}, "
+                f"{human_size(sub['kept_total_size_bytes'])} — prints skipped: "
+                f"{_n_files(skipped)}, {human_size(skipped_bytes)} "
+                f"(full repo {human_size(sub['full_total_size_bytes'])}; --full prices everything)"
             )
         else:
             extra = " + sidecars" if sub.get("sidecars") else ""
@@ -518,6 +707,8 @@ def print_estimate(est: dict, progress=print) -> None:
                 f"  subset:       only files matching {', '.join(sub['include'])}{extra} "
                 f"(full repo: {sub['full_file_count']} files, {human_size(sub['full_total_size_bytes'])})"
             )
+    elif not is_dataset:
+        p("  negatives:    " + _negatives_summary(est.get("classification")))
 
     if is_dataset:
         fmts = est["formats"] or {}
@@ -531,9 +722,15 @@ def print_estimate(est: dict, progress=print) -> None:
             p("  formats:      no files listed upstream")
     elif params:
         by_dtype = params["by_dtype"] or {}
+        prec = est.get("precision") or {}
+        packed = (
+            " (packed)"
+            if isinstance(prec.get("bits"), int) and prec["bits"] < 8
+            else ""
+        )
         if len(by_dtype) > 1:
             split = ", ".join(
-                f"{human_params(n)} {d}"
+                f"{human_params(n)} {d}{packed if d.upper() in ('U8', 'I8', 'I32', 'U32') else ''}"
                 for d, n in sorted(by_dtype.items(), key=lambda kv: -kv[1])
             )
             dtypes = f" ({split})"
@@ -544,6 +741,11 @@ def print_estimate(est: dict, progress=print) -> None:
         )
     else:
         p("  parameters:   not published upstream")
+    if not is_dataset:
+        for line in _precision_lines(est):
+            p(line)
+        for line in _lineage_lines(est):
+            p(line)
 
     primary_key, primary_label = (
         ("data", "data") if is_dataset else ("weights", "weights")
@@ -655,7 +857,7 @@ def print_estimate(est: dict, progress=print) -> None:
     if src["revision_ref"] != "main":
         cmd += f" --revision {shlex.quote(str(src['revision_ref']))}"
     if est["subset"] and est["subset"].get("policy"):
-        p(f"\nTo archive (masters-first is the default): {cmd}\n")
+        p(f"\nTo archive (negatives are the default): {cmd}\n")
     elif est["subset"]:
         for pat in est["subset"]["include"]:
             cmd += f" --include {shlex.quote(pat)}"

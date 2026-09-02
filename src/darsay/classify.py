@@ -1,7 +1,7 @@
-"""Master/print classification of one repo's weight files.
+"""Negative/print classification of one repo's weight files.
 
 Mechanizes the QUANTIZATION.md line the way docs/proposals/classify.md
-ratified it: verdicts come from a closed enum — ``master``, ``print``,
+ratified it: verdicts come from a closed enum — ``negative``, ``print``,
 ``support``, ``unknown`` — where ``unknown`` always means *fetch*. Every
 undecidable, unreadable, capped, or gated case degrades toward keeping
 bytes, never toward skipping them; only a confident print is skipped.
@@ -25,6 +25,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import PurePosixPath
 
 from .gguf_meta import DEFAULT_FETCH_CAP, GGUFError, read_kv
+from .precision import quantization_config_of, torch_dtype_of
 from .providers.base import SourceError
 from .safetensors_meta import read_header_via
 from .subset import matches_include
@@ -37,9 +38,11 @@ SOURCE_CLAIM_KEYS = (
     "general.source.url",
     "general.source.huggingface.repository",
 )
-# Read caps, recorded in the receipt like query_limit.
+# Read caps, recorded in the receipt like query_limit. A frontier MoE
+# weight map runs to tens of MB (Kimi-K3's is 60 MB); the JSON cap
+# matches the GGUF header cap so one index never reads as unknown.
 HEADER_FILE_CAP = 64
-JSON_CAP_BYTES = 10 * 1024 * 1024
+JSON_CAP_BYTES = 64 * 1024 * 1024
 # Header files read concurrently; each is an independent bounded read.
 HEADER_READ_WORKERS = 8
 
@@ -214,7 +217,7 @@ def _config_for(weight_set: dict, configs: dict):
 def _quant_method(cfg) -> str | None:
     if not isinstance(cfg, dict) or "__error__" in cfg:
         return None
-    quant = cfg.get("quantization_config")
+    quant = quantization_config_of(cfg)
     if isinstance(quant, dict):
         return str(quant.get("quant_method") or "unspecified")
     if isinstance(cfg.get("quantization"), dict):
@@ -235,7 +238,7 @@ def _set_dtype(weight_set: dict, configs: dict, st_headers: dict):
         return max(counts, key=counts.get), "headers"
     cfg = _config_for(weight_set, configs)
     if isinstance(cfg, dict) and "__error__" not in cfg:
-        torch_dtype = cfg.get("torch_dtype")
+        torch_dtype = torch_dtype_of(cfg)
         if isinstance(torch_dtype, str):
             return _TORCH_TO_ST.get(torch_dtype.lower(), torch_dtype.upper()), "config"
     return None, None
@@ -271,7 +274,7 @@ def _judge_safetensors(weight_set: dict, facts: dict) -> tuple[str, str, str]:
     )
     if method or (dtype and dtype not in FULL_FIDELITY_DTYPES):
         return (
-            "master",
+            "negative",
             "R5",
             f"quantized safetensors ({method or dtype}) — calibration or a "
             "curated recipe may be baked in",
@@ -287,12 +290,12 @@ def _judge_safetensors(weight_set: dict, facts: dict) -> tuple[str, str, str]:
         )
     if weight_set["kind"] == "indexed":
         return (
-            "master",
+            "negative",
             "R3",
             f"selected by {_name_of(weight_set['index'])}; {dtype} "
             f"(dtype from {established})",
         )
-    return "master", "R4", f"standalone full-fidelity {dtype}"
+    return "negative", "R4", f"standalone full-fidelity {dtype}"
 
 
 def _judge_legacy(weight_set: dict, facts: dict, has_safetensors: bool):
@@ -310,7 +313,7 @@ def _judge_legacy(weight_set: dict, facts: dict, has_safetensors: bool):
             "legacy-format weights beside safetensors — equivalence is not "
             "cheaply verifiable",
         )
-    return "master", "R13", "only weight format in this repo"
+    return "negative", "R13", "only weight format in this repo"
 
 
 def _judge_gguf(
@@ -323,7 +326,7 @@ def _judge_gguf(
         return "unknown", "R14", f"GGUF header unreadable — {reason}"
     kv = info.get("kv") or {}
     if any(key.startswith(IMATRIX_PREFIX) for key in kv):
-        return "master", "R7", "importance matrix baked in (quantize.imatrix.*)"
+        return "negative", "R7", "importance matrix baked in (quantize.imatrix.*)"
     claims = [kv[k] for k in SOURCE_CLAIM_KEYS if isinstance(kv.get(k), str)]
     if claims and not any(locator.lower() in claim.lower() for claim in claims):
         return (
@@ -342,7 +345,7 @@ def _judge_gguf(
         )
     if established == 0:
         return (
-            "master",
+            "negative",
             "R10",
             "no full-fidelity source in this repo — the only surviving form here",
         )
@@ -413,7 +416,7 @@ def evaluate(files: list[dict], facts: dict, *, locator: str) -> dict:
             continue  # incomplete hashes: never a claim
         groups.setdefault(tuple(sorted(shas)), []).append(weight_set)
     for twins in groups.values():
-        keepable = [t for t in twins if t.get("verdict") in ("master", "unknown")]
+        keepable = [t for t in twins if t.get("verdict") in ("negative", "unknown")]
         if len(twins) < 2 or not keepable:
             continue
         keeper = min(
@@ -464,7 +467,7 @@ def evaluate(files: list[dict], facts: dict, *, locator: str) -> dict:
             )
 
     base_in_vault = bool((facts.get("base") or {}).get("in_vault"))
-    verdict_bytes = {"master": 0, "print": 0, "support": 0, "unknown": 0}
+    verdict_bytes = {"negative": 0, "print": 0, "support": 0, "unknown": 0}
     keep = {"files": 0, "bytes": 0}
     skip = {"files": 0, "bytes": 0}
     for weight_set in sets:
@@ -488,7 +491,7 @@ def evaluate(files: list[dict], facts: dict, *, locator: str) -> dict:
         bucket["bytes"] += weight_set["bytes"]
 
     return {
-        "policy": "masters",
+        "policy": "negatives",
         "sets": sets,
         "candidates": established,
         "uncertain_sources": uncertain,
@@ -503,7 +506,7 @@ def evaluate(files: list[dict], facts: dict, *, locator: str) -> dict:
 def attach_selection(classification: dict, files: list[dict]) -> None:
     """Turn verdicts into a verified ``--include`` selection, or refuse.
 
-    The selection keeps every master, unknown, and support file and drops
+    The selection keeps every negative, unknown, and support file and drops
     skipped prints only. Globs must reproduce the intended weight set
     exactly against the full inventory (via the same matcher
     ``select_subset`` uses); exact paths are the fallback, and when even
@@ -711,7 +714,7 @@ def collect_facts(
         has_dtype = (
             isinstance(cfg, dict)
             and "__error__" not in cfg
-            and isinstance(cfg.get("torch_dtype"), str)
+            and isinstance(torch_dtype_of(cfg), str)
         )
         if not has_dtype:
             header_targets.append(weight_set["paths"][0])
@@ -864,9 +867,9 @@ def print_classification(result: dict, progress=print) -> None:
     if selection and skip["bytes"]:
         total = keep["bytes"] + skip["bytes"]
         p(
-            f"\nmasters-first: fetch {human_size(keep['bytes'])} of "
+            f"\nnegatives: fetch {human_size(keep['bytes'])} of "
             f"{human_size(total)} — skip {human_size(skip['bytes'])} of "
-            "prints. darsay archive applies this by default; --full "
+            "prints. darsay archive keeps the negatives by default; --full "
             "fetches everything."
         )
         if src.get("address"):
@@ -880,10 +883,7 @@ def print_classification(result: dict, progress=print) -> None:
                 + format_archive_command(src["address"], revision, selection["include"])
             )
     else:
-        p(
-            "\nNothing here is mechanically skippable — the masters policy "
-            "fetches the full repo."
-        )
+        p("\nNothing here is a print — the negatives are the whole repo.")
     p("")
 
 
@@ -916,7 +916,7 @@ def _print_policy_preflight(result: dict, ref, progress) -> None:
     if not skip["bytes"] and not unknown_sets and not result["notes"]:
         return
     total = skip["bytes"] + keep["bytes"]
-    line = f"masters-first: fetching {human_size(keep['bytes'])} of {human_size(total)}"
+    line = f"negatives: fetching {human_size(keep['bytes'])} of {human_size(total)}"
     if skip["bytes"]:
         line += f" — skipping {human_size(skip['bytes'])} of derivable prints"
     progress(line)
@@ -942,15 +942,18 @@ def _print_policy_preflight(result: dict, ref, progress) -> None:
     )
 
 
-def masters_policy(
+def negatives_policy(
     provider, ref, snapshot, vault, progress=print, on_read=None
 ) -> tuple[list[str] | None, dict | None]:
     """The archive default: classify a fresh model pin, derive its selection.
 
-    Returns ``(include patterns, policy record)`` — or ``(None, None)``
-    when nothing is skippable, the selection could not be verified, or
-    classification failed for any reason. The caller then fetches the
-    full repo; failures never raise past here.
+    Returns ``(include patterns, policy record, classification)``. The
+    first two are ``None`` when nothing is skippable, the selection could
+    not be verified, or classification failed for any reason — the caller
+    then fetches the full repo; failures never raise past here. The
+    classification (``None`` only on failure) lets a caller report what
+    the whole-repo fetch contains: how many sets were negatives, and how
+    many darsay refused to guess about.
     """
     from .providers.huggingface import parse_base_model_tags
 
@@ -983,15 +986,15 @@ def masters_policy(
         )
     except Exception as exc:  # every failure degrades to the full repo
         progress(f"WARNING: classification failed ({exc}) — fetching the full repo")
-        return None, None
+        return None, None, None
     _print_policy_preflight(result, ref, progress)
     selection = result.get("selection")
     if not selection:
-        return None, None
+        return None, None, result
     from . import __version__
 
     policy = {
-        "policy": "masters",
+        "policy": "negatives",
         "classification": {
             "classifier": {"darsay": __version__},
             "read": result.get("read"),
@@ -1010,7 +1013,7 @@ def masters_policy(
             ],
         },
     }
-    return list(selection["include"]), policy
+    return list(selection["include"]), policy, result
 
 
 def classify_source(

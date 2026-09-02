@@ -240,7 +240,7 @@ Hub client still owns authentication, redirects, Range requests, and retries.
 upstream mismatches are carried into `checksum_verification` as `fail`,
 exactly like today's one-shot flow — recorded, never hidden). Only now do
 the completion-time steps run: metadata extraction, licensing record,
-ecosystem queries, manifest assembly from the ledger's recorded hashes,
+lineage queries, manifest assembly from the ledger's recorded hashes,
 README/VERIFICATION/curation template — and only now is the payload's
 `.cache/huggingface/` bookkeeping removed (it must survive between sessions:
 it holds the partials; `iter_payload_files` and hashing skip it until then).
@@ -384,7 +384,7 @@ In descending order of bytes saved:
    a 10 GB shard costs 200 MB to finish, not 10 GB.
 4. **Metadata thrift**: the plan is fetched once at pin time; resume
    sessions make no API calls, and registration makes only the
-   completion-time ecosystem queries. Card facts come from the pin ledger.
+   completion-time lineage queries. Card facts come from the pin ledger.
 
 ### Coordinating a download: shards, assembly, and skeletons
 

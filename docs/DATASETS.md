@@ -55,7 +55,7 @@ Everything that varies by artifact type becomes a property of the
 | payload root | `model/` | `data/` |
 | completeness rules | config/weights/tokenizer | data files (parquet/jsonl/csv/arrow/…); card, license, `dataset_infos.json` recommended |
 | metadata extractor | `model_metadata` (params, arch, tokenizer) | `dataset_metadata` (formats, configs/splits, examples) |
-| ecosystem snapshot | quantized/finetunes/adapters of it | models trained **on** it |
+| lineage snapshot | quantized/finetunes/adapters of it | models trained **on** it |
 | engines | transformers, llama-cpp | none (hydration degrades gracefully) |
 
 ## 4. Addressing: one source-ref grammar, zero new verbs
@@ -101,7 +101,7 @@ manifest's `artifact_type`. See [SOURCES.md](SOURCES.md).
 ## 6. The dataset manifest
 
 Universal sections unchanged: `identity`, `source`, `licensing`,
-`inventory`, `validation`, `relationships`, `archive`, `security`,
+`inventory`, `validation`, `lineage`, `archive`, `security`,
 `curation`. Per-type: `model_metadata` and `runtime` are model-only;
 dataset bundles instead carry:
 
@@ -112,9 +112,9 @@ dataset bundles instead carry:
   the card. **Measured** row counts only when pyarrow is present (optional
   extra, else `skipped` with reason) — the declared/measured split is
   record-don't-fabricate applied to data.
-- `relationships` — `models_trained_on` (Hub `dataset:<id>` filter,
+- `lineage` — `descendants.models_trained_on` (Hub `dataset:<id>` filter,
   `query_limit` recorded) and `source_datasets` from the card. The model
-  side gains the mirror edge: `relationships.training_datasets` from card
+  side gains the mirror edge: a `trained_on` parent in `lineage.parents` from card
   data, making the vault graph two-sided.
 
 ## 7. Per-command behavior

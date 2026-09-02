@@ -1,4 +1,4 @@
-"""The masters-first archive default: skip prints, freeze the pin, degrade safely."""
+"""The negatives archive default: skip prints, freeze the pin, degrade safely."""
 
 from __future__ import annotations
 
@@ -23,22 +23,22 @@ def test_archive_default_skips_confident_prints(vault, test_provider):
     notes = []
     bundle = archive_quiet("test:acme/toy", vault=vault, progress=notes.append)
     manifest = load_manifest(bundle)
-    assert manifest["schema_version"] == SCHEMA_VERSION == "1.8.0"
+    assert manifest["schema_version"] == SCHEMA_VERSION == "2.0.0"
     subset = manifest["source"]["subset"]
-    assert subset["policy"] == "masters"
+    assert subset["policy"] == "negatives"
     assert subset["include"] == ["model.safetensors"]
     classification = subset["classification"]
     assert classification["read"]["caps"]["header_file_cap"] == 64
     rules = {s["rule"]: s for s in classification["sets"]}
     assert rules["R9"]["action"] == "skip"
-    assert rules["R4"]["verdict"] == "master"
+    assert rules["R4"]["verdict"] == "negative"
     # The skipped print was never requested from the provider.
     assert "Q4_K_M.gguf" not in test_provider.downloads
     assert not (bundle / "model" / "Q4_K_M.gguf").exists()
     assert (bundle / "model" / "model.safetensors").is_file()
     assert (bundle / "model" / "config.json").is_file()
     assert "Q4_K_M.gguf" in {f["path"] for f in subset["full_files"]}
-    assert any("masters-first: fetching" in str(line) for line in notes)
+    assert any("negatives: fetching" in str(line) for line in notes)
     assert any("--full fetches everything" in str(line) for line in notes)
 
 
@@ -67,7 +67,7 @@ def test_archive_resume_does_not_reclassify(vault, test_provider):
     bundle_dirs = list(vault.glob("*/*/manifest.json"))
     assert len(bundle_dirs) == 1
     manifest = json.loads(bundle_dirs[0].read_text())
-    assert manifest["source"]["subset"]["policy"] == "masters"
+    assert manifest["source"]["subset"]["policy"] == "negatives"
 
 
 def test_archive_force_reclassifies(vault, test_provider):
@@ -138,7 +138,7 @@ def test_archive_plain_repo_unchanged_by_policy(vault, test_provider):
     bundle = archive_quiet("test:acme/plain", vault=vault, progress=notes.append)
     manifest = load_manifest(bundle)
     assert manifest["source"]["subset"] is None
-    assert not any("masters-first" in str(line) for line in notes)
+    assert not any("negatives" in str(line) for line in notes)
 
 
 def test_archive_default_skips_intra_repo_duplicates(vault, test_provider):
@@ -154,7 +154,7 @@ def test_archive_default_skips_intra_repo_duplicates(vault, test_provider):
     bundle = archive_quiet("test:acme/tripled", vault=vault)
     manifest = load_manifest(bundle)
     subset = manifest["source"]["subset"]
-    assert subset["policy"] == "masters"
+    assert subset["policy"] == "negatives"
     rules = {s["rule"]: s for s in subset["classification"]["sets"]}
     assert rules["R15"]["action"] == "skip"
     assert not (bundle / "model" / "FL2VA" / "model.safetensors").exists()

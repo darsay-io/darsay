@@ -625,7 +625,7 @@ def new_ledger(
     if include:
         files, subset = select_subset(files, include)
     if subset is not None and policy is not None:
-        # A masters-policy selection records why it chose what it chose;
+        # A negatives-policy selection records why it chose what it chose;
         # the manifest carries this through source.subset.
         subset["policy"] = policy["policy"]
         subset["classification"] = policy["classification"]

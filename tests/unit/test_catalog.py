@@ -149,12 +149,12 @@ def test_overlay_have_partial_want_unknown():
     assert by_src["huggingface:acme/have"] == "have"
     assert by_src["huggingface:acme/partial"] == "partial"
     assert by_src["huggingface:acme/want"] == "want"
-    assert by_src["other:foo/bar"] == "unknown"
+    assert by_src["other:foo/bar"] == "closed"
     wanted = filter_want(rows)
     assert all(r["status"] in ("want", "partial") for r in wanted)
     assert next_entry(rows, desire=True)["source"] == "huggingface:acme/partial"
     nxt = next_entry(rows, desire=True)
-    assert nxt["status"] != "unknown"
+    assert nxt["status"] != "closed"
 
 
 def test_next_entry_prefers_partial_over_higher_desire_want():
@@ -166,7 +166,7 @@ def test_next_entry_prefers_partial_over_higher_desire_want():
             "source": "huggingface:acme/partial",
             "remaining_bytes": 10,
         },
-        {"status": "unknown", "desire": 9, "source": "other:foo/bar"},
+        {"status": "closed", "desire": 9, "source": "other:foo/bar"},
     ]
     assert next_entry(rows, desire=True)["source"] == "huggingface:acme/partial"
     ordered = sort_rows(rows, "next")
@@ -200,7 +200,7 @@ def test_sort_rows_desire_size_name_status():
         {"status": "have", "desire": 3, "source": "b", "remaining_bytes": 0},
         {"status": "want", "desire": 9, "source": "a", "remaining_bytes": 50},
         {"status": "partial", "desire": None, "source": "c", "remaining_bytes": 10},
-        {"status": "unknown", "desire": 1, "source": "d", "remaining_bytes": None},
+        {"status": "closed", "desire": 1, "source": "d", "remaining_bytes": None},
     ]
     assert [r["source"] for r in sort_rows(rows, "desire")] == ["a", "b", "d", "c"]
     # SIZE sort is remaining-to-fetch (None keys as if remaining were -1).
@@ -215,7 +215,7 @@ def test_sort_next_puts_unfinished_first():
         {"status": "have", "desire": 6, "source": "a"},
         {"status": "want", "desire": 3, "source": "b"},
         {"status": "partial", "desire": 9, "source": "c"},
-        {"status": "unknown", "desire": 9, "source": "d"},
+        {"status": "closed", "desire": 9, "source": "d"},
     ]
     ordered = sort_rows(rows, "next")
     assert [r["source"] for r in ordered] == ["c", "b", "a", "d"]
@@ -276,7 +276,7 @@ def test_estimate_digest_allowlist():
     assert digest["hints"] == []
     dumped = json.dumps(digest)
     assert "checked_path" not in dumped
-    assert "precision" not in digest
+    assert "precision" in digest
 
 
 def _live(**over):
@@ -321,8 +321,8 @@ def test_hints_for_closed_set():
     assert hints_for(_live(**{"payload.dominant_format": "gguf"})) == ["quant"]
     assert hints_for(_live(**{"parameters.dominant_dtype": "F8_E4M3"})) == ["quant"]
     assert hints_for(_live(**{"parameters.dominant_dtype": "I32"})) == ["quant"]
-    for master in ("F64", "F32", "F16", "BF16", "bf16"):
-        assert hints_for(_live(**{"parameters.dominant_dtype": master})) == []
+    for full in ("F64", "F32", "F16", "BF16", "bf16"):
+        assert hints_for(_live(**{"parameters.dominant_dtype": full})) == []
     everything = _live(
         subset={"include": ["*Q4_K_M*"]},
         **{
@@ -353,11 +353,11 @@ def test_redundant_hint_and_policy_digest():
         **{"payload.weights": {"count": 2, "bytes": 10_000}, "parameters": None}
     )
     assert hints_for(none) == []
-    # A masters-policy selection is the default acquisition, not a curator
+    # A negatives-policy selection is the default acquisition, not a curator
     # subset: no subset hint, and the digest records the policy.
-    policy = _live(subset={"include": ["model.safetensors"], "policy": "masters"})
+    policy = _live(subset={"include": ["model.safetensors"], "policy": "negatives"})
     assert hints_for(policy) == []
-    assert estimate_digest(policy)["policy"] == "masters"
+    assert estimate_digest(policy)["policy"] == "negatives"
     assert estimate_digest(_live())["policy"] is None
 
 
@@ -414,13 +414,13 @@ def test_project_stored_estimate_cleans_hints():
 
 def test_save_writes_the_current_schema_version(tmp_path):
     path = tmp_path / "catalog.json"
-    raw = _catalog([_entry("huggingface:acme/toy")], catalog_schema_version="1.0.0")
+    raw = _catalog([_entry("huggingface:acme/toy")], catalog_schema_version="2.0.0")
     path.write_text(json.dumps(raw), encoding="utf-8")
     loaded = load_catalog(path)
-    assert loaded["catalog_schema_version"] == "1.0.0"
+    assert loaded["catalog_schema_version"] == "2.0.0"
     save_catalog(path, loaded)
     again = json.loads(path.read_text(encoding="utf-8"))
-    assert again["catalog_schema_version"] == CATALOG_SCHEMA_VERSION == "1.2.0"
+    assert again["catalog_schema_version"] == CATALOG_SCHEMA_VERSION == "2.0.0"
 
 
 def test_a_1_1_file_loads_in_a_1_0_reader(tmp_path, monkeypatch):
@@ -589,9 +589,13 @@ def test_load_rejects_known_provider_typo(tmp_path):
 def test_load_rejects_unknown_major(tmp_path):
     path = tmp_path / "catalog.json"
     raw = _catalog([])
-    raw["catalog_schema_version"] = "2.0.0"
+    raw["catalog_schema_version"] = "3.0.0"
     path.write_text(json.dumps(raw), encoding="utf-8")
-    with pytest.raises(SystemExit, match="newer than this darsay"):
+    with pytest.raises(SystemExit, match="is not 2.x"):
+        load_catalog(path)
+    raw["catalog_schema_version"] = "1.2.0"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+    with pytest.raises(SystemExit, match="is not 2.x"):
         load_catalog(path)
 
 
@@ -717,7 +721,7 @@ def test_next_idle_message_empty_vs_complete():
     )
     msg, err = next_idle_message(_catalog([_entry("other:foo/bar")]), unknown_rows)
     assert err
-    assert "unknown source provider" in msg
+    assert "closed" in msg
 
 
 def test_write_catalog_readme_includes_include_cached_size_and_overlay_hints(tmp_path):
@@ -873,7 +877,7 @@ def test_vault_header_omits_remaining_when_complete(tmp_path):
             "have": 2,
             "partial": 0,
             "want": 0,
-            "unknown": 0,
+            "closed": 0,
             "remaining_bytes": 0,
             "remaining_unknown": False,
             "on_disk_bytes": 100,
@@ -886,7 +890,7 @@ def test_vault_header_omits_remaining_when_complete(tmp_path):
             "have": 1,
             "partial": 1,
             "want": 0,
-            "unknown": 0,
+            "closed": 0,
             "remaining_bytes": 50,
             "remaining_unknown": False,
             "on_disk_bytes": 100,

@@ -227,29 +227,85 @@ Design: [Incremental transfer](../docs/INCREMENTAL.md#network-loss).
 
 ---
 
-## Archive just the master (the default)
+## Archive the negatives (the default)
 
 Some repos ship the model *and* a pile of its own derivatives — a BF16
-master plus every GGUF quant of it. `archive` classifies a fresh model
+negative plus every GGUF print of it. `archive` classifies a fresh model
 pin by default and fetches the artifacts that are genuinely hard to
-regenerate: masters, everything it cannot classify, and all support
+regenerate: negatives, everything it cannot classify, and all support
 files. Mechanically derivable prints are skipped, named in the
 preflight, and recorded in the manifest with the full omitted inventory.
 
 ```bash
 darsay estimate owner/model-with-quants        # prices what archive will fetch
 darsay classify owner/model-with-quants        # the per-set evidence table
-darsay archive  owner/model-with-quants        # masters-first, on the record
+darsay archive  owner/model-with-quants        # the negatives, on the record
 darsay archive  owner/model-with-quants --full # every published byte instead
 ```
 
-A skipped print is functionally regenerable from the kept master under a
+A skipped print is functionally regenerable from the kept negative under a
 recorded toolchain — not bit-identical to the published bytes. When
 darsay cannot establish what a file is (two differing weight sets, an
 orphaned shard set, an unreadable header), it refuses to guess and
 fetches it. Policy and rules: [Quantization](../docs/QUANTIZATION.md).
 
 ---
+
+## Read a size: precision and bytes per parameter
+
+Two frontier models with a similar parameter count and a threefold
+difference in disk. `estimate` says why on the `precision:` line —
+every size is parameters times bytes per parameter, and the second
+factor is the precision the publisher released at:
+
+```bash
+darsay estimate Qwen/Qwen3.8-2.4T-A95B
+#   parameters:   2.45T BF16
+#   precision:    BF16 — 2.00 B/param: about one full-fidelity copy (16-bit)
+#   payload:      224 files, 4.4 TiB
+
+darsay estimate moonshotai/Kimi-K3
+#   parameters:   2.78T (2.72T U8 (packed), 57.18B BF16, 11.1M F32)
+#   precision:    MXFP4 (compressed-tensors · 4-bit · group 32) — 0.56 B/param: a 4-bit release
+#                 a native low-precision release is the negative — no higher-fidelity public copy exists to prefer
+#   payload:      119 files, 1.4 TiB
+```
+
+Neither is bigger. Both are negatives. Far above two bytes a parameter
+is the smell of several weight sets in one repo — the `redundant` hint —
+and `darsay classify` lays them out.
+
+## Hold a place for a closed work
+
+A model served by API only, or announced and not yet published, still
+belongs in the family tree. Its home page is a valid catalog address:
+
+```bash
+darsay catalog add summer https://www.qwencloud.com/models/qwen3.8-max-0902 --desire 7
+darsay list summer --sort family        # sits in Qwen 3.8 beside 2.4T-A95B and 27B
+```
+
+The row is **closed**: no price, nothing to fetch, `--next` never picks
+it. When the weights ship, add the source ref and drop the home:
+
+```bash
+darsay catalog add  summer Qwen/Qwen3.8-Max --desire 7
+darsay catalog drop summer https://www.qwencloud.com/models/qwen3.8-max-0902
+```
+
+## Read a catalog as a family tree
+
+```bash
+darsay list summer --sort family
+```
+
+Rows come out as the tree reads: family, then generation oldest first,
+then size — with FAMILY (`Qwen 3.8`) and PRECISION (`BF16`, `MXFP4`)
+columns on every row. The catalog's generated `README.md` draws the same
+tree under **Families**. Family, generation, and member are read from
+each work's name by a documented grammar ([Concepts → lineage](../docs/CONCEPTS.md#lineage));
+parent edges (finetune, quantized, trained-on) are recorded as upstream
+declares them.
 
 ## Price one quant from a pack repo
 
@@ -644,7 +700,7 @@ preflight that writes nothing at all.
 A board is a catalog with a URL, and the URL works wherever a catalog
 name does. One command fetches it, re-prices every row with
 classification (the board alone can only price the shipping box), and
-pushes the result back — sizes, hints, and masters markers included:
+pushes the result back — sizes, hints, precision, and the negatives markers included:
 
 ```bash
 darsay estimate https://darsay.io/b/<board-id>

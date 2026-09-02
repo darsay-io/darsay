@@ -6,9 +6,9 @@
   <a href="../README.md">README</a>
 </p>
 
-# catalog.json — schema reference (v1.1.0)
+# catalog.json — schema reference (v2.0.0)
 
-> **In one sentence.** A catalog is a curated list of sources. The vault is
+> **In one sentence.** A catalog is a curated list of works. The vault is
 > that list, realized. Possession is a view, not a rewrite of this file.
 
 `catalog.json` is the portable want-list. Overlay it against a vault with
@@ -25,9 +25,9 @@ Conventions match the [manifest](MANIFEST.md):
   stripped).
 - Major schema version is breaking. Additive minor/patch: readers ignore
   unknown fields; this tool preserves unknown *top-level* keys on
-  round-trip. A 2.x file is a hard error for a 1.x tool. The tool writes
-  the version it conforms to, so a 1.0.0 file becomes 1.1.0 the first
-  time this darsay saves it (1.0.0 readers still load it).
+  round-trip. A file of another major is a hard error — darsay fixes
+  forward and does not migrate a 1.x catalog; re-add its entries. The
+  tool writes the version it conforms to.
 
 The catalog schema is independent of bundle `schema_version`. Catalogs
 are not inside `.mvb.tar`.
@@ -54,7 +54,7 @@ writable.
 
 | Field | Meaning |
 |---|---|
-| `catalog_schema_version` | `"1.2.0"`. Major = breaking; 1.1 added `estimate.hints`; 1.2 added the `redundant` hint and the digest `policy` key. |
+| `catalog_schema_version` | `"2.0.0"`. Major = breaking. |
 | `kind` | Always `"darsay.catalog"`. |
 | `id` | Slug. Matches the directory name when stored at `catalogs/<id>/`. Lowercase letter, then letters, digits, `.`, `_`, `-` (max 64). |
 | `title` | Human title. Defaults to `id`. |
@@ -67,7 +67,7 @@ writable.
 
 | Field | Meaning |
 |---|---|
-| `source` | Canonical source ref after parse (`huggingface:Qwen/Qwen3-0.6B`, `huggingface:datasets/owner/name`, `test:acme/toy`). |
+| `source` | The work's address. A canonical source ref after parse (`huggingface:Qwen/Qwen3-0.6B`, `huggingface:datasets/owner/name`, `test:acme/toy`) — or, for a **closed work**, its home URL on a host with no provider (`https://www.qwencloud.com/models/qwen3.8-max-0902`): an API-only model, an announced release. A closed work has no `revision`, no `include`, and no `estimate`; its family, generation, and member are read from the URL's last segment exactly as from a repo name. |
 | `revision` | Intended pin, or `null` = any revision of this source satisfies. A 12-char (or longer) hex prefix is stored as typed. Non-hex refs match `revision_ref` exactly. |
 | `include` | `null` (full repo) or a list of globs in argv order, same meaning as `archive --include`. Identity is the *sorted set* of those globs. |
 | `desire` | Integer `1–9`, or `null`. 9 = most desired. Curator data. |
@@ -97,7 +97,11 @@ Stale after 7 days (`*` on SIZE in `list`).
 | `dominant_dtype` | `est["parameters"]["dominant_dtype"]` if dict, else `null` |
 | `unknown_size_count` | `est["payload"]["unknown_size_count"]` |
 | `hints` | Derived once, by `hints_for(est)` — see [Hints](#hints). Since 1.1.0. |
-| `policy` | `"masters"` when the stored price is the default masters-first acquisition ([Quantization §4](QUANTIZATION.md#mechanics)); `null` for full-repo and explicit-include prices. Since 1.2.0. |
+| `policy` | `"negatives"` when the CLI classified the row and the stored price is its negative set — the default acquisition, whether or not any print was skipped ([Quantization §4](QUANTIZATION.md#4-mechanics)); `null` for `--full` and explicit-include prices, datasets, and rows priced by a board before the CLI's refresh. |
+| `precision` | The release precision label — `BF16`, `FP8`, `MXFP4`, `AWQ INT4`, `Q4_K_M` — from `config.json`'s `quantization_config`, the dominant dtype, or (GGUF-only repos) the file name ([Quantization §2](QUANTIZATION.md#2-precision-and-the-one-number-that-explains-a-size)); `null` when nothing establishes it. |
+| `bytes_per_param` | Measured: the priced weight bytes over `parameters`. About 2 is one full-fidelity copy, about 1 an 8-bit release, about 0.5 a 4-bit one, far above 2 several weight sets. `null` when either side is unknown. |
+| `architecture` | `config.json` `model_type` (`qwen3_5_moe_text`), or `null`. |
+| `parents` | Parent edges as upstream declares them: `[{source, relation}]` where `relation` is `finetune` / `adapter` / `merge` / `quantized` / `trained_on` or `null` when unlabeled. From the card's `base_model` and `datasets` and the Hub's `base_model:*` tags. `null` when nothing is declared. |
 
 Never stored: `disk.*`, `bundle.dir`, engines, completeness, variants,
 vault status, bundle ids.
@@ -116,21 +120,34 @@ Empty (`[]`) means *nothing notable*; a missing digest still means
 | `large` | The priced payload is ≥ 20 GiB (`LARGE_PAYLOAD_BYTES`) — more than one sitting, often more than one disk. With `--include`, the priced payload is the subset. An unknown size is never large. |
 | `quant` | A published quantized artifact ([Quantization](QUANTIZATION.md)): the weight bytes are mostly GGUF, or the dominant safetensors dtype is not F64 / F32 / F16 / BF16. |
 | `redundant` | The priced weight bytes are ≥ 1.75× one copy at the published per-dtype parameter counts — the repo likely ships several weight sets (`darsay classify` shows them). Live estimates only; never re-derived from a stored digest. Since 1.2.0. |
-| `subset` | The entry was priced with an explicit `--include`. A masters-policy price sets the digest's `policy` key instead. |
+| `subset` | The entry was priced with an explicit `--include`. A negatives-policy price sets the digest's `policy` key instead. |
 
-A 1.0.0 file carries no `hints`. Readers derive `large`, `gated`, and
-`subset` from the digest and the entry's `include` on the fly; `quant`
-needs the live estimate's weight formats, so a GGUF row shows it only
-after `darsay estimate CATALOG` refreshes the digest (a quantized
-safetensors dtype is derived either way). Refresh is the only thing that
-writes `hints`; `catalog adopt` copies it verbatim.
+A digest written by a darsay.io board before the CLI has refreshed it
+carries the hints the board could derive. Readers derive `large`,
+`gated`, and `subset` from the digest and the entry's `include` on the
+fly; `quant` needs the live estimate's weight formats, so a GGUF row
+shows it only after `darsay estimate CATALOG` refreshes the digest (a
+quantized safetensors dtype is derived either way). Refresh is the only
+thing that writes `hints`; `catalog adopt` copies it verbatim.
+
+### Lineage (not in the file)
+
+Family, generation, member, variants, formats, and size are **read from
+the name** at view time by the grammar in `lineage.py` — the same grammar
+darsay.io runs — so the file stores nothing it could derive. `darsay
+list CATALOG --json` rows carry them under `lineage` (with `read_from:
+"name"`); `list` shows a FAMILY column; `--sort family` orders rows as
+the tree (family, then generation oldest first, then size); the
+generated README draws a **Families** section. Parent edges are the one
+lineage fact the file stores, in the digest's `parents`, because they
+come from upstream declarations, not from the name.
 
 ## Overlay (not in the file)
 
 `darsay list CATALOG` matches each entry against this vault’s
 `bundle_records` by canonical source address + optional revision + include
 set. An entry with `include: null` means *the default acquisition*: it is
-satisfied by a masters-policy bundle (what `archive <source>` produces)
+satisfied by a negatives-policy bundle (what `archive <source>` produces)
 or by a full-repo bundle (a superset). An entry with explicit include
 globs matches only its globs.
 
@@ -139,13 +156,13 @@ globs matches only its globs.
 | `have` | A complete bundle of this work is in the vault. |
 | `partial` | An in-progress pin (ledger, no manifest) matches. |
 | `want` | Nothing in this vault matches. |
-| `unknown` | Unregistered source scheme (a future provider). Not unfinished work. A known provider with a locator that does not parse is a load error, not `unknown`. |
+| `closed` | Nothing to fetch: the address is a home URL, or a scheme with no provider yet. Not unfinished work — a place held. A known provider with a locator that does not parse is a load error, not `closed`. |
 
 `archive --next` and `list --sort next` prefer `partial` over `want`
 (finish bytes already on disk), then higher desire. `--sort desire` is
-priority-first. Unknown rows are not unfinished work: `--next` skips
-them when anything else remains, and errors if they are all that is
-left.
+priority-first; `--sort family` is the tree. Closed rows are not
+unfinished work: `--next` skips them when anything else remains, and
+says so if they are all that is left.
 
 A vault stores one pin per `(source, revision12)`. Catalog rows that
 differ only by `--include` are different works in the catalog, but they
@@ -178,8 +195,9 @@ filesystem path:
 
 `estimate` against a board is the round trip that keeps it honest: the
 board's own quick estimates can only price the shipping box, while the
-CLI classifies (masters-first prices, `hints`, the `policy` marker) and
-pushes the refreshed catalog back. Mutating verbs push after saving;
+CLI classifies (negatives-first prices, `hints`, the `policy` marker,
+precision and bytes per parameter) and pushes the refreshed catalog
+back. Closed rows are left as they are — there is nothing to price. Mutating verbs push after saving;
 `--dry-run` never pushes. The board URL is the capability — treat it
 like a secret.
 
@@ -209,6 +227,7 @@ expires.
 ```
 darsay catalog new NAME
 darsay catalog add CATALOG SOURCE [--desire 1-9] [--estimate]
+darsay catalog add CATALOG https://host/path/to/a-closed-work   # holds its place, no price
 darsay catalog drop CATALOG SOURCE [--include GLOB | --full]
 darsay catalog regen CATALOG
 darsay list CATALOG
@@ -226,5 +245,6 @@ vault as the same table; DESIRE, HINTS, and NOTE hide when every cell is
 empty. HINTS is the entry's [hints](#hints) (`large, gated`), the same
 words `estimate CATALOG` prints per row.
 `list --next` prints a copy-pasteable `darsay archive` line (source +
-`--revision` + `--include`). Cookbook:
+`--revision` + `--include`). FAMILY and PRECISION show the name-derived
+generation and the digest's precision label. Cookbook:
 [Share a catalog](../examples/README.md#share-a-catalog).

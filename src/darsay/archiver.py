@@ -22,7 +22,6 @@ from __future__ import annotations
 
 import json
 import platform
-import re
 import shutil
 import socket
 from datetime import datetime, timezone
@@ -31,6 +30,7 @@ from pathlib import Path
 from . import SCHEMA_VERSION, __version__
 from .hashing import bundle_hash
 from .licensing import build_licensing_record
+from .lineage import lineage_of_source
 from .metadata import estimate_runtime, extract_dataset_metadata, extract_model_metadata
 from .schema import (
     ARTIFACT_TYPES,
@@ -110,7 +110,11 @@ def write_manifest(bundle_dir: Path, manifest: dict) -> None:
 
 
 def load_manifest(bundle_dir: Path) -> dict:
-    """Read + validate. Major-newer than 1.x → SystemExit."""
+    """Read + validate. A manifest of another major → SystemExit.
+
+    darsay is greenfield and fixes forward: a record written under an
+    earlier major is not migrated in place; the source is re-archived.
+    """
     path = bundle_dir / "manifest.json"
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
@@ -138,6 +142,12 @@ def load_manifest(bundle_dir: Path) -> dict:
             f"error: manifest schema {version} is newer than this darsay "
             f"(supports {MANIFEST_SCHEMA_MAJOR}.x)"
         )
+    if major < MANIFEST_SCHEMA_MAJOR:
+        raise SystemExit(
+            f"error: manifest schema {version} predates this darsay "
+            f"({MANIFEST_SCHEMA_MAJOR}.x); re-archive the source — the record "
+            "is not migrated in place"
+        )
     kind = data.get("kind") or MANIFEST_KIND
     if kind != MANIFEST_KIND:
         raise SystemExit(
@@ -145,16 +155,6 @@ def load_manifest(bundle_dir: Path) -> dict:
         )
     data["kind"] = kind
     return data
-
-
-def _guess_version(repo_name: str, model_type: str | None) -> str | None:
-    # "Qwen3-0.6B" with model_type "qwen3" -> "3"
-    if model_type:
-        m = re.search(r"(\d+(?:\.\d+)?)$", model_type)
-        if m:
-            return m.group(1)
-    m = re.search(r"[a-zA-Z](\d+(?:\.\d+)?)[-_]", repo_name)
-    return m.group(1) if m else None
 
 
 def _warn_include_vs_pin(
@@ -184,7 +184,7 @@ def _warn_include_vs_pin(
             "  hint: --force --full re-pins the full file set"
         )
     if subset.get("policy"):
-        # A masters-policy pin *is* the default selection; resume silently.
+        # A negatives-policy pin *is* the default selection; resume silently.
         return
     raise SystemExit(
         f"error: this pin is a subset {pinned}; it is not the full repo\n"
@@ -215,7 +215,7 @@ def archive(
     """Archive a source through pin → reconcile → transfer → register.
 
     A fresh model pin with no explicit ``include`` is classified and
-    pinned masters-first by default — masters, everything unclassifiable,
+    pinned negatives by default — negatives, everything unclassifiable,
     and support files are fetched; confident derivable prints are skipped
     on the record (``source.subset.policy``). ``full=True`` pins the
     whole repo instead; re-runs resume whatever the pin selected.
@@ -295,13 +295,13 @@ def archive(
     payload_dir = bundle_dir / root
 
     def _fresh_ledger() -> dict:
-        """Pin a new ledger; a model pin applies the masters policy by default."""
+        """Pin a new ledger; a model pin applies the negatives policy by default."""
         assert snapshot is not None
         effective_include, policy = include, None
         if ref.artifact_type == "model" and not include and not full:
-            from .classify import masters_policy
+            from .classify import negatives_policy
 
-            effective_include, policy = masters_policy(
+            effective_include, policy, _classification = negatives_policy(
                 provider, ref, snapshot, vault, progress
             )
         return new_ledger(snapshot, include=effective_include, policy=policy)
@@ -539,12 +539,11 @@ def _register_bundle(
             shutil.copy2(bundle_dir / lf, bundle_dir / "LICENSE")
             break
 
-    progress("Querying downstream ecosystem ...")
-    relationships = provider.relationships(source, metadata)
+    progress("Querying lineage: parents declared upstream, descendants listed ...")
+    lineage = provider.lineage(source, metadata)
 
     now = utc_now()
     bundle_id = f"{source.bundle_name}@{commit[:12]}"
-    model_type = model_metadata.get("model_type") if model_metadata else None
     aliases = [source.canonical, source.locator]
     if source.url not in aliases:
         aliases.append(source.url)
@@ -565,9 +564,10 @@ def _register_bundle(
         "bundle_id": bundle_id,
         "identity": {
             "model_name": source.name,
-            "family": model_type or source.name.split("-")[0].lower(),
             "publisher": source.publisher,
-            "version": _guess_version(source.name, model_type),
+            # Family, generation, member, variants, formats, size: read from
+            # the publisher's name for the work (lineage.py), and labeled so.
+            **lineage_of_source(source.canonical).as_dict(),
             "release_date": metadata.get("created_at"),
             "aliases": aliases,
         },
@@ -627,7 +627,7 @@ def _register_bundle(
                 }
             ),
         },
-        "relationships": relationships,
+        "lineage": lineage,
         "archive": {
             "date_archived": now,
             "archived_by": None,

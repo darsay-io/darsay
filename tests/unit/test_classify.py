@@ -154,14 +154,14 @@ def test_r3_indexed_full_fidelity_master():
     }
     result = evaluate(files, _facts(indexes=indexes), locator="a/t")
     indexed = _by_rule(result)["R3"]
-    assert indexed["verdict"] == "master"
+    assert indexed["verdict"] == "negative"
     assert indexed["action"] == "fetch"
     assert "BF16" in indexed["reason"]
 
 
 def test_r4_standalone_master_and_r14_without_dtype():
     result = evaluate([F("model.safetensors")], _facts(), locator="a/t")
-    assert _by_rule(result)["R4"]["verdict"] == "master"
+    assert _by_rule(result)["R4"]["verdict"] == "negative"
     result = evaluate(
         [F("model.safetensors")], _facts(configs={".": None}), locator="a/t"
     )
@@ -176,7 +176,7 @@ def test_r5_quantized_safetensors_master():
         [F("model.safetensors")], _facts(configs={".": cfg}), locator="a/t"
     )
     quant = _by_rule(result)["R5"]
-    assert quant["verdict"] == "master"
+    assert quant["verdict"] == "negative"
     assert "awq" in quant["reason"]
     mlx = {"quantization": {"bits": 4}}
     result = evaluate(
@@ -204,7 +204,7 @@ def test_r6_orphan_unknown_kept():
 def test_r7_imatrix_gguf_master():
     gguf = {"Q4.gguf": {"kv": {"quantize.imatrix.file": "im.dat"}}}
     result = evaluate([F("Q4.gguf")], _facts(gguf=gguf), locator="a/t")
-    assert _by_rule(result)["R7"]["verdict"] == "master"
+    assert _by_rule(result)["R7"]["verdict"] == "negative"
 
 
 def test_r8_external_source_claim_unknown():
@@ -265,7 +265,7 @@ def test_r11_two_candidates_unknown_case_study_shape():
     gguf = {"Q4.gguf": {"kv": {"general.name": "s99-merged-fixed"}}}
     result = evaluate(files, _facts(indexes=indexes, gguf=gguf), locator="a/t")
     by_rule = _by_rule(result)
-    assert by_rule["R3"]["verdict"] == "master"
+    assert by_rule["R3"]["verdict"] == "negative"
     assert by_rule["R6"]["verdict"] == "unknown"
     ambiguous = by_rule["R11"]
     assert ambiguous["verdict"] == "unknown"
@@ -290,7 +290,7 @@ def test_r12_r13_legacy_weights():
     result = evaluate(files, _facts(), locator="a/t")
     assert _by_rule(result)["R12"]["verdict"] == "unknown"
     result = evaluate([F("pytorch_model.bin")], _facts(), locator="a/t")
-    assert _by_rule(result)["R13"]["verdict"] == "master"
+    assert _by_rule(result)["R13"]["verdict"] == "negative"
 
 
 def test_r14_unreadable_headers_fetch():
@@ -546,7 +546,7 @@ def test_r15_intra_repo_duplicates_skip_and_keep_shallowest():
     result = evaluate(files, facts, locator="a/t")
     attach_selection(result, files)
     root = _set_for(result, "text_encoder/model-00001-of-00002.safetensors")
-    assert (root["verdict"], root["action"]) == ("master", "fetch")
+    assert (root["verdict"], root["action"]) == ("negative", "fetch")
     for prefix in ("FL2VA", "Ref2VA"):
         twin = _set_for(
             result, f"{prefix}/text_encoder/model-00001-of-00002.safetensors"

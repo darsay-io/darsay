@@ -23,7 +23,7 @@ def test_classify_single_master_plus_gguf_skips_print(vault, test_provider, caps
     out = capsys.readouterr().out
     assert "test:acme/toy @ main" in out
     assert "SKIPPED" in out and "[R9]" in out
-    assert "masters-first: fetch" in out
+    assert "negatives: fetch" in out
     assert "To pin exactly this selection:" in out
     assert "--include model.safetensors" in out
 
@@ -66,7 +66,7 @@ def test_classify_case_study_shape_refuses_to_guess(vault, test_provider, capsys
     out = capsys.readouterr().out
     data = json.loads(out[out.index("{") :])
     by_rule = {s["rule"]: s for s in data["sets"]}
-    assert by_rule["R3"]["verdict"] == "master"
+    assert by_rule["R3"]["verdict"] == "negative"
     assert by_rule["R6"]["verdict"] == "unknown"
     assert by_rule["R11"]["verdict"] == "unknown"
     assert data["skip"]["bytes"] == 0
@@ -74,7 +74,7 @@ def test_classify_case_study_shape_refuses_to_guess(vault, test_provider, capsys
 
     assert main(["--vault", str(vault), "classify", "test:acme/oblit"]) == 0
     human = capsys.readouterr().out
-    assert "Nothing here is mechanically skippable" in human
+    assert "Nothing here is a print" in human
     assert "need your decision" in human
 
 
@@ -151,5 +151,5 @@ def test_classify_provider_without_read_capability(
     monkeypatch.setattr(test_provider, "read_bytes", no_reads)
     assert main(["--vault", str(vault), "classify", "test:acme/toy"]) == 0
     out = capsys.readouterr().out
-    assert "Nothing here is mechanically skippable" in out
+    assert "Nothing here is a print" in out
     assert "need your decision" in out

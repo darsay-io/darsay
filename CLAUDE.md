@@ -4,7 +4,10 @@ the genesis machine of archives
 
 Tools for archiving full model ecosystems as museum-grade but directly usable
 bundles. One Python package: `darsay` in `src/darsay/`, CLI entry
-point `darsay` (argparse, subcommands in `cli.py`).
+point `darsay` (argparse, subcommands in `cli.py`). The mission and the
+vocabulary every surface shares — work, negative and print, precision,
+family / generation / member — are in `docs/NORTH-STAR.md`; the words
+are not optional, and *master* is not one of them.
 
 ## Environment
 
@@ -38,6 +41,14 @@ point `darsay` (argparse, subcommands in `cli.py`).
   verify at the destination → remove the source; `cp` copies → verifies →
   keeps the source and records the replica in both manifests; partials are
   refused, `assemble --handoff` is their verb),
+  `lineage.py` (the name grammar: family, generation, member, variants,
+  formats, size — read from a work's name and labeled so; mirrored in
+  `website/src/lib/lineage.ts` against `tests/fixtures/lineage-names.json`),
+  `precision.py` (release-precision labels from `config.json` /
+  dtypes / GGUF names, and measured bytes per parameter; mirrored in
+  `website/src/lib/precision.ts`),
+  `classify.py` (negative / print / support / unknown verdicts over a
+  repo's weight sets; the archive default keeps the negatives),
   `verify.py`, `standalone_verify.py` (stdlib-only; frozen into `.mvb.tar`
   as `darsay-verify.py` — changing it is an MVB minor bump), `smoke.py`,
   `export.py` (.mvb.tar), `readme_gen.py`,
@@ -53,16 +64,19 @@ point `darsay` (argparse, subcommands in `cli.py`).
   unless `DARSAY_DEBUG=1`).
 - `tests/` — pytest pyramid: `unit/`, `integration/` (fake `test:` provider),
   `e2e/` (live Hub, opt-in). See `docs/TESTING.md`.
-- `docs/GETTING-STARTED.md` — first-bundle walkthrough for new users.
-  `docs/CONCEPTS.md` — vault, bundle, pin, payload vs metadata.
+- `docs/NORTH-STAR.md` — the mission and the model of the models.
+  `docs/GETTING-STARTED.md` — first-bundle walkthrough for new users.
+  `docs/CONCEPTS.md` — vault, bundle, pin, payload vs metadata, negatives
+  and prints, precision, lineage, closed works.
   `examples/README.md` — copy-paste cookbook.
   `docs/README.md` — documentation home / reading map.
   `docs/MANIFEST.md` — field-by-field manifest schema reference.
   `docs/MVB-FORMAT.md` — single-file export format spec.
   `docs/HYDRATION.md` — bundle→runnable-install design (envs, runner
   contract, hydration.json).
-  `docs/QUANTIZATION.md` — fidelity policy: what gets archived vs derived
-  when a model has quantized variants.
+  `docs/QUANTIZATION.md` — negatives and prints, precision and bytes per
+  parameter: what gets archived vs derived when a model has quantized
+  variants.
   `docs/DESIGN.md` — implementation rationale: why Python, why transfer
   concurrency stays in Python threads (measurements; the Xet tradeoff),
   and why bundle longevity rests on the formats, not the tool.
@@ -120,6 +134,14 @@ point `darsay` (argparse, subcommands in `cli.py`).
 - **Record, don't fabricate:** manifests contain only what was established
   from upstream or the payload; unknown = `null` (curator fills in later).
   Query caps must be recorded (`query_limit`), never silently truncated.
+  Anything derived says what from: lineage read from a name carries
+  `read_from: "name"`, bytes per parameter is measured from the priced
+  bytes, a precision label names its source.
+- **Fix forward:** darsay is greenfield. A change to the model of the
+  models bumps the schema major and every reader follows; no
+  compatibility knobs, no fields kept to describe how things used to be,
+  no in-place migration of records. Breaking changes are named in the
+  changelog with their recovery.
 - **Verify before register:** `import` must fully re-hash a payload before a
   bundle enters the vault; failures register nothing and exit non-zero.
 - **Generated vs hand-edited:** bundle `README.md` is a derived view

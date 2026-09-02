@@ -45,6 +45,11 @@ SIDECAR_GLOBS = (
     "preprocessor_config.json",
     "video_preprocessor_config.json",
     "spiece.model",
+    "tiktoken.model",
+    "*.tiktoken",
+    # Custom-code models (configuration_*.py, modeling_*.py, a tokenizer
+    # class) cannot load without their Python beside the weights.
+    "*.py",
     "dataset_infos.json",
 )
 

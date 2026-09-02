@@ -203,10 +203,11 @@ def _read_marker(tar_path: Path) -> dict:
         schema_major = parse_schema_major(embedded)
     except ValueError:
         raise SystemExit(f"error: export marker schema_version {embedded!r}") from None
-    if schema_major > MANIFEST_SCHEMA_MAJOR:
+    if schema_major != MANIFEST_SCHEMA_MAJOR:
         raise SystemExit(
-            f"error: embedded manifest schema {embedded} is newer than this darsay "
-            f"(supports {MANIFEST_SCHEMA_MAJOR}.x)"
+            f"error: embedded manifest schema {embedded} is not "
+            f"{MANIFEST_SCHEMA_MAJOR}.x — this darsay imports "
+            f"{MANIFEST_SCHEMA_MAJOR}.x exports only"
         )
     return marker
 

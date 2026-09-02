@@ -6,7 +6,7 @@
   <a href="../README.md">README</a>
 </p>
 
-# manifest.json — schema reference (v1.6.0)
+# manifest.json — schema reference (v2.0.0)
 
 > **In one sentence.** The manifest is the recorded facts about a bundle.
 > Unknown is `null`. The tool never fabricates.
@@ -32,8 +32,8 @@ Conventions:
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | Version of this schema (`"1.6.0"`). Major changes only on breaking layout. |
-| `kind` | Always `"darsay.bundle"`. New archives write it. A 1.x file with the field missing is read as `"darsay.bundle"`. Any other value is a load error. |
+| `schema_version` | Version of this schema (`"2.0.0"`). Major changes only on breaking layout. |
+| `kind` | Always `"darsay.bundle"`. A file with the field missing is read as `"darsay.bundle"`. Any other value is a load error. |
 | `artifact_type` | Registry key driving completeness rules and the payload root (`"model"` or `"dataset"`; future: GGUF packs, papers — see `src/darsay/schema.py`). |
 | `bundle_id` | `<bundle directory name>@<first 12 of pinned revision>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Hugging Face dataset bundles take a `datasets--` prefix (`datasets--saidutta69--fable-5-premium@684cb1f849fe`) since model and dataset namespaces can collide on that host. Other providers include their id in the directory name. Stable, deterministic, unique per (source, revision). |
 
@@ -42,9 +42,14 @@ Conventions:
 | Field | Meaning |
 |---|---|
 | `model_name` | Repo name as published (`Qwen3-0.6B`), for datasets too — the field name is kept stable across types. |
-| `family` | Model family, taken from `config.json` `model_type` when available (`qwen3`); name-derived fallback otherwise. |
 | `publisher` | Repo owner (`Qwen`). |
-| `version` | Family version parsed from the name/model_type; null when not derivable. |
+| `family` | The product family, read from the name by the documented grammar (`Qwen`, `Kimi`, `DeepSeek-Coder`); null when the name has no alphabetic lead. The *architecture* family (`config.json` `model_type`) lives in `model_metadata.model_type`. |
+| `generation` | The generation token after the family (`3.8`, `K3`, `V3.2`); null when the name carries none. Orders numerically within a family. |
+| `member` | What remains of the name after family, generation, variants, and formats (`2.4T-A95B`, `27B`, `Flash-Next`); null for a family's flagship (`Kimi-K3`). |
+| `variants` | Closed vocabulary read from the name: `base`, `instruct`, `chat`, `thinking`, `abliterated`, `uncensored`, `distill`. |
+| `formats` | Packaging tokens read from the name: `gguf`, `fp8`, `awq`, `gptq`, `int4`, `mlx`, … |
+| `size` | `{total, active}` parameter counts read from the name (`480B-A35B` → 480e9 / 35e9; `8x7B` → 56e9 / 7e9); null when the name has no size token. A claim of the *name*, distinct from `model_metadata.parameter_count`, which is counted from headers. |
+| `read_from` | Always `"name"` — the provenance of `family` … `size`. |
 | `release_date` | Upstream repo creation time. |
 | `aliases` | Known ids for this artifact, starting with the source repo id. |
 
@@ -69,9 +74,9 @@ Provenance of the download.
 | `access` | `{gated, notes}`. `gated` is the Hub gate status at archive time: `"auto"` (agree → instant access, contact info shared with the authors), `"manual"` (authors approve each request), or `false`. The gate agreement text lives in Hub repo settings, **not** in the repo tree, so it is not part of the snapshot — `notes` records that. Gates are enforced server-side on file downloads; an archive of a gated repo means the archiving account had accepted the terms. |
 | `upstream_stats_at_archive` | Downloads/month and likes at archive time — a popularity snapshot for the historical record. |
 | `upstream_tags` | Raw repo tags at archive time. |
-| `subset` | Present when the pin is not the whole repo — an explicit `archive --include`, or the default masters-first selection. `{include, sidecars, sidecar_file_count, full_file_count, full_total_size_bytes, kept_file_count, kept_total_size_bytes, omitted_file_count, full_files[]}`. `full_files` is the complete upstream inventory (path, size, sha256, git_sha1, sorted by path) so the bundle states exactly what it left out. `inventory.files` is only the kept payload. `null` when the pin is the whole repo (`--full`, datasets, or nothing skippable). |
-| `subset.policy` | `"masters"` when the selection was made by the default masters-first classification ([Quantization §4](QUANTIZATION.md#mechanics)); absent for explicit `--include` subsets. Since 1.7.0. |
-| `subset.classification` | The recorded rationale of a policy selection: `classifier.darsay` (the version that classified), the read receipt (`requests`, `bytes_fetched`, `caps` — the classification's `query_limit`s), and one row per weight set (`{name, kind, verdict, rule, action, file_count, bytes, reason}`). Recorded facts about a decision the tool actually made, not curator claims. Since 1.7.0. |
+| `subset` | Present when the pin is not the whole repo — an explicit `archive --include`, or the default negatives selection. `{include, sidecars, sidecar_file_count, full_file_count, full_total_size_bytes, kept_file_count, kept_total_size_bytes, omitted_file_count, full_files[]}`. `full_files` is the complete upstream inventory (path, size, sha256, git_sha1, sorted by path) so the bundle states exactly what it left out. `inventory.files` is only the kept payload. `null` when the pin is the whole repo (`--full`, datasets, or nothing skippable). |
+| `subset.policy` | `"negatives"` when the selection was made by the default classification — the negative set ([Quantization §4](QUANTIZATION.md#4-mechanics)); absent for explicit `--include` subsets. |
+| `subset.classification` | The recorded rationale of a policy selection: `classifier.darsay` (the version that classified), the read receipt (`requests`, `bytes_fetched`, `caps` — the classification's `query_limit`s), and one row per weight set (`{name, kind, verdict, rule, action, file_count, bytes, reason}`; `verdict` ∈ `negative`, `print`, `support`, `unknown`). Recorded facts about a decision the tool actually made, not curator claims. |
 
 ## `licensing`
 
@@ -105,7 +110,9 @@ torch required).
 | `parameter_count`, `parameters_by_dtype`, `weight_shards` | Counted from safetensors headers. Null for `.bin`/`.gguf`-only payloads, and when any shard's header cannot be read (never a partial count). |
 | `architecture`, `model_type` | From `config.json` (`Qwen3ForCausalLM`, `qwen3`). |
 | `context_length` | `max_position_embeddings`. |
-| `precision` | `torch_dtype`, falling back to the dominant tensor dtype. |
+| `precision` | The release precision label — `BF16`, `FP8`, `MXFP4`, `AWQ INT4`, `Q4_K_M` — from `config.json`'s `quantization_config` (wherever a multimodal config nests it), else the dominant tensor dtype, else a GGUF-only payload's file name ([Quantization §2](QUANTIZATION.md#2-precision-and-the-one-number-that-explains-a-size)). |
+| `precision_detail` | The recipe behind the label when there is one (`compressed-tensors · mxfp4-pack-quantized · 4-bit · group 32`), else null. |
+| `bytes_per_param` | Measured: weight bytes in the payload over `parameter_count`. Null when either is unknown. |
 | `quantization` | `quantization_config.quant_method` when present, else null. |
 | `hidden_size`, `num_hidden_layers`, `num_attention_heads`, `num_key_value_heads`, `tie_word_embeddings` | Architecture shape. |
 | `tokenizer` | `class`, `vocab_size`, `model_max_length`, `special_tokens` (bos/eos/pad/…), `chat_template_present`. |
@@ -190,34 +197,20 @@ when they disagree, both are kept; the manifest never averages claims.)
 
 Statuses: `pass` / `fail` / `skipped` (dependency or file missing) / `not-run`.
 
-## `relationships`
+## `lineage`
 
-Model bundles:
-
-| Field | Meaning |
-|---|---|
-| `base_models` | All declared parents, from card `base_model` plus the Hub's `base_model:*` repo tags (merges have several; null when nothing is declared). |
-| `base_model` | The primary (first) parent — convenience alias for `base_models[0]`. |
-| `base_model_relation` | The model-tree edge label: `finetune`, `adapter`, `quantized`, or `merge`, from the card's `base_model_relation` or an unambiguous typed tag. Null when upstream doesn't label the edge (or labels conflict) — record, don't fabricate. Note the Hub has no relation type for alignment edits (e.g. abliteration); those surface only in tags and card text, and belong in `curation.md`. |
-| `finetuned_from` | The parent **only when the declared relation is `finetune`**; null otherwise — a quantization or alignment edit is not a finetune. |
-| `training_datasets` | Dataset ids the model card declares training on (`card.datasets`, normalized to a list; null when not declared) — the mirror of a dataset bundle's `models_trained_on`. |
-| `quantized_versions`, `gguf_repos` | Downstream repos found at archive time (GGUFs are the `*gguf*` subset). |
-| `finetunes_count`, `adapters_count` | Counts of downstream finetune/adapter repos. |
-| `related_variants`, `successors` | **curator**. |
-
-Dataset bundles:
+Where this work sits: its parents as upstream declares them, and the
+descendants that existed when it was archived. The name-derived half of
+lineage — family, generation, member — lives in `identity`
+([Concepts → lineage](CONCEPTS.md#lineage)).
 
 | Field | Meaning |
 |---|---|
-| `source_datasets` | Upstream datasets this one was derived from, as the card declares them. |
-| `models_trained_on` | Models on the Hub declaring training on this dataset (`dataset:<id>` filter) at archive time. |
-
-Both:
-
-| Field | Meaning |
-|---|---|
-| `query_limit` | Cap on the ecosystem queries (100). A count or list length equal to the cap means **at least** that many — renderers show `≥`. |
-| `ecosystem_snapshot_as_of` | When the ecosystem queries ran. This section is a historical snapshot, not a live index. |
+| `parents` | Edges to the works this one was made from, each `{source, relation, declared_by}`. `source` is a canonical ref (`huggingface:Qwen/Qwen3.8-27B`, `huggingface:datasets/owner/name`). `relation` is the label upstream gave the edge — `finetune`, `adapter`, `merge`, `quantized` (the Hub's model-tree relations), `trained_on` (from the card's `datasets`), `derived` (a dataset's `source_datasets`) — or null when a parent is declared without a label. `declared_by` is `card` or `tag`. Null when nothing is declared. The Hub has no relation for alignment edits (abliteration); those surface in `identity.variants` (read from the name) and in `curation.md`. |
+| `descendants` | An archive-time snapshot of what pointed back at this work. Models: `quantized` (repo ids declaring `base_model:quantized`), `gguf` (the `*gguf*` subset of those), `finetunes_count`, `adapters_count`. Datasets: `models_trained_on` (repo ids declaring `dataset:<id>`). A null list means the query failed; a length equal to `query_limit` means **at least** that many — renderers show `≥`. |
+| `successors`, `related` | **curator** — the next generation, and kin the name grammar cannot see. |
+| `as_of` | When the descendant queries ran. This section is a historical snapshot, not a live index. |
+| `query_limit` | Cap on the descendant queries (100). |
 
 ## `archive`
 
@@ -266,28 +259,34 @@ downstream tooling needs to query them.
 `schema_version` is a property of **this file's shape**, not of the tool that
 last touched it. Tool version (`darsay.__version__`) moves independently.
 
-1.x is a closed major with an open minor:
+2.x is a closed major with an open minor:
 
-- **Major** changes only on breaking layout. A 1.x tool refuses
-  `schema_version` major `> 1` (`load_manifest`, and `import` on the
-  `.mvb.json` marker before unpacking). A 2.x bundle is unsupported, not
-  silently misread. Mixed 1.x minors may coexist in one vault.
+- **Major** changes only on breaking layout. This tool reads
+  `schema_version` major `2` only (`load_manifest`, and `import` on the
+  `.mvb.json` marker before unpacking): a newer major is unsupported, not
+  silently misread, and an older one is refused with a re-archive hint —
+  darsay fixes forward and does not migrate a record in place. Mixed 2.x
+  minors may coexist in one vault.
 - **Minor / patch** are additive. Readers **ignore unknown fields**.
-  Missing additive fields mean `null` (`kind` missing on a 1.x file is
-  read as `"darsay.bundle"`). Writers **preserve** unknown top-level keys
-  on round-trip (`verify`, `run`, `regen`).
+  Missing additive fields mean `null` (`kind` missing is read as
+  `"darsay.bundle"`). Writers **preserve** unknown top-level keys on
+  round-trip (`verify`, `run`, `regen`).
 - **The version describes this file**, not the tool that last touched it.
   Writes do not stamp the tool's current schema onto the record.
-- **1.x will not** rename or remove a field, change `payload_root` for
+- **2.x will not** rename or remove a field, change `payload_root` for
   `model` or `dataset`, change `bundle_hash` or what it covers, or rewrite
   payload.
 - **New artifact types** (GGUF packs, papers) are a new `artifact_type`
-  plus payload root — not a 2.0. Readers take `inventory.layout.payload_root`
+  plus payload root — not a 3.0. Readers take `inventory.layout.payload_root`
   from the record.
 
-2.0, when it exists, is a second reader dispatched on `schema_version`
-major (and `kind`). It lives next to 1.x in the same vault. Payload stays
-byte-immutable; a migrate, if ever needed, rewrites only the record.
+What 2.0.0 changed against 1.x: `identity` gained the name-derived
+`family` … `size` and dropped `version` (the generation) and the
+architecture-as-family reading; `relationships` became `lineage` with
+typed, provenance-carrying `parents`; `model_metadata.precision` became
+the release-precision label with `precision_detail` and
+`bytes_per_param` beside it; `source.subset.policy` reads `"negatives"`
+and verdicts read `negative`. Payload stays byte-immutable across majors.
 
 ---
 

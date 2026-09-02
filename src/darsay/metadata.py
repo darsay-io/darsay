@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .precision import bytes_per_param, precision_facts
 from .safetensors_meta import summarize_safetensors
 
 
@@ -65,14 +66,35 @@ def extract_model_metadata(payload_root: Path, card_data: dict | None = None) ->
         qc = config["quantization_config"]
         quantization = qc.get("quant_method") or "unknown"
 
+    # The release precision and what it actually spends per weight — the
+    # numbers that explain the payload's size (precision.py).
+    weight_files = [
+        p
+        for suffix in ("*.safetensors", "*.gguf", "*.bin", "*.pt", "*.pth")
+        for p in payload_root.glob(suffix)
+    ]
+    gguf_files = [p for p in weight_files if p.suffix.lower() == ".gguf"]
+    weight_bytes = sum(p.stat().st_size for p in weight_files if p.is_file())
+    precision = precision_facts(
+        config=config,
+        dominant_dtype=weights["dominant_dtype"] if weights else None,
+        dominant_format="gguf" if gguf_files and not safetensors_files else None,
+        weight_paths=[p.name for p in gguf_files],
+    )
+
     return {
         "parameter_count": weights["parameter_count"] if weights else None,
         "parameters_by_dtype": weights["parameters_by_dtype"] if weights else None,
         "architecture": (config.get("architectures") or [None])[0],
         "model_type": config.get("model_type"),
         "context_length": config.get("max_position_embeddings"),
-        "precision": config.get("torch_dtype")
+        "precision": precision["label"]
+        or config.get("torch_dtype")
         or (weights["dominant_dtype"] if weights else None),
+        "precision_detail": precision["detail"],
+        "bytes_per_param": bytes_per_param(
+            weight_bytes, weights["parameter_count"] if weights else None
+        ),
         "quantization": quantization,
         "hidden_size": config.get("hidden_size"),
         "num_hidden_layers": config.get("num_hidden_layers"),

@@ -23,6 +23,8 @@ def human_size(n: int | None) -> str:
 def human_params(n: int | None) -> str:
     if n is None:
         return "unknown"
+    if n >= 1e12:
+        return f"{n / 1e12:.2f}T"
     if n >= 1e9:
         return f"{n / 1e9:.2f}B"
     if n >= 1e6:
@@ -223,6 +225,100 @@ def render_bundle_readme(bundle_dir: Path, m: dict) -> str:
     return _render_model_readme(bundle_dir, m)
 
 
+def _family_cell(ident: dict) -> str:
+    """``Qwen 3.8 · 2.4T-A95B`` from the name-derived identity, or ``—``."""
+    parts = []
+    if ident.get("family"):
+        parts.append(ident["family"])
+    if ident.get("generation"):
+        parts.append(ident["generation"])
+    head = " ".join(parts)
+    tail = []
+    if ident.get("member"):
+        tail.append(ident["member"])
+    tail += [v for v in ident.get("variants") or []]
+    cell = head + (" · " + " · ".join(tail) if tail else "")
+    return (cell + " _(read from the name)_") if cell else "—"
+
+
+def _precision_cell(meta: dict) -> str:
+    label = meta.get("precision") or "?"
+    bpp = meta.get("bytes_per_param")
+    if bpp is None:
+        return label
+    return f"{label} · {bpp:.2f} bytes/param"
+
+
+def _lineage_lines(ident: dict, lin: dict) -> list[str]:
+    """The lineage section of a bundle README: name, parents, descendants."""
+    lines = []
+    fam = _family_cell(ident)
+    if fam != "—":
+        lines.append(f"- Family: {fam}")
+    parents = lin.get("parents") or []
+    if parents:
+        for edge in parents:
+            relation = edge.get("relation") or "relation not declared upstream"
+            lines.append(
+                f"- {relation}: `{edge.get('source')}` "
+                f"(declared by upstream {edge.get('declared_by') or 'metadata'})"
+            )
+    else:
+        lines.append("- Parents: none declared upstream")
+    cap = lin.get("query_limit") or 100
+
+    def capped(n):
+        return f"≥{n} (query capped)" if n == cap else str(n)
+
+    desc = lin.get("descendants") or {}
+    if desc.get("gguf"):
+        shown = desc["gguf"][:8]
+        more = len(desc["gguf"]) - len(shown)
+        lines.append(
+            f"- Known GGUF prints at archive time ({capped(len(desc['gguf']))}): "
+            + ", ".join(f"`{g}`" for g in shown)
+            + (f" … +{more} more" if more > 0 else "")
+        )
+    if desc.get("quantized"):
+        lines.append(
+            f"- Known quantizations at archive time: {capped(len(desc['quantized']))} repos (full list in manifest)"
+        )
+    if desc.get("finetunes_count") is not None:
+        lines.append(
+            f"- Public finetunes at archive time: {capped(desc['finetunes_count'])}"
+            + (
+                f" · adapters: {capped(desc['adapters_count'])}"
+                if desc.get("adapters_count") is not None
+                else ""
+            )
+        )
+    trained = desc.get("models_trained_on")
+    if "models_trained_on" in desc:
+        if trained is None:
+            lines.append(
+                "- Models trained on this dataset: query failed at archive time"
+            )
+        else:
+            shown = trained[:8]
+            more = len(trained) - len(shown)
+            lines.append(
+                f"- Models trained on this dataset at archive time: {capped(len(trained))}"
+                + (
+                    ": "
+                    + ", ".join(f"`{t}`" for t in shown)
+                    + (f" … +{more} more" if more > 0 else "")
+                    if shown
+                    else ""
+                )
+            )
+    if lin.get("successors"):
+        lines.append(
+            "- Successors (curator): " + ", ".join(f"`{x}`" for x in lin["successors"])
+        )
+    lines.append(f"- Lineage snapshot taken: {lin.get('as_of') or 'n/a'}")
+    return lines
+
+
 def _render_model_readme(bundle_dir: Path, m: dict) -> str:
     ident = m["identity"]
     src = m["source"]
@@ -231,7 +327,7 @@ def _render_model_readme(bundle_dir: Path, m: dict) -> str:
     meta = m["model_metadata"]
     rt = m["runtime"]
     val = m["validation"]
-    rel = m["relationships"]
+    lin = m["lineage"]
     arc = m["archive"]
     sec = m["security"]
 
@@ -246,11 +342,11 @@ def _render_model_readme(bundle_dir: Path, m: dict) -> str:
         "",
         "| | |",
         "|---|---|",
-        f"| **Family** | {ident['family']} |",
         f"| **Publisher** | {ident['publisher']} |",
-        f"| **Version** | {ident['version'] or '—'} |",
+        f"| **Family** | {_family_cell(ident)} |",
         f"| **Released** | {ident['release_date'] or 'unknown'} |",
-        f"| **Parameters** | {human_params(meta['parameter_count'])} ({meta['precision'] or '?'}) |",
+        f"| **Parameters** | {human_params(meta['parameter_count'])} |",
+        f"| **Precision** | {_precision_cell(meta)} |",
         f"| **Architecture** | {meta['architecture'] or '?'} ({meta['model_type'] or '?'}) |",
         f"| **Context length** | {meta['context_length'] or '?'} |",
     ]
@@ -298,55 +394,10 @@ def _render_model_readme(bundle_dir: Path, m: dict) -> str:
         f"- Smoke tests: tokenizer `{tok_smoke}`, inference `{inf_smoke}`",
         "- Full report: [VERIFICATION.md](VERIFICATION.md) · history in `verification.json`",
         "",
-        "## Relationships",
+        "## Lineage",
         "",
     ]
-    bases = rel.get("base_models") or (
-        [rel["base_model"]] if rel.get("base_model") else []
-    )
-    if bases:
-        relation = rel.get("base_model_relation")
-        lines.append(
-            "- Derived from: "
-            + ", ".join(f"`{b}`" for b in bases)
-            + (
-                f" — relation: **{relation}**"
-                if relation
-                else " — relation not declared upstream"
-            )
-        )
-    else:
-        lines.append("- Derived from: none declared (base model)")
-    if rel.get("gguf_repos"):
-        shown = rel["gguf_repos"][:8]
-        more = len(rel["gguf_repos"]) - len(shown)
-        lines.append(
-            f"- Known GGUF conversions ({len(rel['gguf_repos'])}): "
-            + ", ".join(f"`{g}`" for g in shown)
-            + (f" … +{more} more" if more > 0 else "")
-        )
-    cap = rel.get("query_limit") or 100
-
-    def capped(n):
-        return f"≥{n} (query capped)" if n == cap else str(n)
-
-    if rel.get("quantized_versions"):
-        lines.append(
-            f"- Known quantizations at archive time: {capped(len(rel['quantized_versions']))} repos (full list in manifest)"
-        )
-    if rel.get("finetunes_count") is not None:
-        lines.append(
-            f"- Public finetunes at archive time: {capped(rel['finetunes_count'])}"
-            + (
-                f" · adapters: {capped(rel['adapters_count'])}"
-                if rel.get("adapters_count") is not None
-                else ""
-            )
-        )
-    lines.append(
-        f"- Ecosystem snapshot taken: {rel.get('ecosystem_snapshot_as_of', 'n/a')}"
-    )
-
+    lines += _lineage_lines(ident, lin)
     lines += _archive_record_lines(arc, sec)
     lines += _inventory_lines(inv)
 
@@ -396,7 +447,7 @@ def _render_dataset_readme(bundle_dir: Path, m: dict) -> str:
     inv = m["inventory"]
     dm = m["dataset_metadata"]
     val = m["validation"]
-    rel = m["relationships"]
+    lin = m["lineage"]
     arc = m["archive"]
     sec = m["security"]
 
@@ -495,41 +546,10 @@ def _render_dataset_readme(bundle_dir: Path, m: dict) -> str:
         f"- Structure checks: `{structure_smoke}` (parquet magic, JSONL parse, CSV sniff — `darsay smoke`)",
         "- Full report: [VERIFICATION.md](VERIFICATION.md) · history in `verification.json`",
         "",
-        "## Relationships",
+        "## Lineage",
         "",
-        "- Source datasets (declared upstream): "
-        + (
-            ", ".join(f"`{d}`" for d in rel["source_datasets"])
-            if rel.get("source_datasets")
-            else "none declared"
-        ),
     ]
-    cap = rel.get("query_limit") or 100
-    trained = rel.get("models_trained_on")
-    if trained is not None:
-        count = (
-            f"≥{len(trained)} (query capped)"
-            if len(trained) == cap
-            else str(len(trained))
-        )
-        shown = trained[:8]
-        more = len(trained) - len(shown)
-        lines.append(
-            f"- Models trained on this dataset at archive time: {count}"
-            + (
-                ": "
-                + ", ".join(f"`{t}`" for t in shown)
-                + (f" … +{more} more" if more > 0 else "")
-                if shown
-                else ""
-            )
-        )
-    else:
-        lines.append("- Models trained on this dataset: query failed at archive time")
-    lines.append(
-        f"- Ecosystem snapshot taken: {rel.get('ecosystem_snapshot_as_of', 'n/a')}"
-    )
-
+    lines += _lineage_lines(ident, lin)
     lines += _archive_record_lines(arc, sec)
     lines += _inventory_lines(inv)
 

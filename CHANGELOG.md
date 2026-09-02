@@ -9,6 +9,81 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Breaking
+
+- **Negatives and prints, one vocabulary.** *Master* is gone from every
+  surface. Classification verdicts are `negative | print | support |
+  unknown`; the archive default is the `negatives` policy;
+  `source.subset.policy` and the catalog digest's `policy` read
+  `"negatives"`; `estimate` says `negatives:` where it said
+  `masters-first:`; `classify` prints `negative`. Recovery: none needed
+  for behavior — the rules are unchanged — but any script matching the
+  old words must match the new ones.
+- **Manifest schema 2.0.0.** `identity` now carries `family`,
+  `generation`, `member`, `variants`, `formats`, `size`, and
+  `read_from: "name"` (the name grammar) and no longer carries `version`
+  or the architecture-as-family reading; `relationships` is replaced by
+  `lineage` (`parents` with relation and provenance, `descendants`,
+  curator `successors` / `related`, `as_of`, `query_limit`);
+  `model_metadata.precision` is the release-precision label, with
+  `precision_detail` and `bytes_per_param` beside it. A 1.x manifest is
+  refused by `info`, `verify`, `regen`, `run`, and `export`, and a 1.x
+  `.mvb.tar` does not import: re-archive the source (sibling-blob reuse
+  makes a re-archive of a still-present payload zero-network). `list`
+  still walks 1.x bundles, since it reads only the inventory.
+- **Catalog schema 2.0.0.** The digest gains `precision`,
+  `bytes_per_param`, `architecture`, and `parents`; the status `unknown`
+  is now `closed`; `overlay_stats` reports `closed`. A 1.x `catalog.json`
+  is refused with a re-add hint. The one live darsay.io board is ported
+  by one `darsay estimate <board-url>` after the site deploys.
+- **`SourceProvider.relationships()` is `lineage()`** and returns the
+  manifest's `lineage` section.
+
+### Added
+
+- `docs/NORTH-STAR.md` — the mission and the model of the models: work,
+  negative and print, precision, lineage — and the principle that every
+  label is a doorway. `docs/proposals/lineage-and-precision.md` records
+  the design.
+- **Precision on every model.** `estimate` prints `precision:` — the
+  release precision (`BF16`, `FP8`, `MXFP4`, `AWQ INT4`, `Q4_K_M`) from
+  `config.json`'s `quantization_config` (wherever a multimodal config
+  nests it), the dominant dtype, or a GGUF-only repo's file names — and
+  the measured bytes per parameter with a plain reading of it. Packed
+  dtypes are marked in the `parameters` line; counts print in T above a
+  trillion. The catalog digest and the board carry both facts.
+- **Lineage, read from names and declarations.** `lineage.py` reads
+  family, generation, member, variants, formats, and size from a work's
+  name by a documented grammar (shared with darsay.io through
+  `tests/fixtures/lineage-names.json`); parent edges come from the card
+  and the Hub's `base_model:*` tags with their relation and provenance.
+  `estimate` prints `family:`, `architecture:`, and `lineage:`; `list`
+  shows FAMILY and PRECISION columns and `--sort family` reads a catalog
+  as the tree; the catalog README draws a **Families** section; bundle
+  READMEs have a Lineage section.
+- **Closed works.** `catalog add` accepts a home URL on a host with no
+  provider — an API-only model, an announced release — as a `closed`
+  row: no price, nothing to fetch, its place in the family held. A
+  closed work refuses `--revision` / `--include`; `estimate CATALOG`
+  leaves closed rows in place and says so.
+- `estimate`'s `negatives:` line says what the price is made of when
+  nothing is skipped — how many negative sets, and how many sets darsay
+  would not guess about — instead of a bare "the whole repo".
+
+### Fixed
+
+- A weight index larger than 10 MiB no longer turns a repo's only weight
+  set into `unknown`: the JSON read cap is 64 MiB, matching the GGUF
+  header cap (Kimi-K3's `model.safetensors.index.json` is 60 MB).
+- tiktoken vocabularies (`tiktoken.model`, `*.tiktoken`) satisfy the
+  tokenizer completeness rule, and a `custom_code` model's Python rides
+  along as a sidecar of any `--include` subset.
+- A `quantization_config` nested under `text_config` (multimodal
+  configs) is found by both the classifier and the precision facts, so
+  a native MXFP4 release classifies as a quantized negative rather than
+  a full-fidelity one, and the newer `dtype` config key is read beside
+  `torch_dtype`.
+
 ## [0.14.10] - 2026-09-02
 
 

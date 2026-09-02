@@ -219,10 +219,16 @@ class SourceProvider(ABC):
         """``estimate --variants`` payload, or None when the provider has no such listing."""
         return None
 
-    def relationships(self, source: SourceRef, metadata: dict) -> dict:
-        """Best-effort ecosystem snapshot for the manifest. Unknown stays null."""
+    def lineage(self, source: SourceRef, metadata: dict) -> dict:
+        """The manifest ``lineage`` section: parents as upstream declares them
+        and a best-effort snapshot of descendants at archive time. Unknown
+        stays null; a query cap is recorded, never silently applied."""
         return {
-            "ecosystem_snapshot_as_of": None,
+            "parents": None,
+            "descendants": None,
+            "successors": None,
+            "related": None,
+            "as_of": None,
             "query_limit": None,
         }
 

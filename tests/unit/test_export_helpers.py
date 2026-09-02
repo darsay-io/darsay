@@ -66,7 +66,7 @@ def test_read_marker_rejects_incompatible_major(tmp_path):
     marker = {
         "mvb_format_version": "99.0",
         "bundle_id": "x@abc",
-        "schema_version": "1.6.0",
+        "schema_version": "2.0.0",
         "bundle_hash": {"value": "00"},
     }
     payload = (json.dumps(marker) + "\n").encode("utf-8")
@@ -104,7 +104,7 @@ def test_read_marker_rejects_embedded_schema_major(tmp_path):
     marker = {
         "mvb_format_version": "1.1",
         "bundle_id": "x@abc",
-        "schema_version": "2.0.0",
+        "schema_version": "3.0.0",
         "bundle_hash": {"value": "00"},
     }
     payload = (json.dumps(marker) + "\n").encode("utf-8")

@@ -20,7 +20,7 @@ def test_estimate_prices_the_policy_selection(vault, test_provider, capsys):
     assert main(["--vault", str(vault), "estimate", "test:acme/toy", "--json"]) == 0
     out = capsys.readouterr().out
     est = json.loads(out[out.index("{") :])
-    assert est["subset"]["policy"] == "masters"
+    assert est["subset"]["policy"] == "negatives"
     assert est["subset"]["include"] == ["model.safetensors"]
     assert est["payload"]["file_count"] < len(files)
     full_paths = {f["path"] for f in est["subset"]["full_files"]}
@@ -28,8 +28,8 @@ def test_estimate_prices_the_policy_selection(vault, test_provider, capsys):
 
     assert main(["--vault", str(vault), "estimate", "test:acme/toy"]) == 0
     human = capsys.readouterr().out
-    assert "masters-first:" in human
-    assert "To archive (masters-first is the default):" in human
+    assert "negatives:" in human
+    assert "To archive (negatives are the default):" in human
 
 
 def test_estimate_full_prices_everything(vault, test_provider, capsys):
@@ -67,7 +67,10 @@ def test_estimate_reflects_an_existing_pin_without_reclassifying(
     reads = len(test_provider.reads)
     assert main(["--vault", str(vault), "estimate", "test:acme/toy"]) == 0
     out = capsys.readouterr().out
-    assert len(test_provider.reads) == reads  # the pin already decided
+    # The pin already decided: no header reads. config.json is read once for
+    # the precision facts, which every estimate reports.
+    later = [r for r in test_provider.reads[reads:] if r[0] != "config.json"]
+    assert later == []
     assert "banked" in out or "still to fetch" in out
 
 
@@ -139,5 +142,5 @@ def test_catalog_refresh_respects_read_budget(
     entries = {
         e["source"]: e["estimate"] for e in json.loads(cat_path.read_text())["entries"]
     }
-    assert entries["test:acme/one"]["policy"] == "masters"
+    assert entries["test:acme/one"]["policy"] == "negatives"
     assert entries["test:acme/two"]["policy"] is None

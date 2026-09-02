@@ -5,7 +5,6 @@ import json
 import pytest
 
 from darsay.archiver import (
-    _guess_version,
     _warn_include_vs_pin,
     archive_model,
     bundle_dir_for,
@@ -75,16 +74,9 @@ def test_estimate_repo_wrapper_builds_source_ref(monkeypatch, tmp_path):
     assert seen["source"] == "datasets/owner/name"
 
 
-def test_guess_version():
-    assert _guess_version("Qwen3-0.6B", "qwen3") == "3"
-    assert _guess_version("Qwen3-0.6B", None) == "3"
-    assert _guess_version("Llama-2-7b", None) is None
-    assert _guess_version("toy", None) is None
-
-
 def _minimal_manifest(**overrides):
     data = {
-        "schema_version": "1.6.0",
+        "schema_version": "2.0.0",
         "kind": MANIFEST_KIND,
         "artifact_type": "model",
         "bundle_id": "acme--toy@aaaaaaaaaaaa",
@@ -100,8 +92,15 @@ def test_load_manifest_requires_schema_version(tmp_path):
 
 
 def test_load_manifest_refuses_major_newer(tmp_path):
-    write_manifest(tmp_path, _minimal_manifest(schema_version="2.0.0"))
+    write_manifest(tmp_path, _minimal_manifest(schema_version="3.0.0"))
     with pytest.raises(SystemExit, match="newer than this darsay"):
+        load_manifest(tmp_path)
+
+
+def test_load_manifest_refuses_an_earlier_major(tmp_path):
+    """Fix forward: a 1.x record is re-archived, never migrated in place."""
+    write_manifest(tmp_path, _minimal_manifest(schema_version="1.8.0"))
+    with pytest.raises(SystemExit, match="predates this darsay"):
         load_manifest(tmp_path)
 
 

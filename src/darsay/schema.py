@@ -14,7 +14,7 @@ from __future__ import annotations
 from fnmatch import fnmatch
 
 MANIFEST_KIND = "darsay.bundle"
-MANIFEST_SCHEMA_MAJOR = 1
+MANIFEST_SCHEMA_MAJOR = 2
 # Known top-level keys in document order. write_manifest emits these first,
 # then any extra keys (readers ignore unknowns; writers preserve them).
 MANIFEST_TOP_KEYS = (
@@ -30,7 +30,7 @@ MANIFEST_TOP_KEYS = (
     "dataset_metadata",
     "runtime",
     "validation",
-    "relationships",
+    "lineage",
     "archive",
     "security",
     "curation",
@@ -70,6 +70,10 @@ ARTIFACT_TYPES = {
                     "model/tokenizer.model",
                     "model/vocab.json",
                     "model/spiece.model",
+                    # tiktoken vocabularies (Kimi, GPT-OSS) ship beside custom
+                    # tokenization code instead of tokenizer.json.
+                    "model/tiktoken.model",
+                    "model/*.tiktoken",
                     "model/*.gguf",
                 ],
             ),

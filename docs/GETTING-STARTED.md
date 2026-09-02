@@ -46,9 +46,10 @@ are about to spend disk.
 darsay estimate sshleifer/tiny-gpt2
 ```
 
-You get a pinned revision, a file count, a size, a download bar (styled
-like the live archive panel), a disk verdict, and the exact `archive`
-command to run next. If you already hold part of this source — a
+You get a pinned revision, a file count, a size, the release precision
+and bytes per parameter that explain it, the work's family and
+generation, a download bar (styled like the live archive panel), a disk
+verdict, and the exact `archive` command to run next. If you already hold part of this source — a
 budget-stopped archive, an interrupted download — the bar shows how much
 is banked and only the remaining bytes count against your free space. If
 free space is short, the command exits non-zero — it is a script-friendly
@@ -61,8 +62,8 @@ darsay archive sshleifer/tiny-gpt2
 ```
 
 That pins `main` to a commit, copies every file worth keeping — for a
-model, the masters-first default: the irreplaceable weights and support
-files, skipping mechanically derivable quants; `--full` takes everything
+model, the negatives by default: the irreplaceable weights and support
+files, skipping mechanically derivable prints; `--full` takes everything
 ([Quantization](QUANTIZATION.md)) — hashes them, checks the hashes
 against upstream, captures the license, and writes a bundle under
 `~/darsay` (override with `--vault` or `$DARSAY_HOME`). On a real model the

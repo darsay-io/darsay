@@ -169,6 +169,56 @@ def parse_base_model_tags(tags: list[str]) -> tuple[list[str], dict[str, str]]:
     return ids, relations
 
 
+def parents_from_metadata(
+    metadata: dict, *, canonical_prefix: str = "huggingface:"
+) -> list[dict] | None:
+    """Parent edges as upstream declares them, each with its provenance.
+
+    Sources: the card's ``base_model`` (and ``base_model_relation``), the
+    Hub's ``base_model[:<relation>]:<repo>`` tags, and the card's
+    ``datasets`` (recorded as ``trained_on`` edges). ``relation`` is
+    ``finetune`` / ``adapter`` / ``merge`` / ``quantized`` / ``trained_on``,
+    or ``None`` when upstream declares a parent without labeling the edge —
+    the Hub has no relation for alignment edits such as abliteration, so
+    those surface only in names and cards. ``None`` when nothing is declared.
+    """
+    card = metadata.get("card_data") or {}
+    tags = list(metadata.get("tags") or [])
+    card_bases = [
+        b
+        for b in (_as_list(card.get("base_model")) or [])
+        if isinstance(b, str) and b.strip()
+    ]
+    tag_bases, tag_relations = parse_base_model_tags(tags)
+    card_relation = card.get("base_model_relation")
+    if not isinstance(card_relation, str):
+        card_relation = None
+    edges: list[dict] = []
+    seen: set[str] = set()
+    for repo in [*card_bases, *tag_bases]:
+        if repo in seen:
+            continue
+        seen.add(repo)
+        edges.append(
+            {
+                "source": f"{canonical_prefix}{repo}",
+                "relation": tag_relations.get(repo) or card_relation,
+                "declared_by": "card" if repo in card_bases else "tag",
+            }
+        )
+    for ds in _as_list(card.get("datasets")) or []:
+        if isinstance(ds, str) and ds.strip() and ds not in seen:
+            seen.add(ds)
+            edges.append(
+                {
+                    "source": f"{canonical_prefix}datasets/{ds}",
+                    "relation": "trained_on",
+                    "declared_by": "card",
+                }
+            )
+    return edges or None
+
+
 class HuggingFaceProvider(SourceProvider):
     name = "huggingface"
     label = "Hugging Face"
@@ -558,48 +608,49 @@ class HuggingFaceProvider(SourceProvider):
             "repos": rows,
         }
 
-    def relationships(self, source: SourceRef, metadata: dict) -> dict:
+    def lineage(self, source: SourceRef, metadata: dict) -> dict:
+        """The manifest ``lineage`` section, from upstream declarations and
+        one archive-time listing of descendants (capped, cap recorded)."""
         from huggingface_hub import HfApi
 
         api = HfApi()
         card = metadata.get("card_data") or {}
-        tags = list(metadata.get("tags") or [])
+        as_of = _utc_now()
         if source.artifact_type == "dataset":
-            related = {
-                "as_of": _utc_now(),
-                "query_limit": RELATED_QUERY_LIMIT,
-                "models_trained_on": None,
-            }
+            trained: list[str] | None = None
             try:
                 models = list(
                     api.list_models(
                         filter=f"dataset:{source.locator}", limit=RELATED_QUERY_LIMIT
                     )
                 )
-                related["models_trained_on"] = sorted(m.id for m in models)
+                trained = sorted(m.id for m in models)
             except Exception:
                 pass
+            parents = [
+                {
+                    "source": f"{self.name}:datasets/{ds}",
+                    "relation": "derived",
+                    "declared_by": "card",
+                }
+                for ds in (_as_list(card.get("source_datasets")) or [])
+                if isinstance(ds, str) and ds.strip()
+            ]
             return {
-                "source_datasets": _as_list(card.get("source_datasets")),
-                "models_trained_on": related["models_trained_on"],
-                "ecosystem_snapshot_as_of": related["as_of"],
-                "query_limit": related["query_limit"],
+                "parents": parents or None,
+                "descendants": {"models_trained_on": trained},
+                "successors": None,
+                "related": None,
+                "as_of": as_of,
+                "query_limit": RELATED_QUERY_LIMIT,
             }
 
-        related = {
-            "as_of": _utc_now(),
-            "query_limit": RELATED_QUERY_LIMIT,
-            "quantized_versions": None,
-            "gguf_repos": None,
-            "finetunes": None,
-            "adapters": None,
+        listed: dict[str, list[str] | None] = {
+            "quantized": None,
+            "finetune": None,
+            "adapter": None,
         }
-        kinds = {
-            "quantized": "quantized_versions",
-            "finetune": "finetunes",
-            "adapter": "adapters",
-        }
-        for kind, key in kinds.items():
+        for kind in listed:
             try:
                 models = list(
                     api.list_models(
@@ -607,43 +658,29 @@ class HuggingFaceProvider(SourceProvider):
                         limit=RELATED_QUERY_LIMIT,
                     )
                 )
-                related[key] = sorted(m.id for m in models)
+                listed[kind] = sorted(m.id for m in models)
             except Exception:
                 pass
-        if related["quantized_versions"]:
-            ggufs = [m for m in related["quantized_versions"] if "gguf" in m.lower()]
-            related["gguf_repos"] = ggufs or None
-
-        base_models = [
-            b for b in (_as_list(card.get("base_model")) or []) if isinstance(b, str)
-        ]
-        tag_bases, tag_relations = parse_base_model_tags(tags)
-        for b in tag_bases:
-            if b not in base_models:
-                base_models.append(b)
-        relation = card.get("base_model_relation")
-        if not isinstance(relation, str):
-            distinct = sorted(set(tag_relations.values()))
-            relation = distinct[0] if len(distinct) == 1 else None
-        primary_base = base_models[0] if base_models else None
+        quantized = listed["quantized"]
+        ggufs = [m for m in quantized if "gguf" in m.lower()] if quantized else None
         return {
-            "base_models": base_models or None,
-            "base_model": primary_base,
-            "base_model_relation": relation,
-            "finetuned_from": primary_base if relation == "finetune" else None,
-            "training_datasets": _as_list(card.get("datasets")),
-            "quantized_versions": related["quantized_versions"],
-            "gguf_repos": related["gguf_repos"],
-            "finetunes_count": len(related["finetunes"])
-            if related["finetunes"] is not None
-            else None,
-            "adapters_count": len(related["adapters"])
-            if related["adapters"] is not None
-            else None,
-            "related_variants": None,
+            "parents": parents_from_metadata(
+                metadata, canonical_prefix=f"{self.name}:"
+            ),
+            "descendants": {
+                "quantized": quantized,
+                "gguf": ggufs or None,
+                "finetunes_count": len(listed["finetune"])
+                if listed["finetune"] is not None
+                else None,
+                "adapters_count": len(listed["adapter"])
+                if listed["adapter"] is not None
+                else None,
+            },
             "successors": None,
-            "ecosystem_snapshot_as_of": related["as_of"],
-            "query_limit": related["query_limit"],
+            "related": None,
+            "as_of": as_of,
+            "query_limit": RELATED_QUERY_LIMIT,
         }
 
     def access_record(self, metadata: dict) -> dict:
