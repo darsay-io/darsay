@@ -275,14 +275,40 @@ def release(board: Board, entry_id: int, client: str) -> bool:
 # hostname itself — a board URL travels, and who holds which machine is
 # nobody's business but the operator's.
 _ADJECTIVES = (
-    "amber", "brindled", "farside", "gilded", "harbor", "leeward",
-    "midnight", "patient", "quiet", "sable", "stellar", "umbral",
-    "vaulted", "wandering", "winter", "zenith",
+    "amber",
+    "brindled",
+    "farside",
+    "gilded",
+    "harbor",
+    "leeward",
+    "midnight",
+    "patient",
+    "quiet",
+    "sable",
+    "stellar",
+    "umbral",
+    "vaulted",
+    "wandering",
+    "winter",
+    "zenith",
 )
 _NOUNS = (
-    "archive", "atlas", "aurora", "comet", "heron", "lantern",
-    "meridian", "monolith", "nebula", "orrery", "reliquary", "sextant",
-    "signal", "sounding", "vault", "waypoint",
+    "archive",
+    "atlas",
+    "aurora",
+    "comet",
+    "heron",
+    "lantern",
+    "meridian",
+    "monolith",
+    "nebula",
+    "orrery",
+    "reliquary",
+    "sextant",
+    "signal",
+    "sounding",
+    "vault",
+    "waypoint",
 )
 
 
