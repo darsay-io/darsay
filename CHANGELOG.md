@@ -9,6 +9,29 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Fixed
+
+- `archive --next <board-url>` no longer re-fetches a row the board
+  already checks off as have. Board status never enters `catalog.json`,
+  so the local overlay alone would still want a row someone else finished
+  or checked off by hand; `--next` now reads the board's own status and
+  skips those rows, and the idle message says how many were had vs
+  claimed. Deliberately re-fetching a have row is still one command away:
+  name the source with `archive SOURCE --board <board-url>`.
+
+### Changed
+
+- Board claims no longer default to the machine's raw hostname. The
+  default client id is now a stable pseudonym derived from a hash of
+  hostname + user (e.g. `amber-heron-3f`): a board URL travels, and the
+  hostname of who holds it should not travel with it. `board.client` in
+  config still wins, exactly as before.
+- `archive SOURCE --board <board-url>` marks its claim as a deliberate
+  re-fetch (`refetch`), and prints a note when the named row is already
+  checked off as have. Boards that enforce the new claim contract refuse
+  un-marked claims on have rows, which stops out-of-date `--next` clients
+  from re-downloading what the group already holds.
+
 ## [0.14.9] - 2026-09-01
 
 

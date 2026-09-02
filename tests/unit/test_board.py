@@ -52,6 +52,41 @@ def test_entry_id_for_matches_identity():
     assert entry_id_for(entries, "test:acme/missing", None, None) is None
 
 
+def test_entry_for_returns_the_row_with_its_board_side_fields():
+    entries = [
+        {"id": 4, "source": "test:acme/toy", "revision": None, "status": "have"},
+    ]
+    from darsay.board import entry_for
+
+    row = entry_for(entries, "test:acme/toy", None, None)
+    assert row is not None and row["status"] == "have" and row["id"] == 4
+    assert entry_for(entries, "test:acme/missing", None, None) is None
+
+
+def test_client_id_defaults_to_a_pseudonym_never_the_hostname(monkeypatch, tmp_path):
+    """The board URL travels; the machine's hostname must not travel with it."""
+    import re
+    import socket
+
+    from darsay import board as board_mod
+
+    monkeypatch.setattr(socket, "gethostname", lambda: "JEREMYS-MBP-C7456D33")
+    monkeypatch.setenv("USER", "jeremy")
+    got = board_mod.client_id(tmp_path)
+    assert "JEREMYS" not in got and "C7456D33".lower() not in got.lower()
+    assert re.fullmatch(r"[a-z]+-[a-z]+-[0-9a-f]{2}", got)
+    assert board_mod.client_id(tmp_path) == got  # stable across calls
+    monkeypatch.setattr(socket, "gethostname", lambda: "another-machine")
+    assert board_mod.client_id(tmp_path) != got  # but distinct per machine
+
+
+def test_client_id_config_still_wins(monkeypatch, tmp_path):
+    from darsay import board as board_mod
+
+    (tmp_path / "config.toml").write_text('[board]\nclient = "jeremy-mbp"\n')
+    assert board_mod.client_id(tmp_path) == "jeremy-mbp"
+
+
 def test_http_identifies_the_client(monkeypatch):
     """Cloudflare bans the bare Python-urllib signature (error 1010)."""
     from darsay import __version__

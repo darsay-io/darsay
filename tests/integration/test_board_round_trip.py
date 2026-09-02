@@ -77,6 +77,14 @@ class FakeBoardServer:
                 and current.get("state") != "done"
             ):
                 return 409, json.dumps({"error": "claimed", "claim": current}).encode()
+            entry = next((e for e in self.entries if e.get("id") == entry_id), {})
+            if (
+                entry.get("status") == "have"
+                and body.get("refetch") is not True
+                and body.get("force") is not True
+                and not (current and current.get("client") == body.get("client"))
+            ):
+                return 409, json.dumps({"error": "have", "claim": current}).encode()
             self.claimed_by[entry_id] = dict(body)
             self.claims.append({"entry_id": entry_id, **body})
             return 200, json.dumps({"id": entry_id, "claim": body}).encode()
@@ -164,6 +172,56 @@ def test_archive_next_skips_rows_claimed_by_others(
     assert "claimed by usb-carrier (40%)" in out
     done = [c for c in server.claims if c["state"] == "done"]
     assert len(done) == 1 and done[0]["entry_id"] == 2
+
+
+def test_archive_next_skips_rows_the_board_marks_have(
+    vault, test_provider, board_server, capsys
+):
+    """The board's checkmark wins even when this vault has nothing.
+
+    Board status never enters catalog.json, so the local overlay alone
+    would re-fetch a row someone else finished or checked off.
+    """
+    test_provider.add_repo("acme/one", model_files())
+    test_provider.add_repo("acme/two", model_files())
+    server = board_server(
+        [
+            {"id": 1, "source": "test:acme/one", "desire": 9, "status": "have"},
+            {"id": 2, "source": "test:acme/two", "desire": 5},
+        ]
+    )
+    assert (
+        main(["--vault", str(vault), "archive", "--next", BOARD_URL, "--jobs", "1"])
+        == 0
+    )
+    done = [c for c in server.claims if c["state"] == "done"]
+    assert len(done) == 1 and done[0]["entry_id"] == 2
+    assert not any(c["entry_id"] == 1 for c in server.claims)
+
+
+def test_archive_next_idles_when_rows_are_had_or_held(
+    vault, test_provider, board_server, capsys
+):
+    test_provider.add_repo("acme/one", model_files())
+    test_provider.add_repo("acme/two", model_files())
+    server = board_server(
+        [
+            {"id": 1, "source": "test:acme/one", "status": "have"},
+            {"id": 2, "source": "test:acme/two"},
+        ]
+    )
+    server.claimed_by[2] = {
+        "client": "usb-carrier",
+        "state": "archiving",
+        "percent": 40,
+    }
+    assert main(["--vault", str(vault), "archive", "--next", BOARD_URL]) == 0
+    err = capsys.readouterr().err
+    assert "1 checked off as have on the board" in err
+    assert "1 claimed by another client" in err
+    done = [c for c in server.claims if c["state"] == "done"]
+    assert done == []
+    assert not list(vault.glob("*/*/manifest.json"))
 
 
 def test_archive_next_dry_run_releases_the_claim(
@@ -312,6 +370,35 @@ def test_archive_board_flag_warns_off_board_and_refuses_taken_rows(
                 "1",
             ]
         )
+
+
+def test_archive_board_flag_refetches_a_have_row_deliberately(
+    vault, test_provider, board_server, capsys
+):
+    """Naming the source is the deliberate act: the claim carries refetch
+    and goes through even on a row the board checks off as have."""
+    test_provider.add_repo("acme/one", model_files())
+    server = board_server([{"id": 1, "source": "test:acme/one", "status": "have"}])
+    assert (
+        main(
+            [
+                "--vault",
+                str(vault),
+                "archive",
+                "test:acme/one",
+                "--board",
+                BOARD_URL,
+                "--jobs",
+                "1",
+            ]
+        )
+        == 0
+    )
+    err = capsys.readouterr().err
+    assert "re-fetching deliberately" in err
+    states = [c["state"] for c in server.claims if c["entry_id"] == 1]
+    assert states[0] == "archiving" and states[-1] == "done"
+    assert all(c.get("refetch") for c in server.claims if c["state"] == "archiving")
 
 
 def test_archive_board_flag_dry_run_releases(vault, test_provider, board_server):

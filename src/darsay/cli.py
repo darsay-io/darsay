@@ -781,9 +781,11 @@ def _claim_on_board(args, vault, source, revision, include) -> None:
     The chosen source, not the board's priority, decides what is fetched;
     the board still gets the claim and the progress gauge. A source with
     no matching row archives unclaimed, with a warning — archiving must
-    never silently edit a board.
+    never silently edit a board. Naming the source is the deliberate act,
+    so the claim carries ``refetch``: it goes through even on a row the
+    board already checks off as have (``--next`` never does that).
     """
-    from .board import claim, client_id, fetch_entries, parse_board_url
+    from .board import claim, client_id, entry_for, fetch_entries, parse_board_url
 
     board = parse_board_url(args.board)
     if board is None:
@@ -792,18 +794,23 @@ def _claim_on_board(args, vault, source, revision, include) -> None:
             "  hint: https://darsay.io/b/<board-id>"
         )
     entries = fetch_entries(board)
-    from .board import entry_id_for
-
-    entry_id = entry_id_for(entries, source, revision, include)
-    if entry_id is None:
+    entry = entry_for(entries, source, revision, include)
+    entry_id = entry.get("id") if entry else None
+    if not isinstance(entry_id, int):
         print(
             f"WARNING: {source} is not a row on {board.page_url} — "
             "archiving without a claim",
             file=sys.stderr,
         )
         return
+    if entry.get("status") == "have":
+        print(
+            f"NOTE: {source} is already checked off as have on "
+            f"{board.page_url} — re-fetching deliberately.",
+            file=sys.stderr,
+        )
     client = client_id(vault)
-    ok, other = claim(board, entry_id, client)
+    ok, other = claim(board, entry_id, client, refetch=True)
     if not ok:
         holder = other.get("client") or "another client"
         pct = f" ({other.get('percent')}%)" if other.get("percent") is not None else ""
@@ -819,12 +826,16 @@ def _claim_on_board(args, vault, source, revision, include) -> None:
 def _archive_next_from_board(args, vault, board_hit):
     """Pick the board's next unfinished row and claim it before fetching.
 
+    Unfinished is the board's judgment, not just the local overlay's: a
+    row the board already marks ``have`` — a client reported done, or a
+    human checked it off — is never picked, even though board status
+    never enters catalog.json and this vault alone would still want it.
     A row another client holds a live claim on is skipped — that is the
     coordination boards exist for. The claim context rides on ``args``;
     archive boundaries report progress through it, and the board renders
     the gauge.
     """
-    from .board import claim, client_id, entry_id_for, fetch_entries
+    from .board import claim, client_id, entry_for, fetch_entries
     from .catalog import (
         filter_want,
         load_catalog,
@@ -844,11 +855,16 @@ def _archive_next_from_board(args, vault, board_hit):
         return None
     entries = fetch_entries(board)
     client = client_id(vault)
+    checked_off = held = 0
     for row in candidates:
-        entry_id = entry_id_for(
+        entry = entry_for(
             entries, row["source"], row.get("revision"), row.get("include")
         )
-        if entry_id is None:
+        entry_id = entry.get("id") if entry else None
+        if not isinstance(entry_id, int):
+            continue
+        if entry.get("status") == "have":
+            checked_off += 1
             continue
         ok, other = claim(board, entry_id, client, percent=int(row.get("percent") or 0))
         if not ok:
@@ -859,6 +875,7 @@ def _archive_next_from_board(args, vault, board_hit):
                 else ""
             )
             print(f"Skipping {row['source']} — claimed by {holder}{pct}")
+            held += 1
             continue
         args._board_progress = {"board": board, "entry_id": entry_id, "client": client}
         source, revision, include = realize_from_overlay(row)
@@ -870,7 +887,13 @@ def _archive_next_from_board(args, vault, board_hit):
             f"  [claimed as {client}]"
         )
         return source, revision, include
-    print("Every unfinished row is claimed by another client.", file=sys.stderr)
+    reasons = []
+    if checked_off:
+        reasons.append(f"{checked_off} checked off as have on the board")
+    if held:
+        reasons.append(f"{held} claimed by another client")
+    detail = ", ".join(reasons) or "no unfinished row matches a board row"
+    print(f"Nothing to fetch from {board.page_url}: {detail}.", file=sys.stderr)
     return None
 
 

@@ -658,14 +658,22 @@ progress the board renders as a gauge:
 darsay archive --next https://darsay.io/b/<board-id>
 ```
 
+Unfinished is the board's word for it: a row already checked off as
+have — by a client reporting done, or by someone on the board page —
+is never picked, even when your own vault does not hold it yet.
+
 To pick the row yourself and still get the claim and the gauge, name
-the source and bring the board along with `--board`:
+the source and bring the board along with `--board` (this is also the
+way to deliberately re-fetch a row the board already has):
 
 ```bash
 darsay archive MiniMaxAI/MiniMax-H3 --board https://darsay.io/b/<board-id>
 ```
 
-Sign claims as something nicer than your hostname once:
+Claims sign as a stable pseudonym drawn from a hash of the machine
+(something like `amber-heron-3f`) — never the raw hostname, which would
+tell everyone with the URL exactly which machine holds what. To sign as
+a name the group actually knows, set one once:
 
 ```toml
 # <vault>/config.toml   (or ~/.config/darsay/config.toml)

@@ -188,7 +188,13 @@ chose — the board's desire ordering decides nothing, but the claim and
 the progress gauge still happen; a source with no matching row archives
 unclaimed, with a warning. `archive --next <board-url>` instead lets
 the board pick, and **claims** the row it picks, signed
-as this machine (`board.client` in config, default the hostname). A row
+as this machine (`board.client` in config; the default is a stable
+pseudonym like `amber-heron-3f`, never the raw hostname — the board URL
+travels, and the hostname of who holds it should not). A row
+the board already marks `have` — a client reported done, or someone
+checked it off — is never picked, even though board status stays out of
+`catalog.json` and your vault alone would still want it; name the
+source with `--board` to re-fetch one deliberately. A row
 another client holds a live claim on is skipped — that is how two
 people split one board without colliding. Archive boundaries (start,
 clean pause, registration) report progress, which the board renders as

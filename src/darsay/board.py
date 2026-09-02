@@ -17,6 +17,7 @@ here touches the provider registry.
 from __future__ import annotations
 
 import json
+import os
 import re
 import socket
 from dataclasses import dataclass
@@ -168,13 +169,18 @@ def fetch_entries(board: Board) -> list[dict]:
     return entries if isinstance(entries, list) else []
 
 
-def entry_id_for(
+def entry_for(
     entries: list[dict],
     source: str,
     revision: str | None,
     include: list[str] | None,
-) -> int | None:
-    """Match one board row by catalog identity (source, revision, include set)."""
+) -> dict | None:
+    """The board row matching one catalog identity (source, revision, include set).
+
+    The API row carries what catalog.json deliberately omits — the
+    board-side ``status``, holders, and live claim — so a caller that
+    must honor the board's own bookkeeping reads the row, not just its id.
+    """
     from .catalog import include_key, try_parse_source
 
     want_source = try_parse_source(source)
@@ -190,9 +196,20 @@ def entry_id_for(
             continue
         if include_key(entry.get("include")) != want_include:
             continue
-        identifier = entry.get("id")
-        return identifier if isinstance(identifier, int) else None
+        return entry
     return None
+
+
+def entry_id_for(
+    entries: list[dict],
+    source: str,
+    revision: str | None,
+    include: list[str] | None,
+) -> int | None:
+    """Match one board row by catalog identity (source, revision, include set)."""
+    entry = entry_for(entries, source, revision, include)
+    identifier = entry.get("id") if entry else None
+    return identifier if isinstance(identifier, int) else None
 
 
 def claim(
@@ -205,8 +222,15 @@ def claim(
     banked_bytes: int | None = None,
     total_bytes: int | None = None,
     force: bool = False,
+    refetch: bool = False,
 ) -> tuple[bool, dict]:
-    """Claim a row / report progress. ``(False, claim)`` when someone else holds it."""
+    """Claim a row / report progress. ``(False, claim)`` when someone else holds it.
+
+    ``refetch`` marks a deliberate claim on a row the board already checks
+    off as have (``archive SOURCE --board``); without it the board refuses
+    such claims, which is what keeps an out-of-date ``--next`` from
+    re-downloading what the group already holds.
+    """
     payload: dict = {"client": client, "state": state}
     if percent is not None:
         payload["percent"] = int(percent)
@@ -216,6 +240,8 @@ def claim(
         payload["total_bytes"] = int(total_bytes)
     if force:
         payload["force"] = True
+    if refetch:
+        payload["refetch"] = True
     status, body = _reach(
         "POST", board.claim_url(entry_id), json.dumps(payload).encode("utf-8")
     )
@@ -244,11 +270,42 @@ def release(board: Board, entry_id: int, client: str) -> bool:
     return status == 200
 
 
+# The default client pseudonym: two words and two hex digits, drawn from a
+# hash of hostname + user. Stable per machine, but the board never sees the
+# hostname itself — a board URL travels, and who holds which machine is
+# nobody's business but the operator's.
+_ADJECTIVES = (
+    "amber", "brindled", "farside", "gilded", "harbor", "leeward",
+    "midnight", "patient", "quiet", "sable", "stellar", "umbral",
+    "vaulted", "wandering", "winter", "zenith",
+)
+_NOUNS = (
+    "archive", "atlas", "aurora", "comet", "heron", "lantern",
+    "meridian", "monolith", "nebula", "orrery", "reliquary", "sextant",
+    "signal", "sounding", "vault", "waypoint",
+)
+
+
+def _default_client() -> str:
+    """A stable pseudonym for this machine, e.g. ``amber-heron-3f``."""
+    import hashlib
+
+    user = os.environ.get("USER") or os.environ.get("USERNAME") or ""
+    seed = f"{socket.gethostname()}\n{user}".encode("utf-8", "replace")
+    digest = hashlib.sha256(seed).digest()
+    return (
+        f"{_ADJECTIVES[digest[0] % len(_ADJECTIVES)]}-"
+        f"{_NOUNS[digest[1] % len(_NOUNS)]}-{digest[2]:02x}"
+    )
+
+
 def client_id(vault: Path | None = None) -> str:
-    """Who this machine is on a board: ``board.client`` config, else hostname."""
+    """Who this machine is on a board: ``board.client`` config, else a
+    stable pseudonym — never the raw hostname, which identifies the machine
+    to everyone the board URL reaches."""
     from .config import setting
 
     configured = setting("board", "client", vault)
     if isinstance(configured, str) and configured.strip():
         return configured.strip()[:80]
-    return socket.gethostname()[:80] or "darsay"
+    return _default_client()
