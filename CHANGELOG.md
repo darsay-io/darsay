@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.10] - 2026-09-02
+
+
 ### Fixed
 
 - `archive --next <board-url>` no longer re-fetches a row the board
