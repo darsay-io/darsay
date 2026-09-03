@@ -8,7 +8,15 @@ permissions:
   contents: read
 
 jobs:
+  # The website's docs transform, on the exact source being released. It is
+  # a prerequisite, not a follow-up: nothing is published if darsay.io could
+  # not have published the docs that come with it.
+  docs-site:
+    name: Docs site transform
+    uses: ./.github/workflows/docs-site.yml
+
   release:
+    needs: docs-site
     runs-on: ubuntu-latest
     environment: pypi
     permissions:

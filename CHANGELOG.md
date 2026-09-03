@@ -9,6 +9,33 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Changed
+
+- **A docs page no longer breaks the website after the tag.** The release
+  gate reads the docs' links: every relative link in `README.md`,
+  `CONTRIBUTING.md`, `examples/README.md`, and every `docs/*.md` — Markdown
+  and HTML both — must name a file that is here. The page list is globbed,
+  so a page added today is checked today. `tests/unit/test_release_script.py`
+  runs the same check on every CI run.
+- The two docs *flag* checks now cover a page list that is total rather
+  than partial. `CLI_DOCS` gained `docs/DOCTOR.md` and `docs/CATALOGS.md`
+  (user-facing pages that had never been added), and every remaining page
+  is named in `UNCHECKED_DOCS` with its reason. A `docs/*.md` page in
+  neither list stops the release: those checks read a page as "every darsay
+  flag named here is live", which is wrong for a page that names a flag to
+  say it does *not* exist — a non-goal, a labelled proposal, another
+  program's command line — so the judgement is per page, and the gate asks
+  for it once, by name, instead of letting a page drift in unchecked.
+- CI gained a **Docs site transform** job (`.github/workflows/docs-site.yml`,
+  reusable): it checks out `darsay-io/website`, runs that repository's real
+  `sync-docs.mjs` against this checkout, and then its suite and build. It
+  runs on every pull request, and `release.yml` now `needs:` it, so nothing
+  is published unless darsay.io could have published the docs shipped with
+  it. That site now derives its page list from `docs/*.md`, so a new page
+  publishes itself; what this job catches is an unresolvable link or a
+  renamed heading, which used to fail hours after a release, in the other
+  repository, while darsay.io served the previous release's docs.
+
 ## [0.14.12] - 2026-09-03
 
 

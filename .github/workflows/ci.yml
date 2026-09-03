@@ -119,6 +119,12 @@ jobs:
         run: python -m pytest -m e2e --run-e2e
         timeout-minutes: 15
 
+  docs-site:
+    # The darsay.io transform, run against this checkout: a new docs page or
+    # a renamed heading fails here, not in the website's sync after the tag.
+    name: Docs site transform
+    uses: ./.github/workflows/docs-site.yml
+
   build:
     name: sdist and wheel
     runs-on: ubuntu-latest

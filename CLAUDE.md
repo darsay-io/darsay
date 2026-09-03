@@ -101,6 +101,13 @@ are not optional, and *master* is not one of them.
   bump `SCHEMA_VERSION` (`__init__.py`) / `MVB_FORMAT_VERSION` (`export.py`)
   appropriately (major = breaking). Keep GETTING-STARTED / CONCEPTS /
   examples in sync with the CLI (do not document unshipped flags as live).
+  **A new `docs/*.md` page needs one line in `scripts/release.py`:** either
+  `CLI_DOCS`, if a user reads about flags there — its darsay flags must then
+  all be live — or `UNCHECKED_DOCS` with the reason (a page naming a flag to
+  say it does *not* exist, or another program's command lines, belongs
+  there). A page in neither refuses the release. Nothing else is needed:
+  darsay.io publishes every `docs/*.md` on its own, and the release gate
+  resolves the page's links wherever it lives.
 - `vault/` — archived bundles. **Gitignored; never commit bundles.** The
   reference bundle is `vault/qwen--qwen3-0.6b/c1899de289a0/` (Qwen3-0.6B).
 

@@ -12,8 +12,9 @@ writes, because a hand-typed copy can only drift. Anything authored —
 release notes, docs that describe a flag — it confirms and refuses on,
 because it cannot write prose: notes must already live under
 ``## [Unreleased]`` or ``## [X.Y.Z]``, the user docs must not describe a
-flag the CLI does not ship, and every ``archive`` flag must be mentioned
-somewhere a user reads.
+flag the CLI does not ship, every ``archive`` flag must be mentioned
+somewhere a user reads, and every relative link in those docs must name a
+file that is here.
 
     python scripts/release.py 0.8.1
     python scripts/release.py 0.8.1 --dry-run     # report only, write nothing
@@ -73,10 +74,48 @@ CLI_DOCS = (
     "README.md",
     "docs/GETTING-STARTED.md",
     "docs/CONCEPTS.md",
+    "docs/CATALOGS.md",
+    "docs/DOCTOR.md",
     "docs/INCREMENTAL.md",
     "docs/FAQ.md",
     "examples/README.md",
 )
+
+# The pages deliberately outside those two checks, each with its reason.
+# Both checks read a page as "every darsay flag named here is live", so a
+# page that names a flag in order to say it does not exist fails on its best
+# sentences: SOURCES.md's "Do not add a --provider flag", DATASETS.md's "no
+# --type flag", QUANTIZATION.md's labelled `hydrate --quantize` proposal.
+# Those are not a threshold to tune, which is why this list is not a glob.
+#
+# It is total instead. check_docs_pages_classified refuses a page that is in
+# neither list, so a new docs page is classified by whoever writes it rather
+# than by the release that discovers the omission — DOCTOR.md, CATALOGS.md,
+# and NORTH-STAR.md each went unclassified for weeks, and nothing said so.
+UNCHECKED_DOCS = {
+    "docs/DATASETS.md": "names --type to say no such flag is added",
+    "docs/DESIGN.md": "weighs flags not taken (--xet)",
+    "docs/DISTRIBUTION.md": "pipx and pip command lines, not the CLI's",
+    "docs/HYDRATION.md": "runner-script flags, not the CLI's",
+    "docs/MANIFEST.md": "schema reference; no command lines",
+    "docs/MVB-FORMAT.md": "schema reference; no command lines",
+    "docs/NORTH-STAR.md": "vocabulary and principles, not commands",
+    "docs/QUANTIZATION.md": "documents the hydrate --quantize proposal",
+    "docs/README.md": "the landing table and its version rows",
+    "docs/SOURCES.md": "names --provider to say no such flag is added",
+    "docs/TESTING.md": "ruff and pytest command lines, not the CLI's",
+}
+
+# Files whose relative links must resolve. ``docs/*.md`` is globbed, never
+# listed: darsay.io publishes every one of them, so a page added today is
+# checked today rather than at the release that discovers it.
+LINKED_DOCS = ("README.md", "CONTRIBUTING.md", "examples/README.md")
+MD_LINK = re.compile(r"\]\(([^)]+)\)")
+# The page nav and the logo are HTML. darsay.io strips those blocks, so only
+# this side ever checks them -- and GitHub is where they are read.
+HTML_LINK = re.compile(r'(?:href|src)="([^"]+)"')
+URL_SCHEME = re.compile(r"^[a-z][a-z0-9+.-]*:", re.IGNORECASE)
+
 FLAG_TOKEN = re.compile(r"(?<![\w-])--[a-z][a-z0-9-]*")
 # A flag belongs to the last program named before it on its line; only
 # darsay's are checked, so `rsync's --link-dest` in prose stays rsync's.
@@ -280,6 +319,34 @@ def check_docs_versions_current() -> None:
             )
 
 
+def published_docs() -> set[str]:
+    """Every page darsay.io publishes, as repo-relative paths."""
+    return {"README.md", "examples/README.md"} | {
+        str(path.relative_to(ROOT)) for path in (ROOT / "docs").glob("*.md")
+    }
+
+
+def check_docs_pages_classified() -> None:
+    """Every published page is flag-checked or exempt on purpose, never neither.
+
+    Runs before ``check_docs_flags``, so a page listed but deleted is a
+    refusal with its name rather than a traceback from the reader.
+    """
+    published = published_docs()
+    checked, exempt = set(CLI_DOCS), set(UNCHECKED_DOCS)
+    if both := sorted(checked & exempt):
+        raise Abort(f"docs are in CLI_DOCS and UNCHECKED_DOCS: {' '.join(both)}")
+    if gone := sorted((checked | exempt) - published):
+        raise Abort(f"docs listed by the flag checks but not here: {' '.join(gone)}")
+    if new := sorted(published - checked - exempt):
+        raise Abort(
+            "docs pages nobody classified:\n        "
+            + "\n        ".join(new)
+            + "\n        Add each to CLI_DOCS if a user reads about flags there,"
+            "\n        or to UNCHECKED_DOCS with the reason it is exempt."
+        )
+
+
 def check_docs_flags() -> None:
     """The user docs and the CLI must agree on which flags exist.
 
@@ -314,6 +381,50 @@ def check_docs_flags() -> None:
         raise Abort(
             f"archive flags no user doc mentions: {' '.join(undocumented)}\n"
             f"        (looked in {', '.join(CLI_DOCS)})"
+        )
+
+
+def link_docs() -> list[Path]:
+    """Every file whose relative links the gate resolves."""
+    return [ROOT / name for name in LINKED_DOCS] + sorted((ROOT / "docs").glob("*.md"))
+
+
+def link_targets(line: str) -> list[str]:
+    """Markdown and HTML link targets on one line, in the order written."""
+    return [m.group(1) for m in MD_LINK.finditer(line)] + [
+        m.group(1) for m in HTML_LINK.finditer(line)
+    ]
+
+
+def check_docs_links() -> None:
+    """Every relative link in the user docs must name a file that is here.
+
+    darsay.io publishes ``docs/*.md`` and ``examples/README.md``, and its
+    transform refuses a link it cannot resolve -- which used to mean a docs
+    change failed hours after the release, in the other repository. This is
+    that same rule, one repo earlier and before the tag exists. Confirm,
+    never write: a broken link needs a decision about where it meant to go.
+    """
+    broken: list[str] = []
+    for path in link_docs():
+        base = path.parent
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            for target in link_targets(line):
+                if URL_SCHEME.match(target) or target.startswith(("#", "/")):
+                    continue
+                relative = target.split("#", 1)[0]
+                if not relative:
+                    continue
+                resolved = Path(os.path.normpath(base / relative))
+                where = f"{path.relative_to(ROOT)}:{number}"
+                if not resolved.is_relative_to(ROOT):
+                    broken.append(f"{target}  {where} (leaves the repository)")
+                elif not resolved.exists():
+                    broken.append(f"{target}  {where}")
+    if broken:
+        raise Abort(
+            "docs link to files that are not here:\n        "
+            + "\n        ".join(broken)
         )
 
 
@@ -433,7 +544,9 @@ def check_prepared_release(
     check_prepared_changelog(version)
 
     check_docs_versions_current()
+    check_docs_pages_classified()
     check_docs_flags()
+    check_docs_links()
     if metadata_only:
         print("  - project gate (covered by exact source CI)")
     else:
@@ -536,8 +649,13 @@ def main(argv: list[str] | None = None) -> int:
     heading = check_changelog(version, today)
     print(f"  - changelog: {heading}")
     check_docs_table()
+    check_docs_pages_classified()
     check_docs_flags()
-    print("  - docs: version table rows present, flags match the CLI")
+    check_docs_links()
+    print(
+        "  - docs: version table rows present, every page classified, "
+        "flags match the CLI, links resolve"
+    )
     print("  - repo clean, tag free\n")
 
     if args.dry_run:

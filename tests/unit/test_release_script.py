@@ -28,6 +28,66 @@ def test_docs_flags_match_the_cli(release):
     release.check_docs_flags()
 
 
+def test_docs_links_resolve(release):
+    """Every relative link in the user docs names a file that is here."""
+    release.check_docs_links()
+
+
+def test_docs_pages_are_all_classified(release):
+    """Every page darsay.io publishes is flag-checked or exempt on purpose."""
+    release.check_docs_pages_classified()
+    listed = set(release.CLI_DOCS) | set(release.UNCHECKED_DOCS)
+    assert listed == release.published_docs()
+    assert not set(release.CLI_DOCS) & set(release.UNCHECKED_DOCS)
+
+
+def test_a_new_docs_page_has_to_be_classified(release, monkeypatch, tmp_path):
+    """The lists are total, so forgetting one is a refusal, not a silent gap.
+
+    The whole point of listing rather than globbing: the flag checks read a
+    page as "every darsay flag named here is live", which a page naming a
+    flag to say it does not exist would fail on. That judgement is per page,
+    so the release asks for it once, by name.
+    """
+    for rel in (
+        "README.md",
+        "examples/README.md",
+        "docs/GETTING-STARTED.md",
+        "docs/DESIGN.md",
+    ):
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(release, "ROOT", tmp_path)
+    monkeypatch.setattr(
+        release,
+        "CLI_DOCS",
+        ("README.md", "examples/README.md", "docs/GETTING-STARTED.md"),
+    )
+    monkeypatch.setattr(
+        release, "UNCHECKED_DOCS", {"docs/DESIGN.md": "weighs flags not taken"}
+    )
+    release.check_docs_pages_classified()
+
+    (tmp_path / "docs" / "SHELVES.md").write_text("# Shelves\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match=r"nobody classified:\s+docs/SHELVES\.md"):
+        release.check_docs_pages_classified()
+
+    monkeypatch.setitem(release.UNCHECKED_DOCS, "docs/SHELVES.md", "a proposal page")
+    release.check_docs_pages_classified()
+
+    # And the rot in the other direction: a page the lists still name.
+    (tmp_path / "docs" / "SHELVES.md").unlink()
+    with pytest.raises(SystemExit, match=r"but not here: docs/SHELVES\.md"):
+        release.check_docs_pages_classified()
+
+
+def test_a_docs_page_cannot_be_both_checked_and_exempt(release, monkeypatch):
+    monkeypatch.setitem(release.UNCHECKED_DOCS, "docs/FAQ.md", "contradiction")
+    with pytest.raises(SystemExit, match=r"CLI_DOCS and UNCHECKED_DOCS: docs/FAQ\.md"):
+        release.check_docs_pages_classified()
+
+
 def test_release_validation_suppresses_bytecode_caches(release):
     assert release.sys.dont_write_bytecode is True
     assert release.os.environ["PYTHONDONTWRITEBYTECODE"] == "1"
@@ -63,7 +123,11 @@ def test_prepared_release_check_is_read_only(release, monkeypatch, tmp_path):
     monkeypatch.setattr(
         release, "check_docs_versions_current", lambda: calls.append("docs")
     )
+    monkeypatch.setattr(
+        release, "check_docs_pages_classified", lambda: calls.append("pages")
+    )
     monkeypatch.setattr(release, "check_docs_flags", lambda: calls.append("flags"))
+    monkeypatch.setattr(release, "check_docs_links", lambda: calls.append("links"))
     monkeypatch.setattr(
         release,
         "run_gate",
@@ -73,7 +137,7 @@ def test_prepared_release_check_is_read_only(release, monkeypatch, tmp_path):
     release.check_prepared_release("1.2.3", "2026-08-29", True)
 
     assert changelog.read_text(encoding="utf-8") == "prepared\n"
-    assert calls == ["changelog", "docs", "flags", ("1.2.3", True)]
+    assert calls == ["changelog", "docs", "pages", "flags", "links", ("1.2.3", True)]
 
 
 def test_prepared_changelog_keeps_its_frozen_release_date(
@@ -108,7 +172,11 @@ def test_prepare_only_reuses_writers_without_owning_git(release, monkeypatch):
     )
     monkeypatch.setattr(release, "check_changelog", lambda *args: "heading")
     monkeypatch.setattr(release, "check_docs_table", lambda: calls.append("docs"))
+    monkeypatch.setattr(
+        release, "check_docs_pages_classified", lambda: calls.append("pages")
+    )
     monkeypatch.setattr(release, "check_docs_flags", lambda: calls.append("flags"))
+    monkeypatch.setattr(release, "check_docs_links", lambda: calls.append("links"))
     monkeypatch.setattr(release, "write_version", lambda value: calls.append(value))
     monkeypatch.setattr(release, "write_docs_versions", lambda: [])
     monkeypatch.setattr(release, "write_changelog", lambda *args: "heading")
@@ -124,7 +192,15 @@ def test_prepare_only_reuses_writers_without_owning_git(release, monkeypatch):
     )
 
     assert release.main(["1.2.3", "--prepare-only", "--skip-build"]) == 0
-    assert calls == ["tooling", "docs", "flags", "1.2.3", ("1.2.3", True)]
+    assert calls == [
+        "tooling",
+        "docs",
+        "pages",
+        "flags",
+        "links",
+        "1.2.3",
+        ("1.2.3", True),
+    ]
 
 
 def test_prepare_only_converges_when_source_is_already_prepared(release, monkeypatch):
@@ -162,7 +238,11 @@ def test_metadata_only_prepare_needs_no_ambient_tooling(release, monkeypatch):
     )
     monkeypatch.setattr(release, "check_changelog", lambda *args: "heading")
     monkeypatch.setattr(release, "check_docs_table", lambda: calls.append("docs"))
+    monkeypatch.setattr(
+        release, "check_docs_pages_classified", lambda: calls.append("pages")
+    )
     monkeypatch.setattr(release, "check_docs_flags", lambda: calls.append("flags"))
+    monkeypatch.setattr(release, "check_docs_links", lambda: calls.append("links"))
     monkeypatch.setattr(release, "write_version", lambda value: calls.append(value))
     monkeypatch.setattr(release, "write_docs_versions", lambda: [])
     monkeypatch.setattr(release, "write_changelog", lambda *args: "heading")
@@ -173,7 +253,7 @@ def test_metadata_only_prepare_needs_no_ambient_tooling(release, monkeypatch):
     )
 
     assert release.main(["1.2.3", "--prepare-only", "--metadata-only"]) == 0
-    assert calls == ["docs", "flags", "1.2.3"]
+    assert calls == ["docs", "pages", "flags", "links", "1.2.3"]
 
 
 def test_metadata_only_refuses_to_weaken_native_release(release, capsys):
@@ -197,14 +277,10 @@ def test_flag_token_scoping(release):
 
 def test_docs_flag_checks_complain(release, monkeypatch, tmp_path):
     """Both directions refuse with the offending flag named."""
-    docs = {
-        "README.md": "darsay archive x --max-throttle 5M\n",
-        "docs/GETTING-STARTED.md": "",
-        "docs/CONCEPTS.md": "",
-        "docs/INCREMENTAL.md": "",
-        "docs/FAQ.md": "",
-        "examples/README.md": "",
-    }
+    # Built from CLI_DOCS itself: a page added to that list must not need an
+    # edit here to keep this test honest.
+    docs = dict.fromkeys(release.CLI_DOCS, "")
+    docs["README.md"] = "darsay archive x --max-throttle 5M\n"
     for rel, text in docs.items():
         path = tmp_path / rel
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -217,6 +293,45 @@ def test_docs_flag_checks_complain(release, monkeypatch, tmp_path):
     (tmp_path / "README.md").write_text("darsay archive x --max-gb 1\n")
     with pytest.raises(SystemExit, match=r"no user doc mentions: .*--rehash"):
         release.check_docs_flags()
+
+
+def test_docs_links_complain_about_what_is_missing(release, monkeypatch, tmp_path):
+    """A link with nothing behind it is named, with the file and the line."""
+    tree = {
+        "README.md": "See [the docs](docs/GETTING-STARTED.md).\n",
+        "CONTRIBUTING.md": "",
+        "examples/README.md": "Back to [concepts](../docs/CONCEPTS.md).\n",
+        "docs/GETTING-STARTED.md": (
+            'Nav: <a href="CONCEPTS.md">Concepts</a>\n'
+            "\nThen [the missing page](MISSING.md) and [an anchor](#here).\n"
+        ),
+        "docs/CONCEPTS.md": "",
+    }
+    for rel, text in tree.items():
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+    monkeypatch.setattr(release, "ROOT", tmp_path)
+
+    with pytest.raises(SystemExit, match=r"MISSING\.md  docs/GETTING-STARTED\.md:3"):
+        release.check_docs_links()
+
+    # A new docs page is checked the moment it lands: nothing lists the pages.
+    (tmp_path / "docs" / "GETTING-STARTED.md").write_text(
+        "Then [the new page](NEW-PAGE.md).\n", encoding="utf-8"
+    )
+    with pytest.raises(SystemExit, match=r"NEW-PAGE\.md"):
+        release.check_docs_links()
+    (tmp_path / "docs" / "NEW-PAGE.md").write_text(
+        "Out of bounds: [away](../../elsewhere.md)\n", encoding="utf-8"
+    )
+    with pytest.raises(SystemExit, match=r"leaves the repository"):
+        release.check_docs_links()
+
+    (tmp_path / "docs" / "NEW-PAGE.md").write_text(
+        "Home: [README](../README.md)\n", encoding="utf-8"
+    )
+    release.check_docs_links()
 
 
 PREAMBLE = (

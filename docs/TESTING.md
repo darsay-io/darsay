@@ -112,11 +112,27 @@ job for review.
    `--cov-fail-under=73`, including repository-owned doctor process safety,
    plus a CLI `--version` / `--help` smoke.
 3. **E2E** — Python 3.12, cached Hub downloads, `sshleifer/tiny-gpt2`.
-4. **sdist and wheel** — build, `twine check`, install the wheel in a clean
+4. **Docs site transform** — `docs-site.yml`, a reusable workflow: check out
+   `darsay-io/website`, point `DARSAY_DOCS_ROOT` at this checkout, run the
+   site's `scripts/sync-docs.mjs`, then its suite and its build. That is the
+   transform darsay.io runs on a release, run before the tag: a new
+   `docs/*.md` page publishes itself, but an unresolvable link or a renamed
+   heading (the site checks its field guide's anchors against these headings)
+   fails here instead of in the website's docs sync hours later. Both repos
+   are public, so it needs no token, and the Node toolchain stays inside the
+   website checkout.
+5. **sdist and wheel** — build, `twine check`, install the wheel in a clean
    env and confirm runner scripts shipped.
 
-The existing `release.yml` workflow is unchanged: it publishes artifacts on
-`v*` tags.
+`release.yml` publishes artifacts on `v*` tags, and now `needs:` the same
+`Docs site transform` job first — nothing reaches PyPI or the GitHub Release
+unless darsay.io could have published the docs that come with it.
+
+`tests/unit/test_release_script.py` runs the release gate's docs checks on
+every CI run, not only at release time: the version table against the source
+literals, every `docs/*.md` page against the two lists that classify it, the
+documented flags against the CLI, and every relative link in the user docs
+against the files that are actually here.
 
 ## Adding tests
 

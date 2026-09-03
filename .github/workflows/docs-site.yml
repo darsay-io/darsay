@@ -1,0 +1,58 @@
+name: Docs site transform
+
+# darsay.io publishes `docs/*.md` and `examples/README.md` from a pinned CLI
+# release, through a strict transform: every relative link must resolve, and
+# the site's field guide checks its anchors against the synced headings. A
+# new page or a renamed heading therefore used to break the site's docs sync
+# hours after the tag was cut, in the other repository, while darsay.io went
+# on serving the previous release's docs.
+#
+# So run that exact transform here, where it is still a code review comment:
+# on every pull request, and as a prerequisite of the Release job. Both
+# repositories are public, so the checkout needs no token. The Node toolchain
+# stays inside the website checkout -- none of it lands in this repo.
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  transform:
+    name: Publish these docs into darsay.io
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the CLI under test
+        uses: actions/checkout@v4
+        with:
+          path: darsay
+
+      - name: Check out darsay-io/website
+        uses: actions/checkout@v4
+        with:
+          repository: darsay-io/website
+          path: website
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+
+      - name: Transform these docs, then test and build the site
+        working-directory: website
+        env:
+          # Read the docs from this checkout instead of the release pinned
+          # in docs.lock.json.
+          DARSAY_DOCS_ROOT: ${{ github.workspace }}/darsay
+          PUBLIC_BOARDS_ENABLED: "true"
+        run: |
+          npm ci
+          # --snapshots moves the transform's snapshots with the docs under
+          # test; without it the site's suite would compare this checkout
+          # against the last release and fail on every docs change.
+          node scripts/sync-docs.mjs --snapshots
+          npm test
+          npm run build

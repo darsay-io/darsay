@@ -95,6 +95,25 @@ table, and runs the full CI gate: lint, format, tests with the coverage
 floor, `python -m build`, `twine check`. Only then does it commit and
 tag. If the gate fails it reverts the bump and commits nothing.
 
+The gate also reads the docs' links. Every relative link in `README.md`,
+`CONTRIBUTING.md`, `examples/README.md`, and every `docs/*.md` — Markdown
+and HTML both — must name a file that is here (`check_docs_links`). The
+page list is globbed, not typed, so a docs page added today is checked
+today. darsay.io publishes those same pages through a transform that
+refuses a link it cannot resolve; this is that rule one repository
+earlier, before the tag exists.
+
+The flag checks cannot be globbed the same way, and the gate makes that
+explicit rather than silent. They read a page as *every darsay flag named
+here is live*, which is wrong for a page that names a flag to say it does
+not exist — `SOURCES.md`'s "Do not add a `--provider` flag", `DATASETS.md`'s
+"no `--type` flag", `QUANTIZATION.md`'s labelled `hydrate --quantize`
+proposal. So a new `docs/*.md` page takes one line: `CLI_DOCS` if a user
+reads about flags there, or `UNCHECKED_DOCS` with the reason it is exempt.
+A page in neither stops the release by name (`check_docs_pages_classified`),
+which is the difference that matters — three pages had drifted in
+unclassified before this existed, and nothing said so.
+
 The script pushes nothing. Releasing is pushing the tag:
 
 ```bash
@@ -113,9 +132,17 @@ ten minutes; the force-refresh is in
 [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
 
 darsay.io `/docs/` pins that same GitHub Release in `darsay-io/website`'s
-`docs.lock.json`. After the tag exists, that repo's `Sync CLI docs`
-workflow opens a PR (hourly, or run it from the Actions tab). Merging
-the PR does not deploy the site.
+`docs.lock.json`, and publishes every `docs/*.md` plus `examples/README.md`
+from it — a new page needs no edit over there. The `Docs site transform`
+job runs that repository's real transform against this checkout on every
+pull request, and the `Release` workflow will not publish until it passes,
+so a docs change that the site could not publish fails here rather than in
+the website's sync hours after the tag. It runs against the website's `main`,
+so on the rare occasion it fails on a tag the tag exists but nothing was
+published: fix the website, then re-run the `Release` workflow. After the tag, `Sync CLI docs`
+commits the pin straight to `main` there and `Deploy` ships it; if it ever
+does fail, it opens one `docs-sync` issue for the tag instead of retrying
+the same input every hour.
 
 `SCHEMA_VERSION` and `MVB_FORMAT_VERSION` bump independently, on format
 changes only. Editing `src/darsay/standalone_verify.py` is an MVB minor
