@@ -31,7 +31,8 @@ darsay still loads here. ``darsay config`` prints the effective values
 and which layer set each one; ``darsay config KEY=VALUE`` writes the
 vault file. ``[host]`` is read from the vault file alone — it describes
 one disk, not a machine's preference — and with it ``verify``, ``mv``,
-and ``cp`` hash on that host instead of over the wire (``farside.py``).
+``cp``, and the reconcile pass of ``archive`` / ``assemble`` hash on that
+host instead of over the wire (``farside.py``).
 """
 
 from __future__ import annotations

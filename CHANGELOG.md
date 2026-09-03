@@ -42,10 +42,17 @@ Tool version (`darsay.__version__`) is independent of
   root@nas` and the network warning is gone. A machine that is down or
   has no sha256 tool is a refusal naming the fix, never a silent fall
   back to reading the mount. `[host]` is read from the vault file alone;
-  a user file that sets it is warned about and ignored. `assemble
-  --rehash` still hashes here. Without `[host]`, the network warning now
-  ends with the `config` line to run, the host prefilled from the SMB or
-  NFS mount source when it can be read.
+  a user file that sets it is warned about and ignored. The reconcile
+  pass `archive` and `assemble` make over what a destination already
+  holds — adopting an rsync'd `model/`, `--rehash` — hashes there too:
+  one call for the LFS files and one, with the git blob sha1, for the
+  files git holds itself, so the check against the pin is the same one a
+  local pass makes; assemble's plan says `hashed on root@nas` and its
+  network warning goes away. A host that returns nothing for a file the
+  mount shows is refused as a wrong `host.path`, never verified. Without
+  `[host]`, the network warning now ends with the `config` line to run,
+  the host prefilled from the SMB or NFS mount source when it can be
+  read.
 - `darsay config KEY=VALUE …` writes the vault's `config.toml`; `-n`
   prints what it would write. `darsay verify` and the landing pass
   announce each file over 256 MiB as it is hashed, here or there.

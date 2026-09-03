@@ -63,8 +63,9 @@ wait for a lost network. A vault-level file travels with an
 archive drive; `~/.config/darsay/config.toml` applies to every vault on a
 machine. One table is the vault file's alone: `[host]` names the machine
 that owns the vault's disk and the vault's path there, and with it
-`verify`, `mv`, and `cp` hash on that machine instead of reading a
-network mount back — it needs `sh` and `sha256sum` there, not darsay.
+`verify`, `mv`, `cp`, and the reconcile pass of `archive` and `assemble`
+hash on that machine instead of reading a network mount back — it needs
+`sh` and `sha256sum` there, not darsay.
 `darsay config` shows what applies and why; `darsay config KEY=VALUE`
 writes the vault file.
 [Incremental transfer](INCREMENTAL.md#6-session-budgets),

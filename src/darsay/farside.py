@@ -10,11 +10,13 @@ line back per file. The host needs ``sh``, ``find``, and one of
 ``sha256sum`` / ``shasum`` / ``sha256`` / ``openssl`` — what a NAS, a
 BSD, or a Mac has. Not Python, not rsync, not darsay.
 
-``hash_where_it_lives`` is the one door: ``verify``, ``mv``, and ``cp``
-ask it, and it decides between here and there from the vault's config.
-A far side that cannot be reached is a refusal that names the fix, never
-a silent fall back to the wire. (``assemble --rehash`` hashes through the
-transfer pipeline and still reads here.)
+``hash_where_it_lives`` is the one door: ``verify``, ``mv``, ``cp``, and
+the reconcile pass ``archive`` and ``assemble`` make over what a
+destination already holds (adoption, ``--rehash``) ask it, and it decides
+between here and there from the vault's config. A far side that cannot
+be reached is a refusal that names the fix, never a silent fall back to
+the wire; a far side that does not hold what the mount shows is a
+refusal too, since it means ``[host] path`` names the wrong place.
 """
 
 from __future__ import annotations
@@ -30,21 +32,38 @@ from pathlib import Path
 # multi-gigabyte shard is not minutes of silence.
 _ANNOUNCE_BYTES = 256 * 1024**2
 
-# What runs on the far side. Sent on stdin to ``sh -s``; DIR then optional
-# FILEs relative to it (none = every file, tool caches skipped). A file
-# that is not there is not printed, so the caller sees it as missing.
+# What runs on the far side. Sent on stdin to ``sh -s``; ``-g`` adds the
+# git blob sha1 (what upstream publishes for files git holds itself, as
+# opposed to LFS), then DIR, then optional FILEs relative to it (none =
+# every file, tool caches skipped). A file that is not there is not
+# printed, so the caller sees it as missing.
 FAR_SIDE_SH = r"""#!/bin/sh
 # darsay's far side: hash payload files where the disk is.
-# usage: sh -s -- DIR [FILE...]   prints: <sha256> TAB <size> TAB <path>
+# usage: sh -s -- [-g] DIR [FILE...]
+# prints: <sha256> TAB <size> TAB <path>; with -g: <sha256> TAB <size> TAB <git blob sha1> TAB <path>
 set -eu
+git=0
+if [ "${1:-}" = "-g" ]; then git=1; shift; fi
 cd "$1"
 shift
-if command -v sha256sum >/dev/null 2>&1; then hasher() { sha256sum "$1" | cut -c1-64; }
-elif command -v shasum >/dev/null 2>&1; then hasher() { shasum -a 256 "$1" | cut -c1-64; }
-elif command -v sha256 >/dev/null 2>&1; then hasher() { sha256 -q "$1"; }
-elif command -v openssl >/dev/null 2>&1; then hasher() { openssl dgst -sha256 "$1" | sed 's/.*= //'; }
+if command -v sha256sum >/dev/null 2>&1; then
+  h256() { sha256sum | cut -c1-64; }; h1() { sha1sum | cut -c1-40; }
+elif command -v shasum >/dev/null 2>&1; then
+  h256() { shasum -a 256 | cut -c1-64; }; h1() { shasum -a 1 | cut -c1-40; }
+elif command -v sha256 >/dev/null 2>&1; then
+  h256() { sha256 -q; }; h1() { sha1 -q; }
+elif command -v openssl >/dev/null 2>&1; then
+  h256() { openssl dgst -sha256 | sed 's/.*= //'; }; h1() { openssl dgst -sha1 | sed 's/.*= //'; }
 else echo "no sha256 tool on this host" >&2; exit 3; fi
-one() { printf '%s\t%s\t%s\n' "$(hasher "$1")" "$(wc -c < "$1" | tr -d ' ')" "$1"; }
+one() {
+  size=$(wc -c < "$1" | tr -d ' ')
+  if [ "$git" = 1 ]; then
+    blob=$( { printf 'blob %s\0' "$size"; cat "$1"; } | h1 )
+    printf '%s\t%s\t%s\t%s\n' "$(h256 < "$1")" "$size" "$blob" "$1"
+  else
+    printf '%s\t%s\t%s\n' "$(h256 < "$1")" "$size" "$1"
+  fi
+}
 if [ "$#" -gt 0 ]; then
   for f in "$@"; do [ -f "$f" ] && one "$f"; done
 else
@@ -54,7 +73,8 @@ fi
 
 _NO_SHA256_TOOL = 3
 _SSH_FAILED = 255
-_LINE = re.compile(r"^([0-9a-f]{64})\t(\d+)\t(.+)$")
+_HEX64 = re.compile(r"^[0-9a-f]{64}$")
+_HEX40 = re.compile(r"^[0-9a-f]{40}$")
 
 
 @dataclass(frozen=True)
@@ -91,18 +111,37 @@ def far_side_for(vault: Path | None) -> FarSide | None:
     return FarSide(ssh=str(ssh), path=str(path))
 
 
+def _parse_line(line: str, *, git_sha1: bool) -> tuple[str, dict] | None:
+    fields = line.rstrip("\n").split("\t")
+    if git_sha1:
+        if (
+            len(fields) != 4
+            or not _HEX64.match(fields[0])
+            or not _HEX40.match(fields[2])
+        ):
+            return None
+        digest, size, blob, rel = fields
+        return rel, {"sha256": digest, "size": int(size), "git_sha1": blob}
+    if len(fields) != 3 or not _HEX64.match(fields[0]):
+        return None
+    digest, size, rel = fields
+    return rel, {"sha256": digest, "size": int(size)}
+
+
 def far_side_hash(
     far: FarSide,
     dir_on_host: str,
     files: list[str] | None = None,
     *,
+    git_sha1: bool = False,
     vault: Path | None = None,
     progress=print,
 ) -> dict[str, dict]:
     """sha256 and size per file under ``dir_on_host``, read on the far side.
 
-    Keys are paths relative to the directory. A file the host cannot find
-    is absent. Any failure to run there is a refusal naming the fix.
+    Keys are paths relative to the directory; with ``git_sha1`` each entry
+    also carries the git blob sha1. A file the host cannot find is absent.
+    Any failure to run there is a refusal naming the fix.
     """
     from .readme_gen import human_size
 
@@ -114,6 +153,7 @@ def far_side_hash(
         "sh",
         "-s",
         "--",
+        *(["-g"] if git_sha1 else []),
         shlex.quote(dir_on_host),
         *(shlex.quote(name) for name in files or ()),
     ]
@@ -134,17 +174,17 @@ def far_side_hash(
     proc.stdin.close()
     out: dict[str, dict] = {}
     for line in proc.stdout:
-        match = _LINE.match(line.rstrip("\n"))
-        if match is None:
+        parsed = _parse_line(line, git_sha1=git_sha1)
+        if parsed is None:
             proc.kill()
             raise SystemExit(
                 f"error: cannot hash on {far.ssh}: unexpected output from the far "
                 f"side: {line.rstrip()!r}"
             )
-        digest, size, rel = match.group(1), int(match.group(2)), match.group(3)
-        out[rel] = {"sha256": digest, "size": size}
-        if size >= _ANNOUNCE_BYTES:
-            progress(f"  {rel}  ({human_size(size)})  hashed on {far.ssh}")
+        rel, entry = parsed
+        out[rel] = entry
+        if entry["size"] >= _ANNOUNCE_BYTES:
+            progress(f"  {rel}  ({human_size(entry['size'])})  hashed on {far.ssh}")
     stderr = proc.stderr.read().strip() if proc.stderr is not None else ""
     code = proc.wait()
     if code == 0:
@@ -171,22 +211,46 @@ def hash_where_it_lives(
     payload_dir: Path,
     files: list[str] | None = None,
     *,
+    git_sha1: bool = False,
     progress=print,
 ) -> dict[str, dict]:
     """sha256 and size per payload file, read wherever the disk actually is.
 
     Keys are paths relative to ``payload_dir``; ``files`` narrows the pass
-    to those paths (a file that is not there is absent from the result).
-    On the host the vault's config names when it names one, else here.
+    to those paths (a file that is not there is absent from the result);
+    ``git_sha1`` adds the git blob sha1 to each entry. On the host the
+    vault's config names when it names one, else here.
     """
     from .hashing import hash_file, iter_payload_files
     from .readme_gen import human_size
 
     far = far_side_for(vault)
     if far is not None:
-        return far_side_hash(
-            far, far.where(vault, payload_dir), files, vault=vault, progress=progress
+        from .config import vault_config_path
+
+        there = far.where(vault, payload_dir)
+        found = far_side_hash(
+            far, there, files, git_sha1=git_sha1, vault=vault, progress=progress
         )
+        # What the mount shows here must be what the host sees there; a
+        # file present here and absent there means [host] path is wrong.
+        wanted = (
+            files
+            if files is not None
+            else [rel for rel, _path in iter_payload_files(payload_dir)]
+        )
+        lost = [
+            rel for rel in wanted if rel not in found and (payload_dir / rel).is_file()
+        ]
+        if lost:
+            raise SystemExit(
+                f"error: {far.ssh} has no {lost[0]} under {there}, but it is here "
+                f"at {payload_dir / lost[0]}\n"
+                f"  [host] path in {vault_config_path(vault)} does not name this "
+                "vault's location on that host. Over ssh, `df` shows where the "
+                "share lives."
+            )
+        return found
     if files is None:
         pairs = iter_payload_files(payload_dir)
     else:
@@ -198,10 +262,11 @@ def hash_where_it_lives(
         size = path.stat().st_size
         if size >= _ANNOUNCE_BYTES:
             progress(f"  {rel}  ({human_size(size)})  hashing")
-        out[rel] = {
-            "sha256": hash_file(path, with_blake3=False)["sha256"],
-            "size": size,
-        }
+        hashes = hash_file(path, with_blake3=False, with_git_sha1=git_sha1)
+        entry = {"sha256": hashes["sha256"], "size": size}
+        if git_sha1:
+            entry["git_sha1"] = hashes["git_sha1"]
+        out[rel] = entry
     return out
 
 

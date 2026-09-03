@@ -645,7 +645,10 @@ darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --handoff
 Hash dest where it is a local disk — `assemble --rehash` or `darsay
 verify` on the NAS, not from a laptop over SMB (that reads the whole
 payload back over the wire). `assemble` warns before it hashes a dest
-that sits on a network mount.
+that sits on a network mount — unless the vault's `config.toml` names
+the NAS in `[host]`, in which case the hashing runs there over ssh and
+the plan says `hashed on root@nas`
+([FAQ](../docs/FAQ.md#how-do-i-stop-mv-and-verify-reading-a-nas-back-over-the-wire)).
 A registered payload is frozen: rsync it, verify dest on the dest host,
 then `darsay rm` the source — or [`darsay mv`](#move-a-bundle-to-another-vault),
 which is those three steps with the refusals built in, and after an rsync

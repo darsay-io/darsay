@@ -165,12 +165,14 @@ darsay --vault /Volumes/PIXEL/darsay/vault config host.ssh=root@nas host.path=/v
 That writes a `[host]` table into the vault's own `config.toml` — it is
 a fact about that disk, so it lives with the disk and every machine that
 mounts it reads it; a `[host]` in your user file is ignored with a
-warning. From then on `verify`, `mv`, and `cp` hash the payload *on that
-machine*: one ssh call carries a fifteen-line POSIX shell script on
-stdin, the machine hashes the files where they are, and one line per
-file comes back. The plan says so — `hash: on root@nas` — and the
-network warning is gone. In the landing above, what crosses the wire is
-56 hash lines instead of 200.7 GiB.
+warning. From then on `verify`, `mv`, `cp`, and the pass `archive` and
+`assemble` make over what a destination already holds (adopting an
+rsync'd `model/`, `--rehash`) hash the payload *on that machine*: one
+ssh call carries a short POSIX shell script on stdin, the machine hashes
+the files where they are, and one line per file comes back. The plan
+says so — `hash: on root@nas` — and the network warning is gone. In the
+landing above, what crosses the wire is 56 hash lines instead of
+200.7 GiB.
 
 The machine needs `sh`, `find`, and one of `sha256sum`, `shasum`,
 `sha256`, or `openssl`. A Ubiquiti, Synology, QNAP, or TrueNAS box has

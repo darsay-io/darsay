@@ -46,10 +46,13 @@ are not optional, and *master* is not one of them.
   is their verb),
   `farside.py` (the host that owns a vault's disk: `[host] ssh` / `path`
   in the vault's `config.toml`; `hash_where_it_lives` is the one door
-  `verify` / `mv` / `cp` hash a payload through — on that host over one
-  ssh call carrying a POSIX `sh` script that needs only `sha256sum` /
-  `shasum` / `sha256` / `openssl`, else here; an unreachable host is a
-  refusal naming the fix, never a silent fall back to the wire),
+  `verify` / `mv` / `cp` and the transfer reconcile (adoption,
+  `--rehash`) hash a payload through — on that host over one ssh call
+  carrying a POSIX `sh` script that needs only `sha256sum` / `shasum` /
+  `sha256` / `openssl` (`-g` adds the git blob sha1 for files git holds
+  itself), else here; an unreachable host, or one that lacks a file the
+  mount shows, is a refusal naming the fix, never a silent fall back to
+  the wire),
   `migrate.py` (`darsay migrate`: brings a record written under an earlier
   schema major to the schema this darsay writes — offline, from the record
   and the payload, hashing nothing; the one place an older major is read;

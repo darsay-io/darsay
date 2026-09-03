@@ -725,8 +725,65 @@ def _digest_matches(expected: dict, hashes: dict) -> bool | None:
     if expected.get("lfs_sha256"):
         return hashes["sha256"] == expected["lfs_sha256"]
     if expected.get("git_sha1"):
+        if hashes.get("git_sha1") is None:
+            return None
         return hashes["git_sha1"] == expected["git_sha1"]
     return None
+
+
+def _far_side_records(
+    bundle_dir: Path,
+    payload_dir: Path,
+    ledger: dict,
+    expected_by_path: dict,
+    *,
+    rehash: bool,
+    progress,
+) -> dict[str, dict]:
+    """This pass's hashes, read on the host that owns the disk — ``{}`` when none.
+
+    One call for the LFS files, whose upstream digest is a sha256, and one
+    with the git blob sha1 for the rest, so a file already at the
+    destination is checked against the pin exactly as a local pass would
+    check it, without the mount being read back.
+    """
+    from .farside import far_side_for, hash_where_it_lives
+
+    vault = bundle_dir.parent.parent
+    if far_side_for(vault) is None:
+        return {}
+    targets = [rel for rel, _size in _files_to_hash(payload_dir, ledger, rehash=rehash)]
+    if not targets:
+        return {}
+    lfs = [rel for rel in targets if expected_by_path[rel].get("lfs_sha256")]
+    blobs = [rel for rel in targets if not expected_by_path[rel].get("lfs_sha256")]
+    found: dict[str, dict] = {}
+    if lfs:
+        found.update(hash_where_it_lives(vault, payload_dir, lfs, progress=progress))
+    if blobs:
+        found.update(
+            hash_where_it_lives(
+                vault, payload_dir, blobs, git_sha1=True, progress=progress
+            )
+        )
+    return found
+
+
+def _record_from_far_side(
+    expected: dict, entry: dict, source: str, attempts: int
+) -> dict:
+    hashes = {"sha256": entry["sha256"], "git_sha1": entry.get("git_sha1")}
+    return {
+        "status": "verified",
+        "size": entry["size"],
+        "sha256": entry["sha256"],
+        "blake3": None,
+        "git_sha1": entry.get("git_sha1"),
+        "verified_against_upstream": _digest_matches(expected, hashes),
+        "verified_at": _utc_now(),
+        "source": source,
+        "attempts": attempts,
+    }
 
 
 def _verified_record(
@@ -797,9 +854,22 @@ def reconcile(
     expected_by_path = {item["path"]: item for item in ledger["expected"]}
     present_by_path = dict(iter_payload_files(payload_dir))
     interrupt_check = (lambda: stop.check(session)) if stop is not None else None
+    # When the vault names the host that owns its disk, everything this
+    # pass would hash is hashed there first, in one call, and the loop
+    # below reads the answers instead of the mount.
+    far_side = _far_side_records(
+        bundle_dir,
+        payload_dir,
+        ledger,
+        expected_by_path,
+        rehash=rehash,
+        progress=progress,
+    )
 
     def hashed_record(expected, path, source, attempts):
         relative = expected["path"]
+        if relative in far_side:
+            return _record_from_far_side(expected, far_side[relative], source, attempts)
         size = path.stat().st_size if path.is_file() else 0
         on_bytes = None
         if meter is not None:
@@ -2610,13 +2680,17 @@ def _reconcile_visible(
         session=hash_session,
         disk_path=destination,
     )
+    from .farside import far_side_label
+
+    far = far_side_label(destination.parent.parent)
     display = TransferDisplay(meter, progress=progress)
     with _live_transfer(display) as emit:
         emit(
             f"Hashing {len(targets)} files already at the destination "
-            f"({human_size(total)}) against the pin — not downloading."
+            f"({human_size(total)}) against the pin{' ' + far if far else ''} — "
+            "not downloading."
         )
-        if is_network_filesystem(destination):
+        if far is None and is_network_filesystem(destination):
             emit(
                 "warning: the destination is on a network mount, so that hashing "
                 "reads every byte back over the wire. Run this where the vault "
@@ -2707,11 +2781,14 @@ def assemble_partials(
     if handoff:
         _refuse_handoff_of_registered_sources(sources, destination)
 
+    from .farside import far_side_label
+
+    far = far_side_label(vault)
     trust_note = (
-        "re-hashed dest against the pin"
+        f"re-hashed dest against the pin{' ' + far if far else ''}"
         if rehash
-        else "trusted dest ledger + size; --rehash re-hashes dest, best run where "
-        "it is a local disk"
+        else "trusted dest ledger + size; --rehash re-hashes dest"
+        + (f" {far}" if far else ", best run where it is a local disk")
     )
     progress(f"Assembling into {destination}")
     with transfer_lock(destination, progress=progress):
@@ -3057,6 +3134,8 @@ def assemble_plan(
     free = shutil.disk_usage(probe).free
     needed = sum(planned.values()) + cache_bytes
     floor = free_space_floor(vault)
+    from .farside import far_side_label
+
     return {
         "destination": destination,
         "state": state,
@@ -3068,7 +3147,10 @@ def assemble_plan(
         "hash": {
             "files": len(to_hash),
             "bytes": sum(size for _rel, size in to_hash),
-            "network_mount": bool(to_hash) and bool(is_network_filesystem(destination)),
+            "far_side": far_side_label(vault),
+            "network_mount": bool(to_hash)
+            and far_side_label(vault) is None
+            and bool(is_network_filesystem(destination)),
         },
         "disk": {
             "checked_path": str(probe),
@@ -3135,6 +3217,7 @@ def print_assemble_plan(plan: dict, progress=print) -> None:
             parts.append(
                 f"{hashed['files']} already at dest, {human_size(hashed['bytes'])}"
                 + (" (--rehash)" if plan["rehash"] else " (no verified record yet)")
+                + (f", hashed {hashed['far_side']}" if hashed.get("far_side") else "")
             )
         progress(
             f"  {'verify:':<10}{files(copied + hashed['files'])} against the pin "

@@ -717,10 +717,13 @@ file, not a bundle, so `list`, `du`, and exports never see it.
 
 `[host]` is read from the vault file alone — it describes one disk, not a
 machine's preference, and a user file that sets it is warned about and
-ignored. With it, `verify`, `mv`, and `cp` hash on that machine over one
-ssh call instead of pulling the mount back over the wire (`assemble
---rehash` hashes through the transfer pipeline and still reads here, so
-run it on the host that owns the disk); the machine needs `sh`,
+ignored. With it, `verify`, `mv`, `cp`, and the reconcile pass `archive`
+and `assemble` make over what a destination already holds — adoption of
+unrecorded bytes, `--rehash` — hash on that machine over one ssh call
+instead of pulling the mount back over the wire (two calls for a
+reconcile: the LFS files, then the git-held files with their blob sha1,
+so the check against the pin is the same one a local pass makes); the
+machine needs `sh`,
 `find`, and one of `sha256sum` / `shasum` / `sha256` / `openssl`, which
 is what a NAS, a BSD, or a Mac ships. A machine that cannot be reached is
 a refusal that names the fix, never a silent fall back to the wire.
