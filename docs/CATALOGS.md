@@ -199,7 +199,9 @@ CLI classifies (negatives-first prices, `hints`, the `policy` marker,
 precision and bytes per parameter) and pushes the refreshed catalog
 back. Closed rows are left as they are — there is nothing to price. Mutating verbs push after saving;
 `--dry-run` never pushes. The board URL is the capability — treat it
-like a secret.
+like a secret. The page address with `.json` (`/b/<board-id>.json`, the
+board as a document for programs) names the same board and is accepted
+wherever a board URL is.
 
 `archive SOURCE --board <board-url>` claims the row for a source *you*
 chose — the board's desire ordering decides nothing, but the claim and

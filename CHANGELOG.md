@@ -44,6 +44,10 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Added
 
+- A board's page address with `.json` — `https://darsay.io/b/<id>.json`,
+  the board as a document, the address darsay.io hands a program — is
+  accepted wherever a board URL is (`estimate`, `list`, `archive --next`
+  / `--board`, `catalog add` / `drop` / `adopt`).
 - `docs/NORTH-STAR.md` — the mission and the model of the models: work,
   negative and print, precision, lineage — and the principle that every
   label is a doorway. `docs/proposals/lineage-and-precision.md` records

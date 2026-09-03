@@ -28,8 +28,11 @@ from urllib.parse import urlsplit
 
 HTTP_TIMEOUT = 30
 MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+# A board's address in every spelling the site answers: the page, the
+# page as a document (``/b/<id>.json``, what the site hands a program),
+# the API, and the catalog download. All name the same board.
 _BOARD_PATH = re.compile(
-    r"^/(?:b|api/boards)/(?P<id>[0-9a-f]{32})(?:/catalog\.json)?/?$"
+    r"^/(?:b|api/boards)/(?P<id>[0-9a-f]{32})(?:\.json|/catalog\.json)?/?$"
 )
 
 
@@ -57,7 +60,12 @@ class Board:
 
 
 def parse_board_url(spec: str) -> Board | None:
-    """A Board when ``spec`` is a board URL, else None (never raises)."""
+    """A Board when ``spec`` is a board URL, else None (never raises).
+
+    ``https://darsay.io/b/<id>``, the same with ``.json`` (the board as a
+    document), ``/api/boards/<id>``, and ``/api/boards/<id>/catalog.json``
+    all name one board.
+    """
     raw = (spec or "").strip()
     if not raw.lower().startswith(("https://", "http://")):
         return None

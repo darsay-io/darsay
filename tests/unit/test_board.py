@@ -11,6 +11,8 @@ def test_parse_board_url_forms():
     expect = Board(origin="https://darsay.io", id=BOARD_ID)
     assert parse_board_url(f"https://darsay.io/b/{BOARD_ID}") == expect
     assert parse_board_url(f"https://darsay.io/b/{BOARD_ID}/") == expect
+    # The page as a document — the address the site hands a program.
+    assert parse_board_url(f"https://darsay.io/b/{BOARD_ID}.json") == expect
     assert parse_board_url(f"https://darsay.io/api/boards/{BOARD_ID}") == expect
     assert (
         parse_board_url(f"https://darsay.io/api/boards/{BOARD_ID}/catalog.json")
@@ -27,6 +29,10 @@ def test_parse_board_url_rejects_non_boards():
     assert parse_board_url("https://darsay.io/boards") is None
     assert parse_board_url("https://darsay.io/b/notahexid") is None
     assert parse_board_url(f"https://darsay.io/b/{BOARD_ID}/entries") is None
+    # A key-addressed board names no id: nothing for the CLI to claim on.
+    assert parse_board_url("https://darsay.io/api/board") is None
+    assert parse_board_url("https://darsay.io/api/board.json") is None
+    assert parse_board_url(f"https://darsay.io/api/boards/{BOARD_ID}.json/x") is None
     assert parse_board_url("") is None
 
 
