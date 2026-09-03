@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.12] - 2026-09-03
+
+
 ### Added
 
 - **`darsay migrate` — a record moves forward.** A bundle whose

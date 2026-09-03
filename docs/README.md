@@ -20,7 +20,7 @@
 
 | | Current |
 |---|---|
-| Tool | **0.14.11** |
+| Tool | **0.14.12** |
 | Manifest schema | **2.1.0** |
 | Catalog schema | **2.0.0** |
 | MVB format | **1.2** |
