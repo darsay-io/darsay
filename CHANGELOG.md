@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.14] - 2026-09-03
+
+
 ### Added
 
 - **`SHA256SUMS` — verify a bundle with coreutils alone.** Every bundle
