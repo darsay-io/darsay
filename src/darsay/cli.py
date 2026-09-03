@@ -29,7 +29,8 @@ immutable payload, recorded facts, still loadable as-is.
     darsay info    <bundle>           quick manifest summary
     darsay regen   <bundle>           rebuild README.md after editing curation.md
     darsay export  <bundle> [-o DIR]  pack into a single deterministic .mvb.tar
-    darsay import  <file.mvb.tar>     unpack + verify into the vault
+    darsay import  <file.mvb.tar>     unpack + verify into the vault (an older record is migrated as it lands)
+    darsay migrate <bundle> | --all   bring an older record (manifest.json) to this darsay's schema; payload untouched
     darsay mv      <bundle> VAULT     move a registered bundle to another vault (verify, then remove)
     darsay cp      <bundle> VAULT     copy a registered bundle into another vault (verify there, keep the source)
     darsay assemble <partial> […]     combine matching partials offline
@@ -1550,6 +1551,97 @@ def cmd_import(args) -> int:
     return 0
 
 
+def cmd_migrate(args) -> int:
+    from .migrate import migrate_bundle, migration_plan, vault_migration_plans
+    from .schema import MANIFEST_SCHEMA_MAJOR
+
+    specs = list(args.bundles or [])
+    if args.all and specs:
+        raise SystemExit("error: name bundles or pass --all, not both")
+    if not args.all and not specs:
+        raise SystemExit(
+            "error: migrate needs a bundle (path, id, or unique prefix), or --all "
+            "for every record in the vault that predates this darsay\n"
+            "  hint: darsay list   (rows marked `migrate` are the ones)"
+        )
+    machine = args.json
+    quiet = lambda *a, **k: None  # noqa: E731
+    progress = quiet if machine else print
+    if args.all:
+        vault = _vault_path(args, announce=not machine)
+        plans = vault_migration_plans(vault)
+    else:
+        plans = [
+            migration_plan(_bundle_dir(args, spec, require_manifest=False))
+            for spec in specs
+        ]
+    todo = [plan for plan in plans if plan["status"] == "migrate"]
+    current = [plan for plan in plans if plan["status"] == "current"]
+
+    if args.all and not machine:
+        if not todo:
+            print(
+                f"Every record in {vault} is {MANIFEST_SCHEMA_MAJOR}.x "
+                f"({len(current)} bundle{'s' if len(current) != 1 else ''}) — "
+                "nothing to migrate"
+            )
+            return 0
+        print(
+            f"{len(todo)} of {len(plans)} record{'s' if len(plans) != 1 else ''} in "
+            f"{vault} predate{'s' if len(todo) == 1 else ''} this darsay "
+            f"({MANIFEST_SCHEMA_MAJOR}.x); {len(current)} "
+            f"{'is' if len(current) == 1 else 'are'} current"
+        )
+    # A named bundle that is already current says so; under --all the
+    # header counts the current ones and only the work is shown.
+    for i, plan in enumerate(todo if args.all else plans):
+        if i and not machine:
+            print()
+        migrate_bundle(
+            Path(plan["path"]), progress=progress, dry_run=args.dry_run, plan=plan
+        )
+
+    if machine:
+        print(
+            json.dumps(
+                {
+                    "schema": {
+                        "reads": f"{MANIFEST_SCHEMA_MAJOR}.x",
+                        "writes": plans[0]["to_schema"] if plans else None,
+                    },
+                    "dry_run": bool(args.dry_run),
+                    "bundles": [
+                        {k: v for k, v in plan.items() if k != "record"}
+                        for plan in plans
+                    ],
+                },
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return 0
+    if not todo:
+        return 0
+    if args.dry_run:
+        print()
+        _dry_run_done(args, "nothing written", "migrate")
+        return 0
+    print()
+    if len(todo) == 1:
+        print(
+            f"  next:  darsay verify {todo[0]['bundle_id']}   "
+            "(re-hash the payload where it landed)"
+        )
+    else:
+        print(
+            f"Migrated {len(todo)} records to schema {todo[0]['to_schema']}."
+            "  next: re-hash each payload where it landed:"
+        )
+        for plan in todo:
+            print(f"  darsay verify {plan['bundle_id']}")
+    return 0
+
+
 def cmd_mv(args) -> int:
     from .relocate import move_bundle
 
@@ -2377,6 +2469,30 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_dry_run(p, "read the marker and print what would land where; unpack nothing")
     p.set_defaults(func=cmd_import)
+
+    p = add_cmd(
+        "migrate",
+        help=(
+            "bring a bundle's record (manifest.json) to the schema this darsay "
+            "writes — offline, from the record and the payload; no payload byte "
+            "is touched or re-hashed"
+        ),
+    )
+    p.add_argument("bundles", nargs="*", metavar="BUNDLE", help=bundle_help)
+    p.add_argument(
+        "--all",
+        action="store_true",
+        help="every registered bundle in the vault whose record predates this darsay",
+    )
+    p.add_argument(
+        "--json", action="store_true", help="machine-readable plan and result"
+    )
+    _add_dry_run(
+        p,
+        "print what each record would say after migrating, and where that "
+        "comes from; write nothing",
+    )
+    p.set_defaults(func=cmd_migrate)
 
     p = add_cmd(
         "mv",

@@ -12,6 +12,7 @@ from darsay.archiver import (
     hub_url,
     load_manifest,
     parse_repo_ref,
+    read_manifest,
     write_manifest,
 )
 from darsay.schema import MANIFEST_KIND, MANIFEST_TOP_KEYS
@@ -97,11 +98,14 @@ def test_load_manifest_refuses_major_newer(tmp_path):
         load_manifest(tmp_path)
 
 
-def test_load_manifest_refuses_an_earlier_major(tmp_path):
-    """Fix forward: a 1.x record is re-archived, never migrated in place."""
+def test_load_manifest_refuses_an_earlier_major_and_names_the_verb(tmp_path):
+    """Readers read one major; the record moves forward with `darsay migrate`."""
     write_manifest(tmp_path, _minimal_manifest(schema_version="1.8.0"))
-    with pytest.raises(SystemExit, match="predates this darsay"):
+    with pytest.raises(SystemExit, match="predates this darsay") as refused:
         load_manifest(tmp_path)
+    assert f"hint: darsay migrate {tmp_path}" in str(refused.value)
+    # read_manifest looks at any major; it is how migrate sees the record.
+    assert read_manifest(tmp_path)["schema_version"] == "1.8.0"
 
 
 def test_load_manifest_refuses_wrong_kind(tmp_path):

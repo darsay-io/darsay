@@ -908,6 +908,18 @@ def _mutation_lock(vault: Path):
         handle.close()
 
 
+def _record_predates(bundle: Path) -> str | None:
+    """The record's schema version when it is of an earlier major, else None."""
+    from .archiver import read_manifest
+    from .migrate import record_status
+
+    try:
+        version = str(read_manifest(bundle)["schema_version"])
+        return version if record_status(version) == "older" else None
+    except (SystemExit, ValueError, KeyError):
+        return None
+
+
 def _finding(
     check_id: str,
     summary: str,
@@ -916,6 +928,7 @@ def _finding(
     evidence: str | None = None,
     fixer: str | None | object = _DEFAULT_FIXER,
     severity: str | None = None,
+    action: str | None = None,
     expected_before_exists: bool | None = None,
     expected_before_sha256: str | None = None,
 ) -> dict:
@@ -944,7 +957,8 @@ def _finding(
         "evidence": evidence_value,
         "auto_fixable": chosen_fixer is not None,
         "fixer_id": chosen_fixer,
-        "recommended_action": (
+        "recommended_action": action
+        or (
             "Run `darsay doctor --fix`, then rerun the doctor."
             if chosen_fixer
             else "Inspect the named file; darsay will not guess or replace archival facts."
@@ -1579,15 +1593,36 @@ def _scan(
                     if enabled("bundle.manifest")
                     else next(check for check in manifest_checks if enabled(check))
                 )
-                findings.append(
-                    _finding(
-                        check_id,
-                        "bundle manifest is unreadable or blocks the requested check",
-                        manifest_path,
-                        evidence=str(exc),
-                        fixer=None,
+                predates = _record_predates(bundle)
+                if predates:
+                    # Intact and complete, just written under an earlier
+                    # schema major: one offline command, no payload risk.
+                    findings.append(
+                        _finding(
+                            check_id,
+                            f"bundle record is schema {predates}, which predates "
+                            "this darsay; `darsay migrate` brings it forward",
+                            manifest_path,
+                            evidence=str(exc),
+                            fixer=None,
+                            severity="warning",
+                            action=(
+                                f"Run `darsay migrate {shlex.quote(str(bundle))}` "
+                                "(offline; the payload is not touched), then "
+                                "rerun the doctor."
+                            ),
+                        )
                     )
-                )
+                else:
+                    findings.append(
+                        _finding(
+                            check_id,
+                            "bundle manifest is unreadable or blocks the requested check",
+                            manifest_path,
+                            evidence=str(exc),
+                            fixer=None,
+                        )
+                    )
             else:
                 payload_findings: list[dict] = []
                 payload_partial = False

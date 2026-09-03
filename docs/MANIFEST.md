@@ -6,7 +6,7 @@
   <a href="../README.md">README</a>
 </p>
 
-# manifest.json — schema reference (v2.0.0)
+# manifest.json — schema reference (v2.1.0)
 
 > **In one sentence.** The manifest is the recorded facts about a bundle.
 > Unknown is `null`. The tool never fabricates.
@@ -32,7 +32,7 @@ Conventions:
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | Version of this schema (`"2.0.0"`). Major changes only on breaking layout. |
+| `schema_version` | Version of this schema (`"2.1.0"`). Major changes only on breaking layout. |
 | `kind` | Always `"darsay.bundle"`. A file with the field missing is read as `"darsay.bundle"`. Any other value is a load error. |
 | `artifact_type` | Registry key driving completeness rules and the payload root (`"model"` or `"dataset"`; future: GGUF packs, papers — see `src/darsay/schema.py`). |
 | `bundle_id` | `<bundle directory name>@<first 12 of pinned revision>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Hugging Face dataset bundles take a `datasets--` prefix (`datasets--saidutta69--fable-5-premium@684cb1f849fe`) since model and dataset namespaces can collide on that host. Other providers include their id in the directory name. Stable, deterministic, unique per (source, revision). |
@@ -224,6 +224,7 @@ lineage — family, generation, member — lives in `identity`
 | `last_integrity_check`, `last_accessed` | Maintained by `verify`, `smoke`, `hydrate` / `run`, import. `info` is read-only and does not rewrite the manifest. |
 | `imported` | Present on imported bundles: `at`, `from_file`, `file_sha256`, `mvb_format_version`. |
 | `moves` | Present once `darsay mv` has relocated the bundle: a list, oldest first, of `{at, from_location, method}` where `method` is `rename` (same filesystem; bytes untouched) or `copy` (re-hashed at the destination before the source was removed). An rsync leaves no entry — it is a first-class copy that darsay never sees happen. Since 1.8.0. |
+| `migrations` | Present once `darsay migrate` (or `import` of an older export) has brought the record forward: a list, oldest first, of `{at, from_schema, to_schema, darsay}`. The payload never changes across a migration; what changed is the shape its facts are written in — see [Migration](#migration). Since 2.1.0. |
 
 Export events are logged in the sibling file `exports.json`
 (`{"exports": [{at, file, sha256, size_bytes, mvb_format_version, written_by}]}`),
@@ -264,15 +265,20 @@ last touched it. Tool version (`darsay.__version__`) moves independently.
 - **Major** changes only on breaking layout. This tool reads
   `schema_version` major `2` only (`load_manifest`, and `import` on the
   `.mvb.json` marker before unpacking): a newer major is unsupported, not
-  silently misread, and an older one is refused with a re-archive hint —
-  darsay fixes forward and does not migrate a record in place. Mixed 2.x
+  silently misread. An older major is refused by every verb but `list`
+  and `migrate`, and the refusal names the command: `darsay migrate`
+  re-reads the record under the current model and writes it in this
+  shape ([Migration](#migration)); `import` does the same as an older
+  export lands. Readers never read around an older record. Mixed 2.x
   minors may coexist in one vault.
 - **Minor / patch** are additive. Readers **ignore unknown fields**.
   Missing additive fields mean `null` (`kind` missing is read as
   `"darsay.bundle"`). Writers **preserve** unknown top-level keys on
-  round-trip (`verify`, `run`, `regen`).
+  round-trip (`verify`, `run`, `regen`, `migrate`).
 - **The version describes this file**, not the tool that last touched it.
-  Writes do not stamp the tool's current schema onto the record.
+  Writes do not stamp the tool's current schema onto the record — except
+  `migrate`, whose purpose is exactly that, and which says so in
+  `archive.migrations`.
 - **2.x will not** rename or remove a field, change `payload_root` for
   `model` or `dataset`, change `bundle_hash` or what it covers, or rewrite
   payload.
@@ -287,6 +293,41 @@ typed, provenance-carrying `parents`; `model_metadata.precision` became
 the release-precision label with `precision_detail` and
 `bytes_per_param` beside it; `source.subset.policy` reads `"negatives"`
 and verdicts read `negative`. Payload stays byte-immutable across majors.
+2.1.0 added `archive.migrations`.
+
+## Migration
+
+A record written under an earlier major is a complete set of facts about
+a payload that has not changed. `darsay migrate BUNDLE` reads those facts
+back under the current model and writes them in the current shape —
+offline, from the record and the payload, touching no payload byte and
+re-hashing nothing (`verify` is the next line it prints). `-n` prints,
+per section, what the record will say and where that came from; `--all`
+walks the vault; `--json` is for scripts. `darsay list` marks such
+bundles `migrate`, `darsay doctor` reports them (`bundle.manifest`,
+warning), and `darsay import` migrates an older export as it lands.
+
+For a 1.x record, section by section:
+
+| Section | What `migrate` does | From |
+|---|---|---|
+| `identity` | re-reads `family`, `generation`, `member`, `variants`, `formats`, `size` (`read_from: "name"`); keeps `model_name`, `publisher`, `release_date`, `aliases`; drops `version` (now `generation`) and the config-read `family` (the architecture — still `model_metadata.model_type`) | the name |
+| `model_metadata` | re-derived whole, so `precision` is the release-precision label with `precision_detail` and `bytes_per_param` beside it; `languages` and the curator's `training_cutoff` are kept | `config.json`, the weight headers, the file names |
+| `lineage` | translated from `relationships`: `parents` with each edge's relation and provenance, `descendants` / `as_of` / `query_limit` carried as the archive-time snapshot they are, curator `successors` / `related` kept | the archive-time card and tags when `transfer.json` travelled with the bundle, else the record and its `source.upstream_tags` — a parent both named is then recorded as declared by the tag, the declaration the record itself holds |
+| `source.subset` | `policy` reads `negatives`, verdicts read `negative` — the classification itself is the recorded one | the record |
+| `inventory` | carried as recorded (it is the hash record); `layout` filled from the registry for records that predate it | the record |
+| `source` | carried as recorded; `provider` and `address` spelled out from `origin` and `repo_id` for records that predate them (1.5.0) | the record |
+| everything else | `licensing`, `runtime`, `validation`, `archive`, `security`, `curation`, `dataset_metadata`: carried as recorded; unknown top-level keys round-trip | the record |
+
+Then `archive.migrations` gains `{at, from_schema, to_schema, darsay}`,
+and `README.md` / `VERIFICATION.md` are regenerated (`curation.md` is
+never touched). Nothing is fetched: descendants are a snapshot of when
+the bundle was archived and stay that snapshot. A record of a *newer*
+major is refused — a record moves forward, not back.
+
+The reading of an older major lives in one module (`src/darsay/migrate.py`);
+every other reader reads the current major only. When 3.0 comes, that
+module gains a 2.x reading and 1.x records take both steps.
 
 ---
 

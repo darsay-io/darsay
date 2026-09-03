@@ -191,6 +191,30 @@ The script is part of the export format. Changing it is an MVB minor bump;
 the same bundle state under the same format version still exports the
 same bytes.
 
+### Records move forward; readers do not move back
+
+Every reader reads one schema major. That is what keeps the readers
+simple and the manifest honest: no field describes how things used to
+be, and no code path quietly reinterprets an old shape. When the model
+of the models changes, the record changes shape — and a record written
+under the old shape is a complete set of facts about a payload that has
+not changed, so the recovery is to re-read those facts under the new
+model, not to download the payload again.
+
+`darsay migrate` is that re-reading, and it is deliberately not a chain
+of patches. It carries every fact whose meaning did not change exactly
+as recorded, re-derives from the payload the facts whose meaning did
+(the precision label, bytes per parameter), re-reads the name for the
+fields the name grammar now supplies, and translates the sections the
+model renamed. The test that holds it is not "the patch applied" but
+"the migrated record equals a fresh archive of the same source" — with
+archive-time facts (timestamps, the downloader, the descendants
+snapshot) kept as the older record had them, because those are facts
+about *that* archive. The reading of an older major lives in one
+module, `migrate.py`; the day 3.0 comes, that module gains a 2.x
+reading and a 1.x record takes both steps. `archive.migrations` records
+that it happened, and `verify` remains the verb that reads the bytes.
+
 ## When to revisit
 
 Only when a component appears whose profile is genuinely different — a

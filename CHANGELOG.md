@@ -9,6 +9,46 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Added
+
+- **`darsay migrate` — a record moves forward.** A bundle whose
+  `manifest.json` was written under an earlier schema major (any 1.x)
+  is re-read under the current model and rewritten in the current
+  shape — offline, from the record and the payload: family, generation,
+  member, variants, formats, and size re-read from the name; precision,
+  `precision_detail`, and bytes per parameter re-derived from
+  `config.json` and the weight headers; `relationships` translated into
+  `lineage` with each parent's relation and provenance (from the
+  archive-time card when `transfer.json` travelled with the bundle,
+  else from the record and its upstream tags); the subset policy and
+  verdicts renamed `negatives` / `negative`; everything else carried as
+  recorded, unknown top-level keys included. No payload byte is touched
+  or re-hashed — `verify` is the next line the command prints. `-n`
+  prints, per section, what the record will say and where that came
+  from; `--all` walks the vault; `--json` is for scripts. Manifest
+  schema **2.1.0** (additive): `archive.migrations` records each move
+  as `{at, from_schema, to_schema, darsay}`.
+- Every refusal of an older record ends with the `darsay migrate` line
+  to paste. `darsay list` marks such bundles `migrate` (schema in NOTE,
+  a count in the header); `darsay doctor` reports them as a
+  `bundle.manifest` warning with the command; `darsay import` verifies
+  an older `.mvb.tar`'s payload against its embedded record and
+  migrates the record as it lands. A record of a newer major is still
+  refused everywhere — a record does not move back.
+- `tests/fixtures/schema-1.8.0/` — records and one export written by
+  darsay 0.14.10, the last 1.x writer, regenerable by `make.py` from a
+  worktree at that commit. `test_migrate.py` holds a migrated 1.8.0
+  record equal to a fresh `archive` of the same source, section by
+  section.
+
+### Changed
+
+- The fix-forward invariant, restated: readers still read one major and
+  never read around an older record; the recovery for a breaking schema
+  change is `darsay migrate`, not a re-archive. `migrate.py` is the one
+  place an older major is read. (`docs/NORTH-STAR.md`, `CLAUDE.md`,
+  [MANIFEST.md → Migration](docs/MANIFEST.md#migration).)
+
 ## [0.14.11] - 2026-09-02
 
 

@@ -85,20 +85,22 @@ Three independent layers:
 | Layer | Field | Rule |
 |---|---|---|
 | Container | `mvb_format_version` in the marker | Import requires a matching **major** version. |
-| Record | `schema_version` in the marker and the embedded manifest | Import refuses major `> 1` from the marker (before unpack) and again from `manifest.json`. Interpreted per [MANIFEST.md](MANIFEST.md). |
+| Record | `schema_version` in the marker and the embedded manifest | Import refuses a major newer than this darsay from the marker (before unpack) and again from `manifest.json`. An older major imports: the payload verifies against the embedded inventory (whose shape has never changed), then the record is migrated before it registers ([MANIFEST.md → Migration](MANIFEST.md#migration)). |
 | Content | the pinned commit in `bundle_id` | Different upstream revisions are different bundles. |
 
 ## Import procedure (what `darsay import` guarantees)
 
 1. Stream the first entry; refuse anything whose leading entry is not a
-   compatible `.mvb.json` marker (container major, and embedded
-   `schema_version` major `> 1`).
+   compatible `.mvb.json` marker (container major, or an embedded
+   `schema_version` major newer than this darsay).
 2. Hash the tar file itself (recorded as import provenance).
 3. Unpack into a staging directory using Python's safe `data` extraction
    filter (no path traversal, no specials).
 4. Re-hash **every payload file** and compare against the embedded manifest's
    inventory; recompute the bundle hash and compare against the marker.
-5. Only on a clean pass: rewrite `archive.location`/`host`, stamp
+5. Only on a clean pass: migrate the record if its schema major predates
+   this darsay (`archive.migrations` says so), rewrite
+   `archive.location`/`host`, stamp
    `archive.imported = {at, from_file, file_sha256, mvb_format_version}`, move
    the bundle into the vault, and run a full `verify` to refresh
    `VERIFICATION.md`/`verification.json` at the new location.
@@ -108,9 +110,10 @@ A corrupted archive — even a single flipped byte anywhere in the weights — i
 therefore refused at import time, before the bundle can enter the vault.
 
 `darsay import FILE --dry-run` stops after step 1: it reads the marker,
-applies the same refusals (container major, schema major, an existing
-destination without `--force`), prints the bundle id, destination, and
-payload size, and unpacks nothing. `darsay export BUNDLE --dry-run` likewise
+applies the same refusals (container major, a newer schema major, an
+existing destination without `--force`), prints the bundle id,
+destination, payload size — and, for an older record, that it will be
+migrated as it lands — and unpacks nothing. `darsay export BUNDLE --dry-run` likewise
 lists what would be packed and where — and which machine-local files are
 left out — without writing the tar or `exports.json`.
 

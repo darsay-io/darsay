@@ -1046,7 +1046,7 @@ def vault_as_rows(records: list[dict]) -> list[dict]:
                 "source": rec.get("source_address") or "—",
                 "revision": rec.get("revision"),
                 "include": rec.get("include"),
-                "note": None,
+                "note": rec.get("note"),
                 "bundle_id": rec.get("bundle_id"),
                 "path": rec.get("path"),
                 "policy": rec.get("policy"),
@@ -1128,7 +1128,7 @@ def sort_rows(rows: list[dict], sort: str) -> list[dict]:
 
         def key(row):
             status = row.get("status")
-            group = {"partial": 0, "want": 1, "have": 2}.get(status, 3)
+            group = {"partial": 0, "want": 1, "migrate": 2, "have": 3}.get(status, 4)
             d = row.get("desire")
             return (
                 group,
@@ -1177,7 +1177,7 @@ def sort_rows(rows: list[dict], sort: str) -> list[dict]:
 
         return sorted(rows, key=key)
     if sort == "status":
-        order = {"have": 0, "partial": 1, "want": 2, "closed": 3}
+        order = {"migrate": 0, "have": 1, "partial": 2, "want": 3, "closed": 4}
         return sorted(
             rows,
             key=lambda r: (
@@ -1199,6 +1199,7 @@ def overlay_stats(rows: list[dict]) -> dict:
     partial = sum(1 for r in rows if r.get("status") == "partial")
     want = sum(1 for r in rows if r.get("status") == "want")
     closed = sum(1 for r in rows if r.get("status") == "closed")
+    migrate = sum(1 for r in rows if r.get("status") == "migrate")
     remaining = 0
     remaining_unknown = False
     on_disk = 0
@@ -1223,6 +1224,7 @@ def overlay_stats(rows: list[dict]) -> dict:
         "partial": partial,
         "want": want,
         "closed": closed,
+        "migrate": migrate,
         "remaining_bytes": remaining,
         "remaining_unknown": remaining_unknown,
         "on_disk_bytes": on_disk,
@@ -1280,9 +1282,14 @@ def catalog_header_line(catalog: dict, stats: dict, rows: list[dict]) -> str:
 def vault_header_line(vault: Path, stats: dict) -> str:
     on_disk = human_size(stats.get("on_disk_bytes") or 0)
     remaining = f"  ·  {_remaining_label(stats)}" if stats.get("partial") else ""
+    to_migrate = (
+        f" · {stats['migrate']} to migrate (`darsay migrate --all`)"
+        if stats.get("migrate")
+        else ""
+    )
     return (
-        f"Vault {vault}  ·  {stats['have']} have · {stats['partial']} partial  ·  "
-        f"{on_disk} on disk{remaining}"
+        f"Vault {vault}  ·  {stats['have']} have · {stats['partial']} partial"
+        f"{to_migrate}  ·  {on_disk} on disk{remaining}"
     )
 
 

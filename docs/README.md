@@ -21,7 +21,7 @@
 | | Current |
 |---|---|
 | Tool | **0.14.11** |
-| Manifest schema | **2.0.0** |
+| Manifest schema | **2.1.0** |
 | Catalog schema | **2.0.0** |
 | MVB format | **1.2** |
 | License | Apache 2.0 |
@@ -47,7 +47,8 @@ export, shards, verify. Then the spec for the command you are about to run.
 
 **A bundle is on the wrong disk, or you are not sure which verb.**
 [FAQ](FAQ.md) — moving and copying bundles between vaults, rsync's standing (first-class,
-always), `darsay mv` versus `assemble --handoff`, what travels and what stays.
+always), `darsay mv` versus `assemble --handoff`, what travels and what stays,
+and a record written by an older darsay (`darsay migrate`).
 
 **You are reading this in 2040 and the CLI is gone.**
 [Manifest](MANIFEST.md) and [MVB format](MVB-FORMAT.md) are the two

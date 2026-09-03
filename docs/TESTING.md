@@ -146,6 +146,15 @@ The existing `release.yml` workflow is unchanged: it publishes artifacts on
 - Anything that needs a bundle uses `TestProvider.add_repo(...)` and
   `archive_quiet` from `tests/integration/conftest.py`. Synthetic payloads
   live in `tests/payloads.py`.
+- Records of an earlier schema major: `tests/fixtures/schema-1.8.0/`
+  holds manifests (and one export) written by darsay 0.14.10 — the last
+  1.x writer — so `darsay migrate` is tested against what an older darsay
+  actually wrote, never an imitation. `make.py` there regenerates them
+  from a git worktree at that commit; the payloads are rebuilt from
+  `tests/payloads.py`. `tests/integration/test_migrate.py` holds a
+  migrated record equal to a fresh `archive` of the same source, section
+  by section. A future major adds a `schema-2.x.y/` set the same way,
+  produced by the last writer of that major before the bump.
 - Config files and the free-space floor: an autouse fixture in
   `tests/conftest.py` points `$XDG_CONFIG_HOME` at a nonexistent directory
   and sets `$DARSAY_MIN_FREE=0`, so this machine's

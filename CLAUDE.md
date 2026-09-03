@@ -41,6 +41,10 @@ are not optional, and *master* is not one of them.
   verify at the destination → remove the source; `cp` copies → verifies →
   keeps the source and records the replica in both manifests; partials are
   refused, `assemble --handoff` is their verb),
+  `migrate.py` (`darsay migrate`: brings a record written under an earlier
+  schema major to the schema this darsay writes — offline, from the record
+  and the payload, hashing nothing; the one place an older major is read;
+  `import` calls it as an older export lands),
   `lineage.py` (the name grammar: family, generation, member, variants,
   formats, size — read from a work's name and labeled so; mirrored in
   `website/src/lib/lineage.ts` against `tests/fixtures/lineage-names.json`),
@@ -91,7 +95,8 @@ are not optional, and *master* is not one of them.
   Hugging Face as a plugin.
   `docs/TESTING.md` — test pyramid (unit / integration / e2e) and CI.
   `docs/FAQ.md` — moving and copying bundles between disks, rsync's standing, `mv` vs
-  `assemble --handoff`, what travels with a bundle and what stays.
+  `assemble --handoff`, what travels with a bundle and what stays, records
+  from an older darsay (`migrate`).
   **Update these whenever manifest fields or the export format change**, and
   bump `SCHEMA_VERSION` (`__init__.py`) / `MVB_FORMAT_VERSION` (`export.py`)
   appropriately (major = breaking). Keep GETTING-STARTED / CONCEPTS /
@@ -140,8 +145,13 @@ are not optional, and *master* is not one of them.
 - **Fix forward:** darsay is greenfield. A change to the model of the
   models bumps the schema major and every reader follows; no
   compatibility knobs, no fields kept to describe how things used to be,
-  no in-place migration of records. Breaking changes are named in the
-  changelog with their recovery.
+  and no reader reads around an older record. What moves is the record:
+  `darsay migrate` re-reads a record of an earlier major under the current
+  model and writes it in the current shape — `migrate.py` is the one
+  place an older major is read, the payload is never touched, and
+  `archive.migrations` says it happened. Breaking changes are named in
+  the changelog with their recovery, and the recovery is `migrate`, never
+  a re-download.
 - **Verify before register:** `import` must fully re-hash a payload before a
   bundle enters the vault; failures register nothing and exit non-zero.
 - **Generated vs hand-edited:** bundle `README.md` is a derived view

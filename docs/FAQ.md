@@ -168,6 +168,56 @@ timestamp updates rather than the disk being listed twice. Or rsync
 into the same `<name>/<rev>/` layout and `darsay verify` there — the
 bytes are equally good; only the bookkeeping differs.
 
+## Older records
+
+### A bundle someone sent me says "manifest schema 1.8.0 predates this darsay". What now?
+
+```bash
+darsay migrate ./zai-org--glm-4.5v/ed47433b3711 -n    # read what will change, and where it comes from
+darsay migrate ./zai-org--glm-4.5v/ed47433b3711       # write the record in this darsay's schema
+darsay verify  ./zai-org--glm-4.5v/ed47433b3711       # then hash the payload where it landed
+```
+
+The bundle is fine. Its record — `manifest.json` — was written by an
+older darsay in the shape the model of the models had then, and this
+darsay reads one schema major. `migrate` reads the recorded facts back
+under the current model and writes them in the current shape: family,
+generation, and member re-read from the name; precision and bytes per
+parameter re-derived from `config.json` and the weight headers;
+`relationships` translated into `lineage` with each parent's relation and
+provenance; the subset policy's words renamed; everything else carried
+exactly as recorded. It is offline, it reads a few small files under the
+payload and hashes none of them, and it says what it did in
+`archive.migrations`. The refusal you saw ends with the exact command;
+`-n` shows the plan first. The whole table is in
+[MANIFEST.md → Migration](MANIFEST.md#migration).
+
+### Does migrating touch the payload or the bundle hash?
+
+No. Nothing under `model/` (or `data/`) is written, and the inventory —
+the hash record — is carried as recorded, which is why `verify` is the
+line `migrate` prints next: the record is now readable, and hashing the
+payload where it landed is the same step it always was after an rsync.
+
+### I run a vault that takes submissions. What is the routine?
+
+```bash
+darsay list                 # rows marked `migrate` are records this darsay cannot read yet
+darsay migrate --all -n     # every such record: what it will say, and where that comes from
+darsay migrate --all        # write them; the last lines are the verify commands
+darsay verify <bundle>      # each one, on the host that owns the disk
+```
+
+`darsay doctor` reports them too (`bundle.manifest`, a warning with the
+command). An older `.mvb.tar` needs nothing extra: `darsay import`
+verifies its payload against the embedded record and migrates the record
+as it lands, so a submission by file is one command either way.
+
+### The sender's darsay is newer than mine. Can I migrate down?
+
+No — a record moves forward, never back. Upgrade darsay; the refusal says
+which major it needs.
+
 ## Partials
 
 ### Can I move a half-finished archive?
@@ -190,3 +240,4 @@ first disk *and* keep fetching on it, that is a hand-off:
 | **relocate a partial** | copy a partial's directory to another vault and continue there | `cp -a` / rsync, then the same `archive` |
 | **adoption** | bytes already on disk that hash to the pin are kept, wherever they came from | what `archive` / `assemble` do first |
 | **export / import** | pack a bundle into one verified file / unpack it with verification | `darsay export`, `darsay import` |
+| **migrate** | a record written under an earlier schema major is re-read under the current model and rewritten in the current shape; the payload is untouched | `darsay migrate` — `import` does it for an older export |

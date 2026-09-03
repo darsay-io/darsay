@@ -100,8 +100,10 @@ from headers and hashes, never from a name.
 
 **Fix forward.** darsay is greenfield. When the model of the models
 improves, the schema follows it — no compatibility knobs, no fields kept
-to describe how things used to be. Breaking changes are named in the
-changelog with their recovery.
+to describe how things used to be. A record written under the old model
+is not read around; `darsay migrate` re-reads its facts under the new
+one and writes them in the new shape, and the payload it describes never
+changes. Breaking changes are named in the changelog with their recovery.
 
 ## What "smarter" looks like
 

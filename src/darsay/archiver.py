@@ -109,11 +109,13 @@ def write_manifest(bundle_dir: Path, manifest: dict) -> None:
     )
 
 
-def load_manifest(bundle_dir: Path) -> dict:
-    """Read + validate. A manifest of another major → SystemExit.
+def read_manifest(bundle_dir: Path) -> dict:
+    """Read a manifest of any schema major, checking only its shape.
 
-    darsay is greenfield and fixes forward: a record written under an
-    earlier major is not migrated in place; the source is re-archived.
+    Everything ``load_manifest`` checks except the major: the file parses,
+    ``schema_version`` is present and parseable, ``kind`` is ours. This is
+    how ``migrate`` and the vault walk look at a record this darsay does
+    not otherwise read; every other caller wants ``load_manifest``.
     """
     path = bundle_dir / "manifest.json"
     try:
@@ -132,28 +134,42 @@ def load_manifest(bundle_dir: Path) -> dict:
             f"error: unreadable manifest at {path}: schema_version missing"
         )
     try:
-        major = parse_schema_major(version)
+        parse_schema_major(version)
     except ValueError:
         raise SystemExit(
             f"error: unreadable manifest at {path}: schema_version {version!r}"
         ) from None
-    if major > MANIFEST_SCHEMA_MAJOR:
-        raise SystemExit(
-            f"error: manifest schema {version} is newer than this darsay "
-            f"(supports {MANIFEST_SCHEMA_MAJOR}.x)"
-        )
-    if major < MANIFEST_SCHEMA_MAJOR:
-        raise SystemExit(
-            f"error: manifest schema {version} predates this darsay "
-            f"({MANIFEST_SCHEMA_MAJOR}.x); re-archive the source — the record "
-            "is not migrated in place"
-        )
     kind = data.get("kind") or MANIFEST_KIND
     if kind != MANIFEST_KIND:
         raise SystemExit(
             f"error: unreadable manifest at {path}: kind is not {MANIFEST_KIND!r}"
         )
     data["kind"] = kind
+    return data
+
+
+def load_manifest(bundle_dir: Path) -> dict:
+    """Read + validate. A manifest of another major → SystemExit.
+
+    Readers read one major and never read around an older record;
+    ``darsay migrate`` brings the record forward (``migrate.py``), and a
+    newer one needs a newer darsay.
+    """
+    data = read_manifest(bundle_dir)
+    version = data["schema_version"]
+    major = parse_schema_major(version)
+    if major > MANIFEST_SCHEMA_MAJOR:
+        raise SystemExit(
+            f"error: manifest schema {version} is newer than this darsay "
+            f"(reads {MANIFEST_SCHEMA_MAJOR}.x) — upgrade darsay"
+        )
+    if major < MANIFEST_SCHEMA_MAJOR:
+        from .migrate import migration_hint
+
+        raise SystemExit(
+            f"error: manifest schema {version} predates this darsay "
+            f"(reads {MANIFEST_SCHEMA_MAJOR}.x)\n{migration_hint(bundle_dir)}"
+        )
     return data
 
 

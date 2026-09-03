@@ -605,6 +605,51 @@ verb for partials.
 
 ---
 
+## Take in a bundle from an older darsay
+
+A submission arrives — rsync, a USB stick, `darsay cp` onto a shared
+disk — and every verb but `list` refuses it:
+
+```
+error: manifest schema 1.8.0 predates this darsay (reads 2.x)
+  hint: darsay migrate zai-org--glm-4.5v/ed47433b3711   re-reads the record under the 2.x model; payload untouched (-n to preview)
+```
+
+Read what will change, do it, then hash the payload where it landed:
+
+```bash
+darsay migrate zai-org--glm-4.5v/ed47433b3711 -n
+darsay migrate zai-org--glm-4.5v/ed47433b3711
+darsay verify  zai-org--glm-4.5v/ed47433b3711
+```
+
+Each line of the plan names a section of the record, what it now says,
+and where that came from:
+
+```
+Would migrate zai-org--glm-4.5v@ed47433b3711  (schema 1.8.0 → 2.1.0)
+  identity:   GLM 4.5 · V — re-read from the name; drops version and family 'glm4v' (read from config.json; still model_metadata.model_type)
+  precision:  BF16 · 2.00 bytes/param — re-derived from config.json and 47 safetensors headers (was 'bfloat16', a dtype)
+  lineage:    parents: finetune huggingface:zai-org/GLM-4.5-Air (card); descendants as of 2026-08-30 kept (12 quantized, 3 finetunes) — translated from relationships and the recorded upstream tags
+  carried:    source, licensing, inventory (47 files, 22.1 GiB), runtime, validation, archive, security, curation — as recorded
+  payload:    47 files present at the recorded sizes; bytes untouched, not re-hashed
+```
+
+Nothing under `model/` is hashed or written. For a vault that takes many
+submissions:
+
+```bash
+darsay list                # rows marked `migrate`, and a count in the header
+darsay migrate --all -n
+darsay migrate --all       # the last lines are the verify commands, one per bundle
+```
+
+An older `.mvb.tar` needs no extra step: `darsay import` verifies its
+payload against the embedded record and migrates the record as it lands.
+More in [FAQ → Older records](../docs/FAQ.md#older-records).
+
+---
+
 ## Write curator notes
 
 `curation.md` is the only hand-edited file. The generated `README.md`

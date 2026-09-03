@@ -24,7 +24,7 @@ darsay run     qwen--qwen3-0.6b "Say hello"
   <a href="https://github.com/darsay-io/darsay/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/darsay-io/darsay/ci.yml?style=flat-square&label=CI" alt="CI"></a>
   <a href="https://github.com/darsay-io/darsay/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-38bdf8?style=flat-square" alt="Apache 2.0"></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-00b4ff?style=flat-square&logo=python&logoColor=white" alt="Python 3.10+">
-  <img src="https://img.shields.io/badge/schema-v2.0.0-0ea5e9?style=flat-square" alt="Manifest schema 2.0.0">
+  <img src="https://img.shields.io/badge/schema-v2.1.0-0ea5e9?style=flat-square" alt="Manifest schema 2.1.0">
 </p>
 
 <p align="center">
@@ -269,6 +269,7 @@ archiving**; the bundle hash covers it alone.
 | Diagnose the whole vault | `darsay doctor` (offline; `--fix` is journaled and undoable) |
 | Pack one file for a USB drive | `darsay export qwen--qwen3-0.6b -o /backups` |
 | Bring that file back | `darsay import /backups/<file>.mvb.tar` |
+| Take in a bundle from an older darsay | `darsay migrate <bundle>` — re-reads its record under the current schema, offline; the payload is untouched (`-n` to read the plan, `--all` for the whole vault) |
 
 Source refs are provider-qualified — `huggingface:Qwen/Qwen3-0.6B`,
 `huggingface:datasets/owner/name`. Unprefixed `owner/name` /
@@ -301,6 +302,8 @@ darsay archive  Qwen/Qwen3.8-27B --dry-run            # verified / partial / mis
 darsay archive  Qwen/Qwen3.8-27B --shard 1/3 --max-gb 20
 darsay --vault ./combined assemble /usb/alice/<bundle> /usb/bob/<bundle>
 darsay --vault /Volumes/big assemble ~/darsay/<bundle> --handoff   # partial: hand verified files over, keep a skeleton
+darsay migrate  <bundle>                              # a record from an older darsay → this schema; payload untouched
+darsay migrate  --all -n                              # every such record in the vault: the plan, nothing written
 darsay mv       <bundle> /Volumes/big                 # registered: rename or copy+verify, then remove the source
 darsay cp       <bundle> /Volumes/backup              # registered: verified copy; source kept, replica recorded
 darsay list --json
@@ -316,7 +319,7 @@ darsay dehydrate <bundle>
 darsay rm       <bundle> -n                           # -n / --dry-run: same checks, nothing written
 ```
 
-Every command that writes — `archive`, `assemble`, `import`, `export`, `mv`, `cp`, `rm`,
+Every command that writes — `archive`, `assemble`, `import`, `export`, `migrate`, `mv`, `cp`, `rm`,
 `regen`, `hydrate`, `run`, `dehydrate`, `envs --prune`, the `catalog` verbs,
 `estimate CATALOG` — takes `-n` / `--dry-run`: the same checks, the same
 report in the conditional, nothing written, and the real command to paste.

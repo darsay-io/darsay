@@ -28,6 +28,7 @@ import tarfile
 from datetime import datetime
 from pathlib import Path
 
+from . import SCHEMA_VERSION
 from .hashing import bundle_hash, hash_file, iter_payload_files
 from .vault import prune_empty_parent
 
@@ -203,12 +204,14 @@ def _read_marker(tar_path: Path) -> dict:
         schema_major = parse_schema_major(embedded)
     except ValueError:
         raise SystemExit(f"error: export marker schema_version {embedded!r}") from None
-    if schema_major != MANIFEST_SCHEMA_MAJOR:
+    if schema_major > MANIFEST_SCHEMA_MAJOR:
         raise SystemExit(
-            f"error: embedded manifest schema {embedded} is not "
-            f"{MANIFEST_SCHEMA_MAJOR}.x — this darsay imports "
-            f"{MANIFEST_SCHEMA_MAJOR}.x exports only"
+            f"error: embedded manifest schema {embedded} is newer than this "
+            f"darsay (reads {MANIFEST_SCHEMA_MAJOR}.x) — upgrade darsay to import it"
         )
+    # An earlier major imports: the payload verifies against the embedded
+    # inventory (its shape has never changed), then the record is migrated
+    # before it registers.
     return marker
 
 
@@ -225,10 +228,12 @@ def import_bundle(
     ``dry_run`` reads the marker, runs the same refusals, prints what would
     land where, and unpacks nothing.
     """
-    from .archiver import load_manifest, utc_now, write_manifest
+    from .archiver import load_manifest, read_manifest, utc_now, write_manifest
+    from .migrate import migrate_bundle, migration_plan, record_status
     from .verify import verify_bundle
 
     marker = _read_marker(tar_path)
+    older_record = record_status(marker["schema_version"]) == "older"
     bundle_id = marker["bundle_id"]
     name, _, rev = bundle_id.partition("@")
     if not rev:
@@ -254,6 +259,11 @@ def import_bundle(
             f"{human_size(marker.get('payload_size_bytes'))} — every file re-hashed "
             "against the embedded manifest before it registers"
         )
+        if older_record:
+            progress(
+                f"  record:      schema {marker['schema_version']} — migrated to "
+                f"{SCHEMA_VERSION} before it registers (payload untouched)"
+            )
         progress(
             "  then:        stamp archive.imported, move into the vault, verify there"
         )
@@ -274,7 +284,7 @@ def import_bundle(
         if not (root / "manifest.json").is_file():
             raise SystemExit("error: export contains no manifest.json")
 
-        manifest = load_manifest(root)
+        manifest = read_manifest(root)
         if manifest["bundle_id"] != bundle_id:
             raise SystemExit(
                 f"error: marker/manifest bundle_id mismatch: {bundle_id} vs {manifest['bundle_id']}"
@@ -301,6 +311,13 @@ def import_bundle(
                 f"({len(bad)} bad/missing, {len(extra)} extra, "
                 f"bundle_hash_match={recomputed['value'] == marker['bundle_hash']['value']})"
             )
+
+        if older_record:
+            # Verified as recorded; now the record itself moves forward.
+            plan = migration_plan(root)
+            plan["path"] = str(dest)
+            migrate_bundle(root, progress=progress, plan=plan)
+            manifest = load_manifest(root)
 
         now = utc_now()
         manifest["archive"]["location"] = str(dest.resolve())

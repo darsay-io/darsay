@@ -25,9 +25,9 @@ Conventions match the [manifest](MANIFEST.md):
   stripped).
 - Major schema version is breaking. Additive minor/patch: readers ignore
   unknown fields; this tool preserves unknown *top-level* keys on
-  round-trip. A file of another major is a hard error — darsay fixes
-  forward and does not migrate a 1.x catalog; re-add its entries. The
-  tool writes the version it conforms to.
+  round-trip. A file of another major is a hard error — a catalog is not
+  migrated (a bundle's *record* is: `darsay migrate`); re-add its
+  entries to a new one. The tool writes the version it conforms to.
 
 The catalog schema is independent of bundle `schema_version`. Catalogs
 are not inside `.mvb.tar`.

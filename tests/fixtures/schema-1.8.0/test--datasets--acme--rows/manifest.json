@@ -1,0 +1,272 @@
+{
+  "schema_version": "1.8.0",
+  "kind": "darsay.bundle",
+  "artifact_type": "dataset",
+  "bundle_id": "test--datasets--acme--rows@aaaaaaaaaaaa",
+  "identity": {
+    "model_name": "rows",
+    "family": "rows",
+    "publisher": "acme",
+    "version": null,
+    "release_date": "2026-01-01T00:00:00+00:00",
+    "aliases": [
+      "test:datasets/acme/rows",
+      "acme/rows",
+      "https://test.invalid/datasets/acme/rows"
+    ]
+  },
+  "source": {
+    "origin": "test",
+    "provider": "test",
+    "address": "test:datasets/acme/rows",
+    "repo_id": "acme/rows",
+    "upstream_url": "https://test.invalid/datasets/acme/rows",
+    "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "revision_ref": "main",
+    "last_modified_upstream": "2026-01-01T00:00:00+00:00",
+    "download_timestamp": "2026-09-03T04:10:55+00:00",
+    "transfer": {
+      "sessions": 1,
+      "started": "2026-09-03T04:10:55+00:00",
+      "completed": "2026-09-03T04:10:55+00:00",
+      "bytes_network": 218,
+      "bytes_adopted": 0,
+      "bytes_local_sources": 0,
+      "retries": 0
+    },
+    "downloader": {
+      "tool": "darsay",
+      "version": "0.14.10",
+      "python": "3.14.7",
+      "platform": "macOS-26.5.1-arm64-arm-64bit-Mach-O",
+      "provider": "test"
+    },
+    "mirrors_used": [],
+    "signatures": null,
+    "access": {
+      "gated": false,
+      "notes": null
+    },
+    "upstream_stats_at_archive": {
+      "downloads_last_month": 0,
+      "likes": 0
+    },
+    "upstream_tags": [
+      "task_categories:text-classification"
+    ],
+    "subset": null
+  },
+  "licensing": {
+    "spdx_id": "mit",
+    "name": "MIT License",
+    "license_files": [
+      "data/LICENSE"
+    ],
+    "commercial_use": true,
+    "redistribution": true,
+    "modification": true,
+    "attribution_required": true,
+    "patent_grant": false,
+    "trademark_terms": null,
+    "needs_manual_review": false,
+    "notes": null
+  },
+  "inventory": {
+    "file_count": 4,
+    "total_size_bytes": 218,
+    "bundle_hash": {
+      "algorithm": "sha256-of-sorted-sha256-lines",
+      "value": "72dae7cfe0a4fe841b57199ba001b396a3a81af8199d6cd45c4c5d006229c479",
+      "covers": "data/ payload only; bundle-root metadata files are mutable and excluded"
+    },
+    "layout": {
+      "payload_root": "data/",
+      "mutable_metadata": [
+        "manifest.json",
+        "README.md",
+        "VERIFICATION.md",
+        "verification.json",
+        "curation.md",
+        "exports.json",
+        "hydration.json",
+        "transfer.json",
+        "transfer.lock",
+        "LICENSE"
+      ]
+    },
+    "files": [
+      {
+        "path": "data/LICENSE",
+        "size": 12,
+        "sha256": "267f7a2e19dfa9df99af774520985a0e521925293ea5b7e767ab06969d06bf91",
+        "blake3": null,
+        "upstream_lfs_sha256": "267f7a2e19dfa9df99af774520985a0e521925293ea5b7e767ab06969d06bf91",
+        "upstream_git_sha1": null,
+        "verified_against_upstream": true
+      },
+      {
+        "path": "data/README.md",
+        "size": 14,
+        "sha256": "dc90415e7995e0b49d4391957a70bf31a1ac932b9f84a824ab2957ebc0a950a0",
+        "blake3": null,
+        "upstream_lfs_sha256": "dc90415e7995e0b49d4391957a70bf31a1ac932b9f84a824ab2957ebc0a950a0",
+        "upstream_git_sha1": null,
+        "verified_against_upstream": true
+      },
+      {
+        "path": "data/dataset_infos.json",
+        "size": 156,
+        "sha256": "38951227953e627ed15d9490e965f0296b9c44767b118be72040fd2d5d256e9a",
+        "blake3": null,
+        "upstream_lfs_sha256": "38951227953e627ed15d9490e965f0296b9c44767b118be72040fd2d5d256e9a",
+        "upstream_git_sha1": null,
+        "verified_against_upstream": true
+      },
+      {
+        "path": "data/train.jsonl",
+        "size": 36,
+        "sha256": "e671bf3337962744a15a9c3aef9191fb0c91d36f143c54937deb5932f5b26a46",
+        "blake3": null,
+        "upstream_lfs_sha256": "e671bf3337962744a15a9c3aef9191fb0c91d36f143c54937deb5932f5b26a46",
+        "upstream_git_sha1": null,
+        "verified_against_upstream": true
+      }
+    ]
+  },
+  "dataset_metadata": {
+    "formats": {
+      "json": {
+        "file_count": 1,
+        "total_size_bytes": 156
+      },
+      "jsonl": {
+        "file_count": 1,
+        "total_size_bytes": 36
+      },
+      "md": {
+        "file_count": 1,
+        "total_size_bytes": 14
+      },
+      "(none)": {
+        "file_count": 1,
+        "total_size_bytes": 12
+      }
+    },
+    "declared": {
+      "sources": [
+        "dataset_infos.json"
+      ],
+      "configs": {
+        "default": {
+          "features": {
+            "text": {
+              "dtype": "string"
+            }
+          },
+          "splits": {
+            "train": {
+              "num_examples": 2,
+              "num_bytes": 40
+            }
+          },
+          "download_size": 40,
+          "dataset_size": 40
+        }
+      },
+      "example_count_total": 2
+    },
+    "measured": {
+      "status": "skipped",
+      "reason": "no parquet files in payload (row counting covers parquet only)"
+    },
+    "task_categories": [
+      "text-classification"
+    ],
+    "size_categories": null,
+    "languages": null
+  },
+  "validation": {
+    "checksum_verification": {
+      "at": "2026-09-03T04:10:55+00:00",
+      "method": "per-file at download completion",
+      "status": "pass",
+      "files_checked": 4,
+      "upstream_mismatches": []
+    },
+    "completeness": {
+      "status": "complete",
+      "required": {
+        "data": {
+          "present": true,
+          "matched": [
+            "data/dataset_infos.json",
+            "data/train.jsonl"
+          ]
+        }
+      },
+      "recommended": {
+        "dataset_card": {
+          "present": true,
+          "matched": [
+            "data/README.md"
+          ]
+        },
+        "license": {
+          "present": true,
+          "matched": [
+            "data/LICENSE"
+          ]
+        },
+        "dataset_infos": {
+          "present": true,
+          "matched": [
+            "data/dataset_infos.json"
+          ]
+        }
+      },
+      "missing_required": [],
+      "missing_recommended": []
+    },
+    "smoke_tests": {
+      "structure": {
+        "status": "not-run"
+      }
+    }
+  },
+  "relationships": {
+    "source_datasets": [
+      "acme/raw-rows"
+    ],
+    "models_trained_on": [
+      "acme/Toy-3.5-7B-Instruct"
+    ],
+    "ecosystem_snapshot_as_of": "2026-01-01T00:00:00+00:00",
+    "query_limit": 100
+  },
+  "archive": {
+    "date_archived": "2026-09-03T04:10:55+00:00",
+    "archived_by": null,
+    "location": "/private/var/folders/tf/7cg6g4xd0f1611ks07x8w1r40000gn/T/tmp9twgy0nx/vault/test--datasets--acme--rows/aaaaaaaaaaaa",
+    "host": "darsay-0.14.10-fixture",
+    "storage_tier": "local-disk",
+    "backup_status": "none",
+    "replicas": [],
+    "last_integrity_check": "2026-09-03T04:10:55+00:00",
+    "last_accessed": "2026-09-03T04:10:55+00:00"
+  },
+  "security": {
+    "integrity_status": "verified-against-upstream",
+    "unexpected_changes": [],
+    "trust_level": "unreviewed",
+    "reviewed_by": null,
+    "review_notes": null
+  },
+  "curation": {
+    "historical_significance": null,
+    "major_capabilities": null,
+    "known_limitations": null,
+    "successor_models": null,
+    "personal_notes": null,
+    "curation_file": "curation.md"
+  }
+}

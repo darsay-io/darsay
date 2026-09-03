@@ -1,0 +1,447 @@
+{
+  "schema_version": "1.8.0",
+  "kind": "darsay.bundle",
+  "artifact_type": "model",
+  "bundle_id": "test--acme--toy-3.5-7b-instruct@aaaaaaaaaaaa",
+  "identity": {
+    "model_name": "Toy-3.5-7B-Instruct",
+    "family": "testlm",
+    "publisher": "acme",
+    "version": null,
+    "release_date": "2026-01-01T00:00:00+00:00",
+    "aliases": [
+      "test:acme/Toy-3.5-7B-Instruct",
+      "acme/Toy-3.5-7B-Instruct",
+      "https://test.invalid/acme/Toy-3.5-7B-Instruct"
+    ]
+  },
+  "source": {
+    "origin": "test",
+    "provider": "test",
+    "address": "test:acme/Toy-3.5-7B-Instruct",
+    "repo_id": "acme/Toy-3.5-7B-Instruct",
+    "upstream_url": "https://test.invalid/acme/Toy-3.5-7B-Instruct",
+    "revision": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "revision_ref": "main",
+    "last_modified_upstream": "2026-01-01T00:00:00+00:00",
+    "download_timestamp": "2026-09-03T04:10:54+00:00",
+    "transfer": {
+      "sessions": 1,
+      "started": "2026-09-03T04:10:54+00:00",
+      "completed": "2026-09-03T04:10:54+00:00",
+      "bytes_network": 664,
+      "bytes_adopted": 0,
+      "bytes_local_sources": 0,
+      "retries": 0
+    },
+    "downloader": {
+      "tool": "darsay",
+      "version": "0.14.10",
+      "python": "3.14.7",
+      "platform": "macOS-26.5.1-arm64-arm-64bit-Mach-O",
+      "provider": "test"
+    },
+    "mirrors_used": [],
+    "signatures": null,
+    "access": {
+      "gated": false,
+      "notes": null
+    },
+    "upstream_stats_at_archive": {
+      "downloads_last_month": 12,
+      "likes": 3
+    },
+    "upstream_tags": [
+      "base_model:finetune:acme/Toy-3.5-7B",
+      "base_model:quantized:acme/Toy-3.5-7B-FP8",
+      "text-generation"
+    ],
+    "subset": {
+      "include": [
+        "model.safetensors"
+      ],
+      "sidecars": true,
+      "sidecar_file_count": 6,
+      "full_file_count": 8,
+      "full_total_size_bytes": 721,
+      "kept_file_count": 7,
+      "kept_total_size_bytes": 664,
+      "omitted_file_count": 1,
+      "full_files": [
+        {
+          "path": "LICENSE",
+          "size": 19,
+          "sha256": "4037bd3dec2b7a4ad2e609290f0be9ee3d64738190db987950c73ee38aa6b5d3",
+          "git_sha1": null
+        },
+        {
+          "path": "Q4_K_M.gguf",
+          "size": 57,
+          "sha256": "b937f8c1b6cd4f549289895982e581b5fc88132e48661006fde5e6d96dcddebc",
+          "git_sha1": null
+        },
+        {
+          "path": "README.md",
+          "size": 34,
+          "sha256": "b5dbdcff38d5718aaf83c9f3b945e14dfd8f52134f3c5a35934f8f130bc412e9",
+          "git_sha1": null
+        },
+        {
+          "path": "config.json",
+          "size": 297,
+          "sha256": "a1464779491621cff217ce964da029553b3931ca60fc82a3de35b89813d5cc08",
+          "git_sha1": null
+        },
+        {
+          "path": "generation_config.json",
+          "size": 54,
+          "sha256": "db21a9a560278514b4ec16bbf8f52a05b4bdd36aa54f91ca91602dfd39f2da02",
+          "git_sha1": null
+        },
+        {
+          "path": "model.safetensors",
+          "size": 102,
+          "sha256": "895ce52b7340c7a15d423bcde11fba2581932cdc64145d0da13b700bb7565cb0",
+          "git_sha1": null
+        },
+        {
+          "path": "tokenizer.json",
+          "size": 50,
+          "sha256": "726284f6b81c468c8d7586dcebb161d3dad061e169c18c47f3bb453d777e714c",
+          "git_sha1": null
+        },
+        {
+          "path": "tokenizer_config.json",
+          "size": 108,
+          "sha256": "6a4eb928057d1dbc08b82f44f311b709d079e21152db8a6a974584e176444e7a",
+          "git_sha1": null
+        }
+      ],
+      "policy": "masters",
+      "classification": {
+        "classifier": {
+          "darsay": "0.14.10"
+        },
+        "read": {
+          "requests": 2,
+          "bytes_fetched": 354,
+          "header_files_read": 1,
+          "base_pinned": false,
+          "caps": {
+            "gguf_fetch_cap_bytes": 67108864,
+            "header_file_cap": 64,
+            "json_cap_bytes": 10485760
+          }
+        },
+        "sets": [
+          {
+            "name": "model.safetensors",
+            "kind": "standalone",
+            "verdict": "master",
+            "rule": "R4",
+            "action": "fetch",
+            "file_count": 1,
+            "bytes": 102,
+            "reason": "standalone full-fidelity F32"
+          },
+          {
+            "name": "Q4_K_M.gguf",
+            "kind": "gguf",
+            "verdict": "print",
+            "rule": "R9",
+            "action": "skip",
+            "file_count": 1,
+            "bytes": 57,
+            "reason": "no imatrix — mechanical quant of the sole full-fidelity set; regenerable under a recorded toolchain, not bit-identical"
+          },
+          {
+            "name": "support files",
+            "kind": "support",
+            "verdict": "support",
+            "rule": "R1",
+            "action": "fetch",
+            "file_count": 6,
+            "bytes": 562,
+            "reason": "kept always"
+          }
+        ]
+      }
+    }
+  },
+  "licensing": {
+    "spdx_id": "apache-2.0",
+    "name": "Apache License 2.0",
+    "license_files": [
+      "model/LICENSE"
+    ],
+    "commercial_use": true,
+    "redistribution": true,
+    "modification": true,
+    "attribution_required": true,
+    "patent_grant": true,
+    "trademark_terms": "Section 6: no trademark rights granted beyond what is needed to describe origin of the work.",
+    "needs_manual_review": false,
+    "notes": null
+  },
+  "inventory": {
+    "file_count": 7,
+    "total_size_bytes": 664,
+    "bundle_hash": {
+      "algorithm": "sha256-of-sorted-sha256-lines",
+      "value": "18f74b94c18b9b20ef83e13bd06e2ecc49f3dc7506d17fef8da732128926d022",
+      "covers": "model/ payload only; bundle-root metadata files are mutable and excluded"
+    },
+    "layout": {
+      "payload_root": "model/",
+      "mutable_metadata": [
+        "manifest.json",
+        "README.md",
+        "VERIFICATION.md",
+        "verification.json",
+        "curation.md",
+        "exports.json",
+        "hydration.json",
+        "transfer.json",
+        "transfer.lock",
+        "LICENSE"
+      ]
+    },
+    "files": [
+      {
+        "path": "model/LICENSE",
+        "size": 19,
+        "sha256": "4037bd3dec2b7a4ad2e609290f0be9ee3d64738190db987950c73ee38aa6b5d3",
+        "blake3": null,
+        "upstream_lfs_sha256": "4037bd3dec2b7a4ad2e609290f0be9ee3d64738190db987950c73ee38aa6b5d3",
+        "upstream_git_sha1": null,
+        "verified_against_upstream": true
+      },
+      {
+        "path": "model/README.md",
+        "size": 34,
+        "sha256": "b5dbdcff38d5718aaf83c9f3b945e14dfd8f52134f3c5a35934f8f130bc412e9",
+        "blake3": null,
+        "upstream_lfs_sha256": "b5dbdcff38d5718aaf83c9f3b945e14dfd8f52134f3c5a35934f8f130bc412e9",
+        "upstream_git_sha1": null,
+        "verified_against_upstream": true
+      },
+      {
+        "path": "model/config.json",
+        "size": 297,
+        "sha256": "a1464779491621cff217ce964da029553b3931ca60fc82a3de35b89813d5cc08",
+        "blake3": null,
+        "upstream_lfs_sha256": "a1464779491621cff217ce964da029553b3931ca60fc82a3de35b89813d5cc08",
+        "upstream_git_sha1": null,
+        "verified_against_upstream": true
+      },
+      {
+        "path": "model/generation_config.json",
+        "size": 54,
+        "sha256": "db21a9a560278514b4ec16bbf8f52a05b4bdd36aa54f91ca91602dfd39f2da02",
+        "blake3": null,
+        "upstream_lfs_sha256": "db21a9a560278514b4ec16bbf8f52a05b4bdd36aa54f91ca91602dfd39f2da02",
+        "upstream_git_sha1": null,
+        "verified_against_upstream": true
+      },
+      {
+        "path": "model/model.safetensors",
+        "size": 102,
+        "sha256": "895ce52b7340c7a15d423bcde11fba2581932cdc64145d0da13b700bb7565cb0",
+        "blake3": null,
+        "upstream_lfs_sha256": "895ce52b7340c7a15d423bcde11fba2581932cdc64145d0da13b700bb7565cb0",
+        "upstream_git_sha1": null,
+        "verified_against_upstream": true
+      },
+      {
+        "path": "model/tokenizer.json",
+        "size": 50,
+        "sha256": "726284f6b81c468c8d7586dcebb161d3dad061e169c18c47f3bb453d777e714c",
+        "blake3": null,
+        "upstream_lfs_sha256": "726284f6b81c468c8d7586dcebb161d3dad061e169c18c47f3bb453d777e714c",
+        "upstream_git_sha1": null,
+        "verified_against_upstream": true
+      },
+      {
+        "path": "model/tokenizer_config.json",
+        "size": 108,
+        "sha256": "6a4eb928057d1dbc08b82f44f311b709d079e21152db8a6a974584e176444e7a",
+        "blake3": null,
+        "upstream_lfs_sha256": "6a4eb928057d1dbc08b82f44f311b709d079e21152db8a6a974584e176444e7a",
+        "upstream_git_sha1": null,
+        "verified_against_upstream": true
+      }
+    ]
+  },
+  "model_metadata": {
+    "parameter_count": 8,
+    "parameters_by_dtype": {
+      "float32": 8
+    },
+    "architecture": "TestLMForCausalLM",
+    "model_type": "testlm",
+    "context_length": 128,
+    "precision": "float32",
+    "quantization": null,
+    "hidden_size": 8,
+    "num_hidden_layers": 1,
+    "num_attention_heads": 2,
+    "num_key_value_heads": 2,
+    "tie_word_embeddings": true,
+    "tokenizer": {
+      "class": "PreTrainedTokenizer",
+      "vocab_size": 16,
+      "model_max_length": 128,
+      "special_tokens": {
+        "bos_token": "<s>",
+        "eos_token": "</s>"
+      },
+      "chat_template_present": false
+    },
+    "languages": [
+      "en",
+      "fr"
+    ],
+    "training_cutoff": null,
+    "generation_defaults": {
+      "temperature": 0.7,
+      "top_p": 0.9,
+      "do_sample": false
+    },
+    "weight_shards": 1
+  },
+  "runtime": {
+    "supported_engines": [
+      "transformers"
+    ],
+    "estimated_min_ram_gb": 0.0,
+    "estimated_min_vram_gb": 0.0,
+    "tested_hardware": null,
+    "os_support": [
+      "linux",
+      "macos",
+      "windows"
+    ],
+    "cuda_notes": null,
+    "rocm_notes": null,
+    "cpu_inference": true,
+    "notes": "RAM/VRAM figures are estimates (weight bytes x1.2); engines listed from shipped formats only."
+  },
+  "validation": {
+    "checksum_verification": {
+      "at": "2026-09-03T04:10:54+00:00",
+      "method": "per-file at download completion",
+      "status": "pass",
+      "files_checked": 7,
+      "upstream_mismatches": []
+    },
+    "completeness": {
+      "status": "complete",
+      "required": {
+        "config": {
+          "present": true,
+          "matched": [
+            "model/config.json"
+          ]
+        },
+        "weights": {
+          "present": true,
+          "matched": [
+            "model/model.safetensors"
+          ]
+        },
+        "tokenizer": {
+          "present": true,
+          "matched": [
+            "model/tokenizer.json"
+          ]
+        }
+      },
+      "recommended": {
+        "model_card": {
+          "present": true,
+          "matched": [
+            "model/README.md"
+          ]
+        },
+        "license": {
+          "present": true,
+          "matched": [
+            "model/LICENSE"
+          ]
+        },
+        "generation_config": {
+          "present": true,
+          "matched": [
+            "model/generation_config.json"
+          ]
+        },
+        "tokenizer_config": {
+          "present": true,
+          "matched": [
+            "model/tokenizer_config.json"
+          ]
+        }
+      },
+      "missing_required": [],
+      "missing_recommended": []
+    },
+    "smoke_tests": {
+      "tokenizer": {
+        "status": "not-run"
+      },
+      "inference": {
+        "status": "not-run"
+      }
+    }
+  },
+  "relationships": {
+    "base_models": [
+      "acme/Toy-3.5-7B",
+      "acme/Toy-3.5-7B-FP8"
+    ],
+    "base_model": "acme/Toy-3.5-7B",
+    "base_model_relation": "finetune",
+    "finetuned_from": "acme/Toy-3.5-7B",
+    "training_datasets": [
+      "acme/corpus"
+    ],
+    "quantized_versions": [
+      "acme/Toy-3.5-7B-Instruct-GGUF"
+    ],
+    "gguf_repos": [
+      "acme/Toy-3.5-7B-Instruct-GGUF"
+    ],
+    "finetunes_count": 2,
+    "adapters_count": 0,
+    "related_variants": null,
+    "successors": null,
+    "ecosystem_snapshot_as_of": "2026-01-01T00:00:00+00:00",
+    "query_limit": 100
+  },
+  "archive": {
+    "date_archived": "2026-09-03T04:10:54+00:00",
+    "archived_by": null,
+    "location": "/private/var/folders/tf/7cg6g4xd0f1611ks07x8w1r40000gn/T/tmp9twgy0nx/vault/test--acme--toy-3.5-7b-instruct/aaaaaaaaaaaa",
+    "host": "darsay-0.14.10-fixture",
+    "storage_tier": "local-disk",
+    "backup_status": "none",
+    "replicas": [],
+    "last_integrity_check": "2026-09-03T04:10:54+00:00",
+    "last_accessed": "2026-09-03T04:10:54+00:00"
+  },
+  "security": {
+    "integrity_status": "verified-against-upstream",
+    "unexpected_changes": [],
+    "trust_level": "unreviewed",
+    "reviewed_by": null,
+    "review_notes": null
+  },
+  "curation": {
+    "historical_significance": null,
+    "major_capabilities": null,
+    "known_limitations": null,
+    "successor_models": null,
+    "personal_notes": null,
+    "curation_file": "curation.md"
+  }
+}

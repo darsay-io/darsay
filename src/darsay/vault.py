@@ -87,6 +87,7 @@ def bundle_records(vault: Path) -> list[dict]:
             subset = src.get("subset") or {}
             include = subset.get("include")
             policy = subset.get("policy")
+            schema, record_note = _record_standing(m)
             rows.append(
                 {
                     "bundle_id": m["bundle_id"],
@@ -99,7 +100,9 @@ def bundle_records(vault: Path) -> list[dict]:
                     "archived": m["archive"]["date_archived"][:10],
                     "partial": False,
                     "artifact_type": m.get("artifact_type"),
-                    "status": "have",
+                    "status": "migrate" if record_note else "have",
+                    "schema_version": schema,
+                    "note": record_note,
                     "source_address": _source_address_from_manifest(m),
                     "revision": src.get("revision"),
                     "revision_ref": src.get("revision_ref"),
@@ -183,6 +186,30 @@ def bundle_records(vault: Path) -> list[dict]:
                 }
             )
     return rows
+
+
+def _record_standing(manifest: dict) -> tuple[str | None, str | None]:
+    """The record's schema, and a note when this darsay cannot read it.
+
+    ``list`` walks every record so an operator sees what arrived; a
+    record of an earlier major is on disk and intact but every other
+    verb refuses it until ``darsay migrate`` brings it forward.
+    """
+    from .migrate import record_status
+    from .schema import MANIFEST_SCHEMA_MAJOR
+
+    version = manifest.get("schema_version")
+    try:
+        standing = record_status(version)
+    except ValueError:
+        return (str(version) if version is not None else None), None
+    if standing == "older":
+        return str(version), f"schema {version} · darsay migrate"
+    if standing == "newer":
+        return str(version), (
+            f"schema {version} · newer than this darsay ({MANIFEST_SCHEMA_MAJOR}.x)"
+        )
+    return str(version), None
 
 
 def prune_empty_parent(bundle_dir: Path) -> None:
