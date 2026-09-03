@@ -3,7 +3,9 @@
 An export is a deterministic tar of the whole bundle directory:
 
 - entries rooted at `<bundle_id>/`, marker file `.mvb.json` first, then all
-  files in sorted order (including a frozen `darsay-verify.py`);
+  files in sorted order (including a frozen `darsay-verify.py` and the
+  payload's `SHA256SUMS`, both generated from the tool and the record rather
+  than taken from disk);
 - normalized tar metadata (mtime = the bundle's date_archived, uid/gid 0,
   mode 0644, no owner names), GNU format, no compression — model weights are
   essentially incompressible and a plain tar stays inspectable;
@@ -29,14 +31,25 @@ from datetime import datetime
 from pathlib import Path
 
 from . import SCHEMA_VERSION
-from .hashing import bundle_hash, hash_file, iter_payload_files
+from .hashing import (
+    SHA256SUMS_NAME,
+    bundle_hash,
+    hash_file,
+    iter_payload_files,
+    sha256sums_text,
+)
 from .vault import prune_empty_parent
 
 # Bump major on incompatible layout changes; import requires a matching major.
 # Minor 1.2 adds a frozen copy of standalone_verify.py as darsay-verify.py.
-MVB_FORMAT_VERSION = "1.2"
+# Minor 1.3 adds SHA256SUMS — the payload's hash list in coreutils format,
+# so `sha256sum -c` verifies an unpacked export with no Python at all.
+MVB_FORMAT_VERSION = "1.3"
 MARKER_NAME = ".mvb.json"
 STANDALONE_VERIFY_NAME = "darsay-verify.py"
+# Members export generates from the tool and the record; an on-disk copy
+# (an import unpacks both) is ignored so the tar never carries a stale one.
+GENERATED_MEMBERS = {STANDALONE_VERIFY_NAME, SHA256SUMS_NAME}
 
 # Bundle-root files that never go into an export: volatile machine-local state
 # (export log, hydration/run records, resumable-transfer ledger/lock).
@@ -54,9 +67,7 @@ def _bundle_files(bundle_dir: Path) -> list[tuple[str, Path]]:
         rel = p.relative_to(bundle_dir).as_posix()
         if rel in EXPORT_EXCLUDE or p.name == ".DS_Store":
             continue
-        # Always inject the canonical verifier; ignore an on-disk copy
-        # (imports unpack one into the bundle).
-        if rel == STANDALONE_VERIFY_NAME:
+        if rel in GENERATED_MEMBERS:
             continue
         if p.is_symlink():
             raise SystemExit(f"error: refusing to export symlink in bundle: {rel}")
@@ -110,8 +121,10 @@ def export_bundle(
 
     files = _bundle_files(bundle_dir)
     verifier = standalone_verify_bytes()
+    sums = sha256sums_text(manifest["inventory"]["files"]).encode("utf-8")
     members: list[tuple[str, Path | None, bytes | None]] = [
         (STANDALONE_VERIFY_NAME, None, verifier),
+        (SHA256SUMS_NAME, None, sums),
         *((rel, abs_path, None) for rel, abs_path in files),
     ]
     members.sort(key=lambda t: t[0])
@@ -122,6 +135,7 @@ def export_bundle(
         total = (
             len(marker_bytes)
             + len(verifier)
+            + len(sums)
             + sum(abs_path.stat().st_size for _rel, abs_path in files)
         )
         excluded = sorted(

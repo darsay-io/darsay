@@ -550,13 +550,24 @@ them and `darsay rm` for either side. When the destination's `curation.md`
 differs from the bundle's, the plan says so before anything moves; the
 bundle's lands.
 
-Over SMB or NFS, prefer the rsync form: `mv` verifies by reading the
-destination back, which over the wire is a trip of the whole payload, and
-it says so before it starts — with the three lines to paste, paths filled
-in: the rsync above, `darsay verify` on the host that owns the disk,
-`darsay rm` here. With the bytes already there, the rsync carries only
-the record. rsync `--delete` is never part of it
-([FAQ](../docs/FAQ.md#should-the-rsync-use---delete)). `mv` refuses a partial — that is
+Over SMB or NFS, name the machine that owns the disk once and `mv`
+hashes there instead of reading the mount back:
+
+```bash
+darsay --vault /Volumes/big config host.ssh=root@nas host.path=/volume1/big
+darsay mv qwen--qwen3-0.6b /Volumes/big        # plan says: hash: on root@nas
+```
+
+That machine needs `sh` and `sha256sum` (or `shasum`, `sha256`,
+`openssl`), not darsay or Python — one ssh call carries a short POSIX
+script, and the hashes come back. Without it, `mv` verifies by reading
+the destination back, which over the wire is a trip of the whole
+payload, and it says so before it starts — with the lines to paste, paths
+filled in: the rsync above, `darsay verify` on the host that owns the
+disk, `darsay rm` here, and the `config` line above. With the bytes
+already there, the rsync carries only the record. rsync `--delete` is
+never part of it ([FAQ](../docs/FAQ.md#should-the-rsync-use---delete)).
+`mv` refuses a partial — that is
 [`assemble --handoff`](#archive-in-halves-across-two-disks) or the recipe
 below. Which verb when: [FAQ](../docs/FAQ.md#moving-bundles).
 
@@ -640,6 +651,31 @@ then `darsay rm` the source — or [`darsay mv`](#move-a-bundle-to-another-vault
 which is those three steps with the refusals built in, and after an rsync
 lands on the copy instead of making another. `--handoff` is the verb for
 partials.
+
+---
+
+## Verify a bundle with nothing but coreutils
+
+Every bundle carries `SHA256SUMS`, the payload's hash list in the format
+`sha256sum` reads. No darsay, no Python:
+
+```bash
+cd ~/darsay/qwen--qwen3-0.6b/c1899de289a0
+sha256sum -c SHA256SUMS          # shasum -a 256 -c SHA256SUMS on a Mac
+sha256sum SHA256SUMS             # the bundle hash: inventory.bundle_hash.value in manifest.json
+```
+
+```
+model/LICENSE: OK
+model/config.json: OK
+model/model.safetensors: OK
+…
+4b0c2f…  SHA256SUMS
+```
+
+The first command checks the bytes; the second binds the list to the
+record, because darsay's bundle hash is the SHA-256 of exactly that
+text. Why it works: [FAQ](../docs/FAQ.md#can-i-verify-a-bundle-without-darsay-or-without-python).
 
 ---
 

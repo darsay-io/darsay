@@ -309,7 +309,9 @@ def test_cli_dry_run_then_migrate_then_verify(vault, capsys):
     assert main(["--vault", str(vault), "migrate", str(bundle)]) == 0
     out = capsys.readouterr().out
     assert f"Migrating {TOY}@{REV}  (schema 1.8.0 → {SCHEMA_VERSION})" in out
-    assert f"Wrote manifest.json, README.md  (schema {SCHEMA_VERSION})" in out
+    assert (
+        f"Wrote manifest.json, README.md, SHA256SUMS  (schema {SCHEMA_VERSION})" in out
+    )
     assert f"next:  darsay verify {TOY}@{REV}" in out
     assert load_manifest(bundle)["identity"]["family"] == "Toy"
 
@@ -378,7 +380,7 @@ def test_cli_migrate_json(vault, capsys):
 
     assert main(["--vault", str(vault), "migrate", str(bundle), "--json"]) == 0
     data = json.loads(capsys.readouterr().out)
-    assert data["bundles"][0]["written"] == ["manifest.json", "README.md"]
+    assert data["bundles"][0]["written"] == ["manifest.json", "README.md", "SHA256SUMS"]
     assert load_manifest(bundle)["schema_version"] == SCHEMA_VERSION
 
 

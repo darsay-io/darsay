@@ -58,7 +58,15 @@ These match the list in `CLAUDE.md` / `CONTRIBUTING.md`:
   copy already at the destination is hashed in place with only what is
   missing or differs copied, a failed verification leaves the source
   untouched and registers nothing, and a partial is refused
-  (`tests/integration/test_relocate.py`).
+  (`tests/integration/test_relocate.py`). When the vault names the host
+  that owns its disk, the hashing happens there: `test_farside.py` puts a
+  fake `ssh` on `PATH` that runs the real POSIX far-side script locally
+  with the same stdin, so the script, its hasher fallbacks, a host that
+  is down, and a host with no sha256 tool are all exercised for real.
+- `SHA256SUMS` is the inventory in coreutils format and its sha256 is the
+  bundle hash; `test_sha256sums.py` runs the real `sha256sum -c` /
+  `shasum -a 256 -c` against an archived bundle and checks that `export`
+  generates the member rather than reading a stale one.
 - The same bundle state exports to a byte-identical `.mvb.tar` (marker first,
   volatile files excluded, `darsay-verify.py` always the canonical copy).
 - Manifests record what was established; unknown is `null`; query caps are

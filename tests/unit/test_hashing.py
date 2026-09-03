@@ -105,3 +105,17 @@ def test_hash_file_interrupt_check_can_abort(tmp_path):
         hash_file(path, with_blake3=False, interrupt_check=raise_abort)
     # A None check hashes the same file normally.
     assert hash_file(path, with_blake3=False)["sha256"]
+
+
+def test_sha256sums_is_the_text_the_bundle_hash_hashes():
+    import hashlib
+
+    from darsay.hashing import bundle_hash, sha256sums_text
+
+    records = [
+        {"path": "model/b.safetensors", "sha256": "b" * 64, "size": 2},
+        {"path": "model/a.json", "sha256": "a" * 64, "size": 1},
+    ]
+    text = sha256sums_text(records)
+    assert text == f"{'a' * 64}  model/a.json\n{'b' * 64}  model/b.safetensors\n"
+    assert bundle_hash(records)["value"] == hashlib.sha256(text.encode()).hexdigest()

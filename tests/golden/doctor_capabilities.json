@@ -57,6 +57,15 @@
     {
       "auto_fix": true,
       "default": true,
+      "description": "The payload hash list SHA256SUMS is the inventory in manifest.json, so `sha256sum -c` and the bundle hash agree.",
+      "fixer_id": "bundle.sha256sums.regenerate",
+      "id": "bundle.sha256sums",
+      "risk": "low",
+      "severity": "warning"
+    },
+    {
+      "auto_fix": true,
+      "default": true,
       "description": "Transfer locks are parseable and do not belong to a dead or copied owner.",
       "fixer_id": "transfer.lock.quarantine",
       "id": "transfer.lock",
@@ -132,6 +141,15 @@
     {
       "auto_fix": true,
       "default": true,
+      "description": "The payload hash list SHA256SUMS is the inventory in manifest.json, so `sha256sum -c` and the bundle hash agree.",
+      "fixer_id": "bundle.sha256sums.regenerate",
+      "id": "bundle.sha256sums",
+      "risk": "low",
+      "severity": "warning"
+    },
+    {
+      "auto_fix": true,
+      "default": true,
       "description": "Transfer locks are parseable and do not belong to a dead or copied owner.",
       "fixer_id": "transfer.lock.quarantine",
       "id": "transfer.lock",
@@ -184,6 +202,12 @@
       "check_id": "bundle.readme",
       "default": true,
       "id": "bundle.readme.regenerate",
+      "risk": "low"
+    },
+    {
+      "check_id": "bundle.sha256sums",
+      "default": true,
+      "id": "bundle.sha256sums.regenerate",
       "risk": "low"
     },
     {

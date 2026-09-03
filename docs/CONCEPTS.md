@@ -61,8 +61,14 @@ required; rsync stays first-class.
 free-space floor an archive pauses at, a bandwidth cap, or how long to
 wait for a lost network. A vault-level file travels with an
 archive drive; `~/.config/darsay/config.toml` applies to every vault on a
-machine. `darsay config` shows what applies and why.
-[Incremental transfer](INCREMENTAL.md#6-session-budgets).
+machine. One table is the vault file's alone: `[host]` names the machine
+that owns the vault's disk and the vault's path there, and with it
+`verify`, `mv`, and `cp` hash on that machine instead of reading a
+network mount back — it needs `sh` and `sha256sum` there, not darsay.
+`darsay config` shows what applies and why; `darsay config KEY=VALUE`
+writes the vault file.
+[Incremental transfer](INCREMENTAL.md#6-session-budgets),
+[FAQ](FAQ.md#how-do-i-stop-mv-and-verify-reading-a-nas-back-over-the-wire).
 
 ## Catalog
 
@@ -105,7 +111,7 @@ Four parts, always:
 |---|---|---|
 | Payload (`model/` or `data/`) | Byte-exact snapshot of upstream | Frozen after archive |
 | `manifest.json` | What was established, never guessed | Tool may add facts; never fabricates |
-| Generated views (`README.md`, `VERIFICATION.md`) | Human-readable projections | Regenerated |
+| Generated views (`README.md`, `VERIFICATION.md`, `SHA256SUMS`) | Human-readable projections; `SHA256SUMS` is the inventory in coreutils format, so `sha256sum -c` verifies the payload with no darsay and `sha256sum SHA256SUMS` is the bundle hash | Regenerated |
 | `curation.md` | Your notes | Yours; never overwritten once it exists |
 
 The **bundle hash** covers the payload only. Tool-written state at the

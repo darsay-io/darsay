@@ -203,3 +203,58 @@ def test_config_renders_rate_and_duration():
     assert by_name["transfer.max_rate"].render(5 * 1024**2) == "5.0 MiB/s"
     assert by_name["transfer.max_offline"].render(3600.0) == "1h"
     assert "first failure" in by_name["transfer.max_offline"].render(0)
+
+
+def test_host_settings_come_from_the_vault_file_alone(monkeypatch, tmp_path, capsys):
+    from darsay.config import setting
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    assert setting("host", "ssh", vault) == ""
+    vault_config_path(vault).write_text(
+        '[host]\nssh = "root@nas"\npath = "/volume1/darsay/vault"\n', encoding="utf-8"
+    )
+    assert setting("host", "ssh", vault) == "root@nas"
+    assert setting("host", "path", vault) == "/volume1/darsay/vault"
+    assert resolved_settings(vault)[("host", "ssh")]["origin"] == str(
+        vault_config_path(vault)
+    )
+
+    user = tmp_path / "user.toml"
+    user.write_text('[host]\nssh = "me@laptop"\n', encoding="utf-8")
+    monkeypatch.setenv("DARSAY_CONFIG", str(user))
+    other = tmp_path / "other"
+    other.mkdir()
+    assert setting("host", "ssh", other) == ""
+    assert (
+        "belongs in that vault's config.toml (ignored here)" in capsys.readouterr().err
+    )
+
+
+def test_write_vault_settings_keeps_comments_and_replaces_keys(tmp_path, no_env_floor):
+    from darsay.config import setting, write_vault_settings
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    path = write_vault_settings(vault, {"host.ssh": "root@nas", "host.path": "/v"})
+    assert path == vault_config_path(vault)
+    assert path.read_text(encoding="utf-8") == '[host]\nssh = "root@nas"\npath = "/v"\n'
+
+    path.write_text(
+        '# the drive\'s own floor\n[transfer]\nmin_free = "10G"  # keep room\n\n'
+        '[host]\nssh = "old@nas"  # stale\n',
+        encoding="utf-8",
+    )
+    write_vault_settings(vault, {"host.ssh": "root@nas", "host.path": "/volume1/v"})
+    text = path.read_text(encoding="utf-8")
+    assert text == (
+        '# the drive\'s own floor\n[transfer]\nmin_free = "10G"  # keep room\n\n'
+        '[host]\nssh = "root@nas"\npath = "/volume1/v"\n'
+    )
+    assert setting("host", "ssh", vault) == "root@nas"
+    assert setting("transfer", "min_free", vault) == 10 * 1024**3
+
+    with pytest.raises(SystemExit, match="unknown setting 'host.port'"):
+        write_vault_settings(vault, {"host.port": "22"})
+    with pytest.raises(SystemExit, match="transfer.min_free"):
+        write_vault_settings(vault, {"transfer.min_free": "lots"})

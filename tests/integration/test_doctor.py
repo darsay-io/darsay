@@ -303,3 +303,37 @@ def test_parent_directory_swap_cannot_redirect_readme_write(
     assert outside_readme.read_bytes() == outside_original
     assert (parked / "README.md").read_bytes() == b"stale generated output\n"
     assert not list(parked.glob("*.doctor.tmp.*"))
+
+
+def test_doctor_regenerates_a_stale_hash_list_and_undoes_it(
+    vault, test_provider, capsys
+):
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    sums = bundle / "SHA256SUMS"
+    good = sums.read_bytes()
+    sums.write_bytes(b"edited by hand\n")
+
+    assert main(["--vault", str(vault), "doctor", "--json"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    finding = next(
+        f for f in report["findings"] if f["check_id"] == "bundle.sha256sums"
+    )
+    assert finding["fixer_id"] == "bundle.sha256sums.regenerate"
+
+    argv = ["--vault", str(vault), "doctor", "fix", "--only", "bundle.sha256sums"]
+    assert main([*argv, "--json"]) == 0
+    fixed = json.loads(capsys.readouterr().out)
+    assert sums.read_bytes() == good
+    assert fixed["actions"][0]["fixer_id"] == "bundle.sha256sums.regenerate"
+
+    assert (
+        main(["--vault", str(vault), "doctor", "undo", fixed["run_id"], "--json"]) == 0
+    )
+    capsys.readouterr()
+    assert sums.read_bytes() == b"edited by hand\n"
+
+    sums.unlink()
+    assert main([*argv, "--json"]) == 0
+    capsys.readouterr()
+    assert sums.read_bytes() == good

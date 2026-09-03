@@ -96,7 +96,8 @@ repo name and say so. Whether bytes are a negative or a print is decided
 from headers and hashes, never from a name.
 
 **The formats outlive the tool.** `manifest.json`, `catalog.json`, and
-`.mvb.tar` are plain, documented, and sufficient without darsay.
+`.mvb.tar` are plain, documented, and sufficient without darsay — and
+`SHA256SUMS` lets `sha256sum` alone check a payload against its record.
 
 **Fix forward.** darsay is greenfield. When the model of the models
 improves, the schema follows it — no compatibility knobs, no fields kept

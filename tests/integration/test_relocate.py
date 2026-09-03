@@ -515,6 +515,10 @@ def test_mv_onto_existing_over_a_network_mount_prints_the_local_way(
         "path for that directory"
     ) in text
     assert f"darsay rm {BUNDLE_ID} --yes    # here, once that passed" in text
+    assert (
+        "Or name the host that owns the disk once, and every verb hashes there" in text
+    )
+    assert f"darsay --vault {shlex.quote(str(vault))} config host.ssh=" in text
     assert "Continuing over the wire" not in text, "a dry run continues nothing"
 
     logs.clear()

@@ -2493,6 +2493,64 @@ def is_network_filesystem(path: Path) -> bool | None:
     return _deepest_mount(os.path.realpath(path), mounts)
 
 
+def _darwin_mount_sources(text: str) -> list[tuple[str, str]]:
+    """``mount(8)`` output → ``[(mount point, source), …]``."""
+    pairs = []
+    for line in text.splitlines():
+        head, sep, _flags = line.rpartition(" (")
+        source, on, mount_point = head.partition(" on ")
+        if sep and on:
+            pairs.append((mount_point, source))
+    return pairs
+
+
+def _linux_mount_sources(text: str) -> list[tuple[str, str]]:
+    """``/proc/self/mountinfo`` → ``[(mount point, source), …]``."""
+    pairs = []
+    for line in text.splitlines():
+        head, sep, tail = line.partition(" - ")
+        fields = head.split()
+        rest = tail.split()
+        if not sep or len(fields) < 5 or len(rest) < 2:
+            continue
+        mount_point = fields[4]
+        for escape, char in _MOUNTINFO_ESCAPES.items():
+            mount_point = mount_point.replace(escape, char)
+        pairs.append((mount_point, rest[1]))
+    return pairs
+
+
+def mount_source(path: Path) -> str | None:
+    """What the deepest mount holding ``path`` was mounted from.
+
+    ``//user@host/share`` for SMB, ``host:/export`` for NFS — the string
+    that names the host that owns the disk. ``None`` when unknowable.
+    """
+    try:
+        if sys.platform == "darwin":
+            out = subprocess.run(
+                ["mount"], check=True, capture_output=True, text=True
+            ).stdout
+            pairs = _darwin_mount_sources(out)
+        elif sys.platform.startswith("linux"):
+            pairs = _linux_mount_sources(
+                Path("/proc/self/mountinfo").read_text(encoding="utf-8")
+            )
+        else:
+            return None
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    target = os.path.realpath(path)
+    best: tuple[int, str] | None = None
+    for mount_point, source in pairs:
+        root = mount_point.rstrip("/")
+        if root and target != root and not target.startswith(root + "/"):
+            continue
+        if best is None or len(root) > best[0]:
+            best = (len(root), source)
+    return None if best is None else best[1]
+
+
 def _files_to_hash(
     payload_dir: Path, ledger: dict, *, rehash: bool
 ) -> list[tuple[str, int]]:

@@ -153,14 +153,42 @@ travel harmlessly: `hydration.json` points at the old vault's `.runtime`,
 so `darsay hydrate` again there (or `darsay dehydrate` it); `darsay doctor`
 flags a record whose interpreter is gone.
 
+### How do I stop `mv` and `verify` reading a NAS back over the wire?
+
+Tell the vault, once, which machine owns its disk and where the vault is
+on that machine:
+
+```bash
+darsay --vault /Volumes/PIXEL/darsay/vault config host.ssh=root@nas host.path=/volume1/darsay/vault
+```
+
+That writes a `[host]` table into the vault's own `config.toml` — it is
+a fact about that disk, so it lives with the disk and every machine that
+mounts it reads it; a `[host]` in your user file is ignored with a
+warning. From then on `verify`, `mv`, and `cp` hash the payload *on that
+machine*: one ssh call carries a fifteen-line POSIX shell script on
+stdin, the machine hashes the files where they are, and one line per
+file comes back. The plan says so — `hash: on root@nas` — and the
+network warning is gone. In the landing above, what crosses the wire is
+56 hash lines instead of 200.7 GiB.
+
+The machine needs `sh`, `find`, and one of `sha256sum`, `shasum`,
+`sha256`, or `openssl`. A Ubiquiti, Synology, QNAP, or TrueNAS box has
+those; so does a Mac or any BSD. It does not need Python, rsync, or
+darsay. `host.path` is the vault's path as that machine sees it — over
+ssh, `df` shows where the share lives. A machine that cannot be reached,
+or has none of those tools, is a refusal that names the fix; darsay never
+quietly falls back to reading 200 GiB over the wire because ssh was down.
+
 ### `mv` warned that my destination is a network mount. Why, and what should I do?
 
 Verifying at the destination means reading the payload back. Over SMB or
 NFS that is every byte crossing the wire — a second trip for a fresh
 copy, and for a copy already there, one read of what an rsync just wrote
-— the thing darsay promises never to do *silently*. So the plan names the
-vault, says what the wire would carry, and prints the local way with the
-real paths filled in:
+— the thing darsay promises never to do *silently*. The lasting fix is
+the question above: name the host that owns the disk once. Until then,
+the plan names the vault, says what the wire would carry, and prints the
+local way with the real paths filled in:
 
 ```
   warning:  /Volumes/PIXEL/darsay/vault is a network mount: hashing the 56 payload files already there reads 200.7 GiB back over the wire. To hash the bytes where the disk is instead:
@@ -258,6 +286,35 @@ is missing or differs is copied, and the replica entry — keyed by
 location — updates its timestamp rather than listing the disk twice. Or
 rsync into the same `<name>/<rev>/` layout and `darsay verify` there —
 the bytes are equally good; only the bookkeeping differs.
+
+## Verifying
+
+### Can I verify a bundle without darsay, or without Python?
+
+Yes, with coreutils alone. Every bundle carries `SHA256SUMS` at its root:
+the payload's hash list in the format `sha256sum` has read for decades,
+one `<sha256>  <path>` line per payload file, sorted by path. From the
+bundle root:
+
+```bash
+sha256sum -c SHA256SUMS      # every payload file: OK, or FAILED (shasum -a 256 -c on a Mac)
+sha256sum SHA256SUMS         # prints inventory.bundle_hash.value from manifest.json
+```
+
+The second line is not a coincidence. darsay's bundle hash has always
+been the SHA-256 of exactly those sorted lines, so the list is bound to
+the record by one command and the bytes to the list by the other. A
+reader in 2040 with `tar` and `sha256sum` can open an export and prove
+it whole. `darsay-verify.py`, the stdlib Python verifier that also ships
+in every export, does the complete check — extra files, completeness,
+the manifest read as a whole — when Python is there.
+
+`SHA256SUMS` is a generated view, like `README.md`: `archive` writes it,
+`regen`, `verify`, and `migrate` rewrite it, `export` generates it from
+the record rather than reading the disk, and `darsay doctor` reports one
+that is missing or does not match the inventory (and regenerates it under
+`--fix`). Never edit it; the inventory in `manifest.json` is the truth it
+is derived from. [MVB format → Manual recovery](MVB-FORMAT.md#manual-recovery-without-darsay).
 
 ## Older records
 

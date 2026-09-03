@@ -44,6 +44,12 @@ are not optional, and *master* is not one of them.
   place, only what is missing or differs copied, `method: adopt` — and
   never refused or re-copied; partials are refused, `assemble --handoff`
   is their verb),
+  `farside.py` (the host that owns a vault's disk: `[host] ssh` / `path`
+  in the vault's `config.toml`; `hash_where_it_lives` is the one door
+  `verify` / `mv` / `cp` hash a payload through — on that host over one
+  ssh call carrying a POSIX `sh` script that needs only `sha256sum` /
+  `shasum` / `sha256` / `openssl`, else here; an unreachable host is a
+  refusal naming the fix, never a silent fall back to the wire),
   `migrate.py` (`darsay migrate`: brings a record written under an earlier
   schema major to the schema this darsay writes — offline, from the record
   and the payload, hashing nothing; the one place an older major is read;
@@ -130,7 +136,9 @@ are not optional, and *master* is not one of them.
   dest's ledger (size match), downloads only what is still missing, and
   adjusts metadata. It must not re-download a file whose digest matches,
   and it must not pull dest back over a network mount to re-hash a copy.
-  Hash dest where it is a local disk (`assemble --rehash` / `verify`).
+  Hash dest where it is a local disk (`assemble --rehash` / `verify`), or
+  on the host that owns it when the vault's `config.toml` names one
+  (`[host]`, `farside.py`).
   **This stays true forever:** `darsay mv` and `darsay cp` are that same
   contract folded into verbs (copy — or, onto a copy already there, hash
   in place and copy only what is missing or differs — verify where it
@@ -165,6 +173,13 @@ are not optional, and *master* is not one of them.
   a re-download.
 - **Verify before register:** `import` must fully re-hash a payload before a
   bundle enters the vault; failures register nothing and exit non-zero.
+- **The verification outlives the tool:** `SHA256SUMS` at the bundle root
+  is the inventory in coreutils format, sorted by path, and the bundle
+  hash is the sha256 of exactly that text — so `sha256sum -c SHA256SUMS`
+  checks the bytes and `sha256sum SHA256SUMS` matches the record with no
+  darsay and no Python. It is a derived view (`archive`, `regen`,
+  `verify`, `migrate` write it; `export` generates it; `doctor` repairs
+  it), never a source of truth and never hand-edited.
 - **Generated vs hand-edited:** bundle `README.md` is a derived view
   (`regen`); `curation.md` is the curator's file and must never be
   overwritten by a generated view once it exists. `mv` / `cp` carry the

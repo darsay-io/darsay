@@ -212,6 +212,7 @@ vault/qwen--qwen3-0.6b/<revision12>/
 ├── model/              # immutable payload: pristine snapshot of the upstream repo
 ├── manifest.json       # machine-readable record — the source of truth
 ├── README.md           # human-readable summary, generated from the manifest
+├── SHA256SUMS          # the payload's hash list: `sha256sum -c` verifies it with no darsay
 ├── VERIFICATION.md     # latest verification report
 ├── verification.json   # verification history (last 50 runs)
 ├── curation.md         # curator's notes — the only hand-edited file
@@ -265,7 +266,8 @@ archiving**; the bundle hash covers it alone.
 | Put it on another disk | `darsay mv qwen--qwen3-0.6b /Volumes/big` — verifies the copy, then removes the source. rsync into `<name>/<rev>/` is just as valid, always; `mv` after an rsync hashes the copy in place and copies nothing that matched |
 | Keep a verified backup copy | `darsay cp qwen--qwen3-0.6b /Volumes/backup` — verified there; both manifests record the replica |
 | Delete a bundle | `darsay rm qwen--qwen3-0.6b --yes` |
-| Re-hash and compare | `darsay verify qwen--qwen3-0.6b` |
+| Re-hash and compare | `darsay verify qwen--qwen3-0.6b` — or, with no darsay at all, `sha256sum -c SHA256SUMS` in the bundle |
+| Keep a NAS vault from being read back over the wire | `darsay --vault /Volumes/nas/vault config host.ssh=root@nas host.path=/volume1/vault` once; `verify`, `mv`, and `cp` then hash on the NAS itself, which needs only `sh` and `sha256sum` |
 | Diagnose the whole vault | `darsay doctor` (offline; `--fix` is journaled and undoable) |
 | Pack one file for a USB drive | `darsay export qwen--qwen3-0.6b -o /backups` |
 | Bring that file back | `darsay import /backups/<file>.mvb.tar` |

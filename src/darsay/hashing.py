@@ -85,13 +85,37 @@ def iter_payload_files(payload_root: Path):
     return files
 
 
+SHA256SUMS_NAME = "SHA256SUMS"
+
+
+def sha256sums_text(file_records: list[dict]) -> str:
+    """The payload's hash list in coreutils format, sorted by path.
+
+    One ``<sha256>  <path>`` line per payload file, paths from the bundle
+    root, trailing newline. ``sha256sum -c SHA256SUMS`` from the bundle
+    root verifies the payload with no darsay and no Python, and the
+    bundle hash is the sha256 of exactly this text — so ``sha256sum
+    SHA256SUMS`` is the value the manifest records.
+    """
+    return (
+        "\n".join(
+            f"{r['sha256']}  {r['path']}"
+            for r in sorted(file_records, key=lambda r: r["path"])
+        )
+        + "\n"
+    )
+
+
+def write_sha256sums(bundle_dir: Path, manifest: dict) -> Path:
+    """Write the bundle's ``SHA256SUMS`` from its recorded inventory."""
+    path = bundle_dir / SHA256SUMS_NAME
+    path.write_text(sha256sums_text(manifest["inventory"]["files"]), encoding="utf-8")
+    return path
+
+
 def bundle_hash(file_records: list[dict], payload_root: str = "model") -> dict:
-    """Deterministic hash over the payload: sha256 of 'sha256  path' lines, sorted by path."""
-    lines = [
-        f"{r['sha256']}  {r['path']}"
-        for r in sorted(file_records, key=lambda r: r["path"])
-    ]
-    digest = hashlib.sha256(("\n".join(lines) + "\n").encode("utf-8")).hexdigest()
+    """Deterministic hash over the payload: sha256 of the ``SHA256SUMS`` text."""
+    digest = hashlib.sha256(sha256sums_text(file_records).encode("utf-8")).hexdigest()
     return {
         "algorithm": "sha256-of-sorted-sha256-lines",
         "value": digest,

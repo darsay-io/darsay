@@ -21,10 +21,17 @@ Files are TOML::
     max_rate = "5M"      # cap network transfer at 5 MiB/s; 0 is unlimited
     max_offline = "1h"   # keep waiting for the network this long, then pause
 
+    [host]                            # the vault file only: a fact about this disk
+    ssh = "root@nas"                  # the host that owns it, as ssh names it
+    path = "/volume1/darsay/vault"    # this vault's path on that host
+
 Unknown keys in a known table warn (a typo must not silently disarm a
 guard); unknown tables are ignored, so a vault config written by a newer
 darsay still loads here. ``darsay config`` prints the effective values
-and which layer set each one.
+and which layer set each one; ``darsay config KEY=VALUE`` writes the
+vault file. ``[host]`` is read from the vault file alone — it describes
+one disk, not a machine's preference — and with it ``verify``, ``mv``,
+and ``cp`` hash on that host instead of over the wire (``farside.py``).
 """
 
 from __future__ import annotations
@@ -139,10 +146,18 @@ class Setting:
     example: str
     env: str | None = None
     flag: str | None = None
+    # A fact about one vault's disk, read from that vault's file alone.
+    vault_only: bool = False
 
     @property
     def name(self) -> str:
         return f"{self.table}.{self.key}"
+
+
+def _text(value: object) -> str:
+    if isinstance(value, bool) or not isinstance(value, str):
+        raise ValueError(f"expected a string, got {value!r}")
+    return value.strip()
 
 
 # The registry. Every layer — file parsing, env overrides, ``darsay
@@ -192,6 +207,29 @@ SETTINGS: tuple[Setting, ...] = (
         example='"jeremy-mbp"',
         env="DARSAY_BOARD_CLIENT",
     ),
+    Setting(
+        table="host",
+        key="ssh",
+        default="",
+        parse=_text,
+        render=lambda value: str(value) or "(none: payloads are hashed here)",
+        help=(
+            "the host that owns this vault's disk, as ssh names it; with host.path, "
+            "verify / mv / cp hash there instead of reading the mount back"
+        ),
+        example='"root@nas"',
+        vault_only=True,
+    ),
+    Setting(
+        table="host",
+        key="path",
+        default="",
+        parse=_text,
+        render=lambda value: str(value) or "(none)",
+        help="this vault's path on that host",
+        example='"/volume1/darsay/vault"',
+        vault_only=True,
+    ),
 )
 _BY_SLOT = {(item.table, item.key): item for item in SETTINGS}
 _TABLES = {item.table for item in SETTINGS}
@@ -223,8 +261,12 @@ def _toml_module():
     return tomllib
 
 
-def _read_file(path: Path, *, required: bool) -> dict:
-    """One config file as validated ``{(table, key): value}`` settings."""
+def _read_file(path: Path, *, required: bool, vault_file: bool = True) -> dict:
+    """One config file as validated ``{(table, key): value}`` settings.
+
+    A ``vault_only`` setting in the user file is a category error — it
+    describes one disk, not this machine — so it warns and is ignored.
+    """
     try:
         text = path.read_bytes()
     except FileNotFoundError:
@@ -261,11 +303,84 @@ def _read_file(path: Path, *, required: bool) -> dict:
                     file=sys.stderr,
                 )
                 continue
+            if item.vault_only and not vault_file:
+                print(
+                    f"warning: {path}: {item.name} describes one vault's disk and "
+                    "belongs in that vault's config.toml (ignored here)",
+                    file=sys.stderr,
+                )
+                continue
             try:
                 values[(table, key)] = item.parse(raw)
             except ValueError as exc:
                 raise SystemExit(f"error: {path}: {item.name}: {exc}") from None
     return values
+
+
+def write_vault_settings(vault: Path, assignments: dict[str, str]) -> Path:
+    """Set ``table.key`` values in ``<vault>/config.toml``, keeping the rest.
+
+    Each value is validated by its setting's parser before anything is
+    written, and written as a TOML string (every setting reads one). A
+    present ``key =`` line in the table is replaced; a missing one is
+    added after the table header; a missing table is appended. Comments
+    and other lines stay where they are.
+    """
+    items = {}
+    for name, raw in assignments.items():
+        table, _, key = name.partition(".")
+        item = _BY_SLOT.get((table, key))
+        if item is None:
+            known = ", ".join(entry.name for entry in SETTINGS)
+            raise SystemExit(f"error: unknown setting {name!r}; settings: {known}")
+        try:
+            item.parse(raw)
+        except ValueError as exc:
+            raise SystemExit(f"error: {item.name}: {exc}") from None
+        items[(table, key)] = raw
+    path = vault_config_path(vault)
+    lines = path.read_text(encoding="utf-8").splitlines() if path.is_file() else []
+    for (table, key), raw in items.items():
+        rendered = f'{key} = "{raw}"'
+        header = next(
+            (i for i, line in enumerate(lines) if line.strip() == f"[{table}]"), None
+        )
+        if header is None:
+            if lines and lines[-1].strip():
+                lines.append("")
+            lines += [f"[{table}]", rendered]
+            continue
+        end = next(
+            (
+                i
+                for i in range(header + 1, len(lines))
+                if lines[i].strip().startswith("[")
+            ),
+            len(lines),
+        )
+        slot = next(
+            (
+                i
+                for i in range(header + 1, end)
+                if re.match(rf"\s*{re.escape(key)}\s*=", lines[i])
+            ),
+            None,
+        )
+        if slot is None:
+            # After the table's last setting, before any blank lines that
+            # separate it from the next table.
+            insert_at = end
+            while insert_at > header + 1 and not lines[insert_at - 1].strip():
+                insert_at -= 1
+            lines.insert(insert_at, rendered)
+        else:
+            lines[slot] = rendered
+    text = "\n".join(lines) + "\n"
+    toml = _toml_module()
+    if toml is not None:
+        toml.loads(text)  # a file this darsay cannot read back is never written
+    path.write_text(text, encoding="utf-8")
+    return path
 
 
 def resolved_settings(vault: Path | None = None) -> dict:
@@ -278,11 +393,12 @@ def resolved_settings(vault: Path | None = None) -> dict:
         (item.table, item.key): {"value": item.default, "origin": "default"}
         for item in SETTINGS
     }
-    layers = [(user_config_path(), bool(os.environ.get("DARSAY_CONFIG")))]
+    layers = [(user_config_path(), bool(os.environ.get("DARSAY_CONFIG")), False)]
     if vault is not None:
-        layers.append((vault_config_path(vault), False))
-    for path, required in layers:
-        for slot, value in _read_file(path, required=required).items():
+        layers.append((vault_config_path(vault), False, True))
+    for path, required, vault_file in layers:
+        values = _read_file(path, required=required, vault_file=vault_file)
+        for slot, value in values.items():
             resolved[slot] = {"value": value, "origin": str(path)}
     for item in SETTINGS:
         if item.env is None:

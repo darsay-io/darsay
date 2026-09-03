@@ -7,6 +7,8 @@ Bundle layout:
                           (data/ for dataset bundles — the registry's payload_root)
         manifest.json     machine-readable record (schema.py / SCHEMA_VERSION)
         README.md         human-readable summary, regenerable from the manifest
+        SHA256SUMS        the payload's hash list, coreutils format: `sha256sum -c`
+                          verifies with no darsay; its own sha256 is the bundle hash
         VERIFICATION.md   latest verification report
         verification.json verification history
         curation.md       curator notes; the only file meant to be hand-edited
@@ -677,9 +679,11 @@ def _register_bundle(
     write_manifest(bundle_dir, manifest)
     _write_curation_template(bundle_dir, manifest)
 
+    from .hashing import write_sha256sums
     from .readme_gen import write_bundle_readme
 
     write_bundle_readme(bundle_dir, manifest)
+    write_sha256sums(bundle_dir, manifest)
 
     from .verify import write_verification_report
 

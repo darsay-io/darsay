@@ -252,6 +252,7 @@ def test_dry_run_is_offered_by_every_writing_command():
         "export",
         "import",
         "migrate",
+        "config",
         "mv",
         "cp",
         "assemble",
@@ -265,7 +266,7 @@ def test_dry_run_is_offered_by_every_writing_command():
     for command in writing:
         assert "--dry-run" in flags[command], command
     # Read-only commands do not pretend to have anything to skip.
-    for command in ("list", "du", "config", "info", "verify", "smoke", "complete"):
+    for command in ("list", "du", "info", "verify", "smoke", "complete"):
         assert "--dry-run" not in flags[command], command
 
 

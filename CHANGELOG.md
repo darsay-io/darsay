@@ -11,6 +11,44 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Added
 
+- **`SHA256SUMS` — verify a bundle with coreutils alone.** Every bundle
+  now carries the payload's hash list at its root in the format
+  `sha256sum` has read for decades: one `<sha256>  <path>` line per
+  payload file, sorted by path. `sha256sum -c SHA256SUMS` from the bundle
+  root checks the bytes with no darsay and no Python; `sha256sum
+  SHA256SUMS` prints the manifest's `inventory.bundle_hash.value`,
+  because the bundle hash has always been the SHA-256 of exactly that
+  text — the list is bound to the record by one command and the bytes to
+  the list by the other. It is a derived view: `archive` writes it,
+  `regen`, `verify`, and `migrate` rewrite it, `export` generates it into
+  the tar from the record (**MVB format 1.3**; an on-disk copy is ignored
+  like `darsay-verify.py`), `import` unpacks it, and `darsay doctor`
+  reports one that is missing or does not match the inventory
+  (`bundle.sha256sums`, a stat-free check that runs under `--quick`) and
+  regenerates it under `--fix`, journaled and undoable like the README.
+  `darsay-verify.py` stays as the complete check when Python is present.
+- **`[host]` — hash on the machine that owns the disk.** A vault's own
+  `config.toml` can name the machine that owns its disk and the vault's
+  path there (`[host] ssh = "root@nas"`, `path = "/volume1/darsay/vault"`;
+  `darsay --vault VAULT config host.ssh=… host.path=…` writes it, keeping
+  comments). With it, `verify`, `mv`, and `cp` hash the payload on that
+  machine over one ssh call: a fifteen-line POSIX `sh` script goes over on
+  stdin, the machine hashes the files where they are with whichever of
+  `sha256sum`, `shasum`, `sha256`, or `openssl` it has, and one line per
+  file comes back — no Python, rsync, or darsay needed there, so a
+  Ubiquiti or Synology box qualifies. A landing hashes twice there, the
+  files already present and then the copies; a fresh copy hashes its
+  staging directory by its path on the host. The plan says `hash: on
+  root@nas` and the network warning is gone. A machine that is down or
+  has no sha256 tool is a refusal naming the fix, never a silent fall
+  back to reading the mount. `[host]` is read from the vault file alone;
+  a user file that sets it is warned about and ignored. `assemble
+  --rehash` still hashes here. Without `[host]`, the network warning now
+  ends with the `config` line to run, the host prefilled from the SMB or
+  NFS mount source when it can be read.
+- `darsay config KEY=VALUE …` writes the vault's `config.toml`; `-n`
+  prints what it would write. `darsay verify` and the landing pass
+  announce each file over 256 MiB as it is hashed, here or there.
 - **The network-mount warning ends with the commands to paste.** When a
   `mv` / `cp` destination is on SMB or NFS, the plan names the vault,
   says what the wire would carry — two trips of the payload for a fresh

@@ -306,7 +306,7 @@ def test_migration_plan_states_what_would_be_written(tmp_path):
     assert (plan["from_schema"], plan["to_schema"]) == ("1.0.0", SCHEMA_VERSION)
     assert plan["payload"]["files"] == 7
     assert plan["payload"]["missing"] == []
-    assert plan["writes"] == ["manifest.json", "README.md"]
+    assert plan["writes"] == ["manifest.json", "README.md", "SHA256SUMS"]
     assert plan["ledger"] is False
 
 
@@ -351,7 +351,7 @@ def test_dry_run_writes_nothing_and_a_real_run_records_the_move(tmp_path):
     assert not (bundle / "README.md").exists()
 
     plan = migrate_bundle(bundle, progress=silent)
-    assert plan["written"] == ["manifest.json", "README.md"]
+    assert plan["written"] == ["manifest.json", "README.md", "SHA256SUMS"]
     manifest = load_manifest(bundle)
     (entry,) = manifest["archive"]["migrations"]
     assert (entry["from_schema"], entry["to_schema"]) == ("1.0.0", SCHEMA_VERSION)

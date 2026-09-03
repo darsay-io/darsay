@@ -1414,6 +1414,24 @@ def cmd_config(args) -> int:
         "user": user_config_path(),
         "vault": vault_config_path(vault),
     }
+    if args.assignments:
+        from .config import write_vault_settings
+
+        assignments = {}
+        for text in args.assignments:
+            name, sep, value = text.partition("=")
+            if not sep or not name.strip():
+                raise SystemExit(f"error: expected KEY=VALUE, got {text!r}")
+            assignments[name.strip()] = value.strip()
+        if args.dry_run:
+            for name, value in assignments.items():
+                print(f'Would set {name} = "{value}" in {files["vault"]}')
+            _dry_run_done(args, "nothing written", "set")
+            return 0
+        path = write_vault_settings(vault, assignments)
+        for name, value in assignments.items():
+            print(f'Set {name} = "{value}" in {path}')
+        return 0
     resolved = resolved_settings(vault)
     if args.json:
         payload = {
@@ -1811,18 +1829,20 @@ def cmd_envs(args) -> int:
 
 def cmd_regen(args) -> int:
     from .archiver import load_manifest
+    from .hashing import SHA256SUMS_NAME, write_sha256sums
     from .readme_gen import write_bundle_readme
 
     bundle = _bundle_dir(args)
+    manifest = load_manifest(bundle)
     readme = bundle / "README.md"
-    added, removed = write_bundle_readme(
-        bundle, load_manifest(bundle), dry_run=args.dry_run
-    )
+    added, removed = write_bundle_readme(bundle, manifest, dry_run=args.dry_run)
     if args.dry_run:
         print(f"Would regenerate {readme}{_delta_note(added, removed)}")
+        print(f"Would regenerate {bundle / SHA256SUMS_NAME}")
         _dry_run_done(args, "nothing written", "regenerate")
         return 0
     print(f"Regenerated {readme}{_delta_note(added, removed)}")
+    print(f"Regenerated {write_sha256sums(bundle, manifest)}")
     return 0
 
 
@@ -2282,8 +2302,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="machine-readable totals")
     p.set_defaults(func=cmd_du)
 
-    p = add_cmd("config", help="show effective settings and which config file set them")
+    p = add_cmd(
+        "config",
+        help=(
+            "show effective settings and which config file set them; with "
+            "KEY=VALUE, write the vault's config.toml"
+        ),
+    )
+    p.add_argument(
+        "assignments",
+        nargs="*",
+        metavar="KEY=VALUE",
+        help=(
+            "settings to write to <vault>/config.toml, e.g. host.ssh=root@nas "
+            "host.path=/volume1/darsay/vault (the host that owns the vault's disk)"
+        ),
+    )
     p.add_argument("--json", action="store_true", help="machine-readable settings")
+    _add_dry_run(p, "with KEY=VALUE, print what would be written; write nothing")
     p.set_defaults(func=cmd_config)
 
     p = add_cmd(

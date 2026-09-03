@@ -30,17 +30,20 @@ The default pass checks:
   digests match each manifest, without writing verification history;
 - whether generated `README.md` files match `manifest.json` plus
   `curation.md`;
+- whether each bundle's `SHA256SUMS` is its inventory in coreutils format
+  (a stat-free check that runs under `--quick` too);
 - whether a transfer lock is malformed, copied, or owned by a dead local
   process;
 - whether disposable `hydration.json` records parse and name an existing
   interpreter.
 
-Only three low-risk repair families are enabled:
+Only four low-risk repair families are enabled:
 
 1. Regenerate a derived bundle `README.md` from its authoritative inputs.
-2. Quarantine a stale transfer lock after proving it is malformed, copied, or
+2. Regenerate a derived `SHA256SUMS` from the manifest's inventory.
+3. Quarantine a stale transfer lock after proving it is malformed, copied, or
    owned by a dead process on this host.
-3. Quarantine an unreadable/stale hydration record. Hydration is disposable;
+4. Quarantine an unreadable/stale hydration record. Hydration is disposable;
    the next `run` or `hydrate` rebuilds it.
 
 Malformed manifests and configuration remain manual findings. The doctor
@@ -50,7 +53,7 @@ prove that remote owner is dead.
 
 ### Current diagnostic scope
 
-The eight checks above are the complete current registry, not a claim to cover
+The nine checks above are the complete current registry, not a claim to cover
 every possible damaged archive or runtime state. In particular, doctor does not
 yet provide dedicated findings for transfer-ledger semantics, interrupted
 imports, MVB structure, shared runtime-environment leases, installed package or

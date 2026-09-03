@@ -100,6 +100,14 @@ CHECKS: tuple[Check, ...] = (
         "low",
     ),
     Check(
+        "bundle.sha256sums",
+        "The payload hash list SHA256SUMS is the inventory in manifest.json, "
+        "so `sha256sum -c` and the bundle hash agree.",
+        "warning",
+        "bundle.sha256sums.regenerate",
+        "low",
+    ),
+    Check(
         "transfer.lock",
         "Transfer locks are parseable and do not belong to a dead or copied owner.",
         "warning",
@@ -120,6 +128,7 @@ FIXERS = {check.fixer: check.id for check in CHECKS if check.fixer is not None}
 _DEFAULT_FIXER = object()
 _FIXER_MUTATION_SCOPE = {
     "bundle.readme.regenerate": ("README.md", "WriteFile"),
+    "bundle.sha256sums.regenerate": ("SHA256SUMS", "WriteFile"),
     "transfer.lock.quarantine": ("transfer.lock", "Rename"),
     "runtime.hydration.quarantine": ("hydration.json", "Rename"),
 }
@@ -1540,6 +1549,7 @@ def _scan(
         "bundle.paths",
         "bundle.payload",
         "bundle.readme",
+        "bundle.sha256sums",
         "transfer.lock",
         "runtime.hydration",
     }
@@ -1569,6 +1579,7 @@ def _scan(
             "bundle.paths",
             "bundle.payload",
             "bundle.readme",
+            "bundle.sha256sums",
         }
         if enabled_checks & manifest_checks and manifest_path.is_symlink():
             check_id = (
@@ -1708,6 +1719,56 @@ def _scan(
                                 "bundle.readme",
                                 "README cannot be regenerated safely from current inputs",
                                 bundle / "README.md",
+                                evidence=str(exc),
+                                fixer=None,
+                            )
+                        )
+                # The hash list is the inventory in coreutils format; its
+                # own sha256 is the bundle hash. Cheap — no payload read —
+                # so it runs under --quick too.
+                sums = bundle / "SHA256SUMS"
+                if enabled("bundle.sha256sums") and sums.is_symlink():
+                    findings.append(
+                        _finding(
+                            "bundle.sha256sums",
+                            "SHA256SUMS is a symlink and will not be followed",
+                            sums,
+                            fixer=None,
+                        )
+                    )
+                elif enabled("bundle.sha256sums") and readme_prerequisites_healthy:
+                    from .hashing import sha256sums_text
+
+                    try:
+                        expected = sha256sums_text(
+                            manifest["inventory"]["files"]
+                        ).encode("utf-8")
+                        actual = sums.read_bytes() if sums.is_file() else None
+                        if actual != expected:
+                            findings.append(
+                                _finding(
+                                    "bundle.sha256sums",
+                                    "payload hash list SHA256SUMS is missing"
+                                    if actual is None
+                                    else "payload hash list SHA256SUMS does not "
+                                    "match the inventory",
+                                    sums,
+                                    evidence=(
+                                        f"expected sha256 {_sha256(expected)} "
+                                        "(the bundle hash)"
+                                    ),
+                                    expected_before_exists=actual is not None,
+                                    expected_before_sha256=(
+                                        _sha256(actual) if actual is not None else None
+                                    ),
+                                )
+                            )
+                    except (OSError, KeyError, TypeError, UnicodeError) as exc:
+                        findings.append(
+                            _finding(
+                                "bundle.sha256sums",
+                                "SHA256SUMS cannot be regenerated from the inventory",
+                                sums,
                                 evidence=str(exc),
                                 fixer=None,
                             )
@@ -1906,6 +1967,42 @@ def _apply_finding(vault: Path, run: Path, finding: dict) -> dict:
                 f"README repair prerequisites are unsafe in {bundle}", EXIT_UNSAFE
             )
         data = render_bundle_readme(bundle, manifest).encode("utf-8")
+        return mutate(
+            vault,
+            run,
+            path,
+            operation="WriteFile",
+            data=data,
+            fixer=fixer,
+            **expected_kwargs,
+        )
+    if fixer == "bundle.sha256sums.regenerate":
+        from .hashing import sha256sums_text
+
+        bundle = path.parent
+        for controlled in (bundle / "manifest.json", path):
+            if controlled.is_symlink():
+                raise DoctorError(
+                    f"refusing SHA256SUMS repair through symlink: {controlled}",
+                    EXIT_UNSAFE,
+                )
+        try:
+            manifest = load_manifest(bundle)
+        except SystemExit as exc:
+            raise DoctorError(
+                f"SHA256SUMS repair prerequisite changed: {exc}", EXIT_UNSAFE
+            ) from exc
+        prerequisite_findings, partial = _scan_payload(
+            bundle, manifest, quick=True, expired=lambda: False
+        )
+        if partial or any(
+            row["check_id"] in {"bundle.manifest", "bundle.paths"}
+            for row in prerequisite_findings
+        ):
+            raise DoctorError(
+                f"SHA256SUMS repair prerequisites are unsafe in {bundle}", EXIT_UNSAFE
+            )
+        data = sha256sums_text(manifest["inventory"]["files"]).encode("utf-8")
         return mutate(
             vault,
             run,
@@ -2243,11 +2340,7 @@ def _diagnose_run(
     elif fix and dry_run:
         actions = [
             {
-                "action": (
-                    "WriteFile"
-                    if f["fixer_id"] == "bundle.readme.regenerate"
-                    else "Rename"
-                ),
+                "action": _FIXER_MUTATION_SCOPE[f["fixer_id"]][1],
                 "fixer_id": f["fixer_id"],
                 "path": _relative_in_vault(vault, Path(f["path"])).as_posix(),
                 "proposed": True,

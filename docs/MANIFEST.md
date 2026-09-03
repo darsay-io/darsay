@@ -95,7 +95,7 @@ Provenance of the download.
 | Field | Meaning |
 |---|---|
 | `file_count`, `total_size_bytes` | Payload totals. |
-| `bundle_hash` | `{algorithm, value, covers}`. SHA-256 over the sorted `"<sha256>  <path>"` lines of the payload — one value that fingerprints the whole payload. Covers the payload root only; bundle-root metadata is mutable by design. |
+| `bundle_hash` | `{algorithm, value, covers}`. SHA-256 over the sorted `"<sha256>  <path>"` lines of the payload — one value that fingerprints the whole payload. Those lines, with a trailing newline, are the bundle's `SHA256SUMS` file, so `sha256sum SHA256SUMS` prints this value and `sha256sum -c SHA256SUMS` from the bundle root verifies the payload with no darsay. Covers the payload root only; bundle-root metadata is mutable by design. |
 | `layout` | `payload_root` (`model/` for model bundles, `data/` for dataset bundles — readers must take the root from here, writers from the registry) and the list of mutable bundle-root metadata files, including machine-local transfer/export/hydration state. |
 | `files[]` | Per file: `path`, `size`, `sha256`, `blake3` (null if blake3 wasn't installed), `upstream_lfs_sha256` (LFS files), `upstream_git_sha1` (small git-blob files), `verified_against_upstream` (true/false/null = no upstream expectation). |
 

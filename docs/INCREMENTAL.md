@@ -699,6 +699,10 @@ and are never exported. Layers resolve in order, later wins:
 min_free = "10G"      # bytes, or a binary K/M/G/T suffix; 0 disables the floor
 max_rate = "5M"       # bytes per second ("5M" or "5M/s" = 5 MiB/s); 0 is unlimited
 max_offline = "1h"    # seconds, or an s/m/h/d suffix; 0 pauses at the first failure
+
+[host]                            # the vault file only: a fact about this disk
+ssh = "root@nas"                  # the machine that owns it, as ssh names it
+path = "/volume1/darsay/vault"    # this vault's path on that machine
 ```
 
 Unknown keys in a known table warn on stderr — a typo (`min_fre`) must not
@@ -707,8 +711,20 @@ ignored so a vault config written by a newer darsay still loads here. A
 malformed file or value is an error, not a fallback to the default.
 `darsay config` prints the effective value of every setting and the layer
 that set it (`--json` for scripts); it is the first thing to run when a
-floor is not what you expected. `<vault>/config.toml` is a vault-root
+floor is not what you expected; `darsay config KEY=VALUE` writes the vault
+file, keeping its comments. `<vault>/config.toml` is a vault-root
 file, not a bundle, so `list`, `du`, and exports never see it.
+
+`[host]` is read from the vault file alone — it describes one disk, not a
+machine's preference, and a user file that sets it is warned about and
+ignored. With it, `verify`, `mv`, and `cp` hash on that machine over one
+ssh call instead of pulling the mount back over the wire (`assemble
+--rehash` hashes through the transfer pipeline and still reads here, so
+run it on the host that owns the disk); the machine needs `sh`,
+`find`, and one of `sha256sum` / `shasum` / `sha256` / `openssl`, which
+is what a NAS, a BSD, or a Mac ships. A machine that cannot be reached is
+a refusal that names the fix, never a silent fall back to the wire.
+[FAQ](FAQ.md#how-do-i-stop-mv-and-verify-reading-a-nas-back-over-the-wire).
 
 ## 7. Manifest impact
 

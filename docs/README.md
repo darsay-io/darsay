@@ -23,7 +23,7 @@
 | Tool | **0.14.13** |
 | Manifest schema | **2.1.0** |
 | Catalog schema | **2.0.0** |
-| MVB format | **1.2** |
+| MVB format | **1.3** |
 | License | Apache 2.0 |
 
 Tool version, schema version, and export-format version bump independently.

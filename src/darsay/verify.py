@@ -12,7 +12,7 @@ import json
 import socket
 from pathlib import Path
 
-from .hashing import bundle_hash, hash_file, iter_payload_files
+from .hashing import bundle_hash, write_sha256sums
 from .schema import check_completeness, payload_root
 
 MAX_HISTORY = 50
@@ -40,20 +40,29 @@ def verify_bundle(bundle_dir: Path, progress=print) -> dict:
     return report
 
 
-def hash_payload(bundle_dir: Path, manifest: dict, progress=print) -> dict:
-    """Every payload file's sha256 and size, keyed by its recorded path."""
+def hash_payload(
+    bundle_dir: Path, manifest: dict, progress=print, *, vault: Path | None = None
+) -> dict:
+    """Every payload file's sha256 and size, keyed by its recorded path.
+
+    Read wherever the disk actually is: on the host the vault's
+    ``config.toml`` names (``[host]``), else here. ``vault`` defaults to
+    the bundle's vault root, two levels up.
+    """
+    from .farside import far_side_label, hash_where_it_lives
+
     root = payload_root(manifest)
     payload_dir = bundle_dir / root
+    vault = bundle_dir.parent.parent if vault is None else vault
+    count = len(manifest["inventory"]["files"])
+    where = far_side_label(vault)
     progress(
-        f"Re-hashing {len(manifest['inventory']['files'])} files in {payload_dir} ..."
+        f"Re-hashing {count} files {where} ..."
+        if where
+        else f"Re-hashing {count} files in {payload_dir} ..."
     )
-    actual = {}
-    for rel, abs_path in iter_payload_files(payload_dir):
-        actual[f"{root}/{rel}"] = {
-            "sha256": hash_file(abs_path, with_blake3=False)["sha256"],
-            "size": abs_path.stat().st_size,
-        }
-    return actual
+    hashed = hash_where_it_lives(vault, payload_dir, progress=progress)
+    return {f"{root}/{rel}": entry for rel, entry in hashed.items()}
 
 
 def record_verification(
@@ -143,6 +152,9 @@ def record_verification(
         from .readme_gen import write_bundle_readme
 
         write_bundle_readme(bundle_dir, manifest)
+    # The hash list is a view of the inventory, which never changes; a
+    # bundle from before it existed gains it here.
+    write_sha256sums(bundle_dir, manifest)
     report = write_verification_report(bundle_dir, checksum, completeness)
     if relocated_from:
         report["relocated_from"] = relocated_from

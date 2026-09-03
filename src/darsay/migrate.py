@@ -146,7 +146,7 @@ def migration_plan(bundle_dir: Path) -> dict:
     plan["carried"] = carried
     plan["payload"] = _payload_check(bundle_dir, record)
     plan["verified_here"] = _verified_here(bundle_dir, record, plan["payload"])
-    plan["writes"] = ["manifest.json", "README.md"] + (
+    plan["writes"] = ["manifest.json", "README.md", "SHA256SUMS"] + (
         ["VERIFICATION.md"] if (bundle_dir / "verification.json").is_file() else []
     )
     plan["record"] = record
@@ -707,6 +707,7 @@ def migrate_bundle(
     if dry_run or plan["status"] == "current":
         return plan
 
+    from .hashing import write_sha256sums
     from .readme_gen import write_bundle_readme
     from .transfer import transfer_lock
     from .verify import refresh_verification_md
@@ -726,6 +727,7 @@ def migrate_bundle(
         archive["last_accessed"] = now
         write_manifest(bundle_dir, record)
         write_bundle_readme(bundle_dir, record)
+        write_sha256sums(bundle_dir, record)
         refresh_verification_md(bundle_dir)
     plan["written"] = list(plan["writes"])
     progress(f"Wrote {', '.join(plan['written'])}  (schema {plan['to_schema']})")

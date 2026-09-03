@@ -185,6 +185,7 @@ def relocation_plan(bundle_dir: Path, dest_vault: Path, *, op: str = "mv") -> di
     """
     from .archiver import load_manifest
     from .config import free_space_floor
+    from .farside import far_side_label
     from .transfer import disk_verdict, is_network_filesystem
 
     words = _VERBS[op]
@@ -266,6 +267,7 @@ def relocation_plan(bundle_dir: Path, dest_vault: Path, *, op: str = "mv") -> di
             left for left in LEAVE_BEHIND if (bundle_dir / left).exists()
         ),
         "network": bool(is_network_filesystem(dest_vault)),
+        "far_side": far_side_label(dest_vault),
         "disk": {
             "checked_path": str(probe),
             "free_bytes": free,
@@ -291,16 +293,17 @@ def _how_adopt(plan: dict, tail: str) -> str:
     total = plan["payload_files"]
     to_copy = landing["missing"] + landing["resized"]
     cost = human_size(landing["copy_bytes"])
+    where = plan["far_side"] or "in place"
     if landing["present"] and to_copy:
         return (
             f"{landing['present']} of {total} payload files are already there at "
-            f"the recorded size — hash them in place, copy the other {to_copy} "
+            f"the recorded size — hash them {where}, copy the other {to_copy} "
             f"({cost}), {tail}"
         )
     if landing["present"]:
         return (
             f"all {total} payload files are already there at the recorded size — "
-            f"hash them in place, copy nothing, {tail}"
+            f"hash them {where}, copy nothing, {tail}"
         )
     return (
         f"none of the {total} payload files is there at the recorded size — "
@@ -329,10 +332,11 @@ def print_relocation_plan(plan: dict, progress=print, *, dry_run: bool) -> None:
     elif plan["method"] == "adopt":
         progress(f"  how:      {_how_adopt(plan, tail)}")
     else:
+        there = f" {plan['far_side']}" if plan["far_side"] else ""
         progress(
             f"  how:      copy {plan['files']} files ({human_size(plan['bytes'])}), "
             f"re-hash the {plan['payload_files']} payload files at the "
-            f"destination, {tail}"
+            f"destination{there}, {tail}"
         )
     if plan["method"] != "rename":
         disk = plan["disk"]
@@ -358,7 +362,15 @@ def print_relocation_plan(plan: dict, progress=print, *, dry_run: bool) -> None:
             f"  leaves:   {', '.join(plan['leaves_behind'])} — vault-local; "
             "`darsay hydrate` again at the destination"
         )
-    if plan["network"] and plan["method"] != "rename":
+    if plan["method"] != "rename" and plan["far_side"]:
+        from .config import vault_config_path
+
+        progress(
+            f"  hash:     {plan['far_side']} — [host] in "
+            f"{vault_config_path(plan['dest_vault'])}; nothing is read back over "
+            "the wire"
+        )
+    elif plan["network"] and plan["method"] != "rename":
         for line in _over_the_wire(plan, dry_run=dry_run):
             progress(line)
 
@@ -404,6 +416,16 @@ def _over_the_wire(plan: dict, *, dry_run: bool) -> list[str]:
             "              (that copy is not recorded as a replica; the bytes are "
             "just as good)"
         )
+    from .farside import far_side_guess
+    from .transfer import mount_source
+
+    guess = far_side_guess(mount_source(plan["dest_vault"])) or "USER@HOST"
+    lines += [
+        "            Or name the host that owns the disk once, and every verb "
+        "hashes there instead of reading the mount back:",
+        f"              darsay --vault {shlex.quote(str(plan['dest_vault']))} config "
+        f"host.ssh={guess} host.path=/this/vault/on/that/host",
+    ]
     if not dry_run:
         lines.append(
             "            Continuing over the wire; Ctrl-C at any point leaves the "
@@ -468,7 +490,9 @@ def _copy_and_verify(
             if _copy_file(path, staging / rel) == "clonefile":
                 cloned += 1
         progress("Verifying the copy at the destination ...")
-        actual = hash_payload(staging, load_manifest(staging), progress=progress)
+        actual = hash_payload(
+            staging, load_manifest(staging), progress=progress, vault=plan["dest_vault"]
+        )
         report = record_verification(staging, actual, progress=progress, at=dest)
         checksum = report["checksum"]
         if checksum["status"] != "pass":
@@ -491,10 +515,11 @@ def _land_onto(
 ) -> tuple[dict, dict]:
     """Land the bundle on a destination that already holds some of it.
 
-    One pass over the record's inventory: a file already there at its
-    recorded size is hashed where it is and kept when it matches
-    (adopted); anything missing, at another size, or hashing wrong is
-    copied from the source and hashed again where it landed. Then every
+    Two passes over the record's inventory, each hashed wherever the
+    destination's disk actually is (``farside.hash_where_it_lives``):
+    first every file already there at its recorded size — kept when it
+    matches (adopted); then, after anything missing, at another size, or
+    hashing wrong has been copied from the source, the copies. Then every
     other file the bundle carries — the record, the views, the notes, the
     ledger — replaces the destination's, the verification is recorded,
     and ``stamp(dest, landed)`` writes the new home. The source is not
@@ -503,7 +528,8 @@ def _land_onto(
     counts.
     """
     from .archiver import load_manifest
-    from .hashing import hash_file, iter_payload_files
+    from .farside import hash_where_it_lives
+    from .hashing import iter_payload_files
     from .readme_gen import human_size
     from .schema import payload_root
     from .transfer import transfer_lock
@@ -511,59 +537,69 @@ def _land_onto(
 
     manifest = load_manifest(source)
     root = payload_root(manifest)
+    prefix = f"{root}/"
     expected = {r["path"]: r for r in manifest["inventory"]["files"]}
     landing = plan["landing"]
-    to_copy = landing["missing"] + landing["resized"]
+    vault = plan["dest_vault"]
+    where = plan["far_side"] or "in place"
     verb = "moved" if plan["op"] == "mv" else "copied"
+
+    def hashed(rels: list[str]) -> dict[str, dict]:
+        if not rels:
+            return {}
+        found = hash_where_it_lives(
+            vault, dest / root, [rel[len(prefix) :] for rel in rels], progress=progress
+        )
+        return {prefix + rel: entry for rel, entry in found.items()}
 
     with transfer_lock(dest, progress=progress):
         progress(
-            f"Landing on {dest}: hashing {landing['present']} payload files in "
-            f"place, copying {to_copy} ({human_size(landing['copy_bytes'])}) ..."
+            f"Landing on {dest}: hashing {landing['present']} payload files "
+            f"{where}, copying {landing['missing'] + landing['resized']} "
+            f"({human_size(landing['copy_bytes'])}) ..."
         )
-        actual: dict[str, dict] = {}
-        adopted = 0
-        copied = 0
-        replaced: list[str] = []
-        for rel in sorted(expected):
-            record = expected[rel]
-            target = dest / rel
-            size = record["size"]
-            loud = size >= _ANNOUNCE_BYTES
-            if target.is_file() and target.stat().st_size == size:
-                if loud:
-                    progress(f"  {rel}  ({human_size(size)})  hashing in place")
-                digest = hash_file(target, with_blake3=False)["sha256"]
-                if digest == record["sha256"]:
-                    actual[rel] = {"sha256": digest, "size": size}
-                    adopted += 1
-                    continue
-                progress(
-                    f"  {rel}  differs from the record at the destination — "
-                    "copying from the source"
-                )
-                replaced.append(rel)
-            elif loud:
+        there = [
+            rel
+            for rel in sorted(expected)
+            if (dest / rel).is_file()
+            and (dest / rel).stat().st_size == expected[rel]["size"]
+        ]
+        first = hashed(there)
+        actual = {
+            rel: first[rel]
+            for rel in there
+            if rel in first and first[rel]["sha256"] == expected[rel]["sha256"]
+        }
+        replaced = [rel for rel in there if rel not in actual]
+        for rel in replaced:
+            progress(
+                f"  {rel}  differs from the record at the destination — "
+                "copying from the source"
+            )
+        to_copy = [rel for rel in sorted(expected) if rel not in actual]
+        for rel in to_copy:
+            size = expected[rel]["size"]
+            if size >= _ANNOUNCE_BYTES:
                 progress(f"  {rel}  ({human_size(size)})  copying")
-            _copy_file(source / rel, target)
-            digest = hash_file(target, with_blake3=False)["sha256"]
-            if digest != record["sha256"]:
+            _copy_file(source / rel, dest / rel)
+        second = hashed(to_copy)
+        for rel in to_copy:
+            if second.get(rel, {}).get("sha256") != expected[rel]["sha256"]:
                 raise SystemExit(
                     f"error: {rel} does not match the record after copying to the "
                     f"destination — nothing {verb}; the source is untouched, but "
                     f"check it: darsay verify {source}"
                 )
-            actual[rel] = {"sha256": digest, "size": target.stat().st_size}
-            copied += 1
+            actual[rel] = second[rel]
         # Anything under the payload root the record does not list is
         # refused at plan time; one that appeared since is recorded as extra.
-        for rel, path in iter_payload_files(dest / root):
-            key = f"{root}/{rel}"
-            if key not in actual:
-                actual[key] = {
-                    "sha256": hash_file(path, with_blake3=False)["sha256"],
-                    "size": path.stat().st_size,
-                }
+        if (dest / root).is_dir():
+            extras = [
+                prefix + rel
+                for rel, _path in iter_payload_files(dest / root)
+                if prefix + rel not in actual
+            ]
+            actual.update(hashed(extras))
         for rel, path in bundle_files(source):
             if rel not in expected:
                 _copy_file(path, dest / rel)
@@ -575,7 +611,11 @@ def _land_onto(
                 f"source untouched ({len(checksum['mismatched'])} modified, "
                 f"{len(checksum['missing'])} missing, {len(checksum['extra'])} extra)"
             )
-        landed = {"adopted": adopted, "copied": copied, "replaced": replaced}
+        landed = {
+            "adopted": len(there) - len(replaced),
+            "copied": len(to_copy),
+            "replaced": replaced,
+        }
         stamp(dest, landed)
     return report, landed
 

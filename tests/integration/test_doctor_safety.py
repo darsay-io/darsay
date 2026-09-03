@@ -254,5 +254,5 @@ def test_capabilities_match_golden(tmp_path: Path):
         tmp_path, None, "capabilities", "--json", expected=0
     )
     _assert_golden(_canonical_capabilities(completed.stdout))
-    assert len(capabilities["detectors"]) == 8
-    assert len(capabilities["fixers"]) == 3
+    assert len(capabilities["detectors"]) == 9
+    assert len(capabilities["fixers"]) == 4
