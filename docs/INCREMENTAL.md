@@ -57,7 +57,11 @@ download, and not as an SMB dest-hash. Hash dest where it is a local disk
 rename on the same filesystem; otherwise copy into a staging directory,
 re-hash the copy where it landed, stamp the manifest's new location, and
 only then remove the source; `darsay cp` is the same copy-and-verify with
-the source kept and the replica recorded in both manifests. They are
+the source kept and the replica recorded in both manifests. A destination
+that already holds the bundle is landed on: every payload file there at
+its recorded size is hashed in place and kept when it matches, only what
+is missing or differs is copied — rsync followed by `darsay mv` reads the
+destination once and copies nothing that matched. They are
 sugar over what rsync already satisfies and will never become a
 requirement — nothing they record is needed to open, verify, run, or
 export the bundle. The verbs do not overlap: `mv` and `cp` refuse a

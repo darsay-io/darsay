@@ -9,6 +9,16 @@ the source afterwards (and is a rename on one filesystem, where nothing
 is rewritten and so nothing is re-hashed); ``cp`` keeps the source and
 records the new copy as a replica in both manifests.
 
+A destination that already holds the bundle — an earlier rsync, a backup
+being refreshed, a partial someone started there — is landed on, never
+refused and never copied over from scratch. Every payload file already
+there at its recorded size is hashed in place and kept when it matches;
+only what is missing or differs is copied; the record travels from the
+source. That is *adoption*, the same first step ``archive`` and
+``assemble`` take over bytes they find on disk, and it is what makes
+"rsync, then ``darsay mv``" cost one read of the destination and nothing
+else.
+
 Both act on *registered* bundles only. A partial's verified bytes cross
 vaults with ``assemble --handoff`` (per file, leaving a skeleton); that
 verb never touches a registered payload and these never touch a partial.
@@ -28,9 +38,12 @@ from pathlib import Path
 # travels.
 LEAVE_BEHIND = frozenset({"hydration.json", "transfer.lock"})
 
-# Files at least this large announce themselves while copying, so a
-# multi-gigabyte shard is not minutes of silence.
+# Files at least this large announce themselves while copying or hashing,
+# so a multi-gigabyte shard is not minutes of silence.
 _ANNOUNCE_BYTES = 256 * 1024**2
+
+# How many of a destination's unlisted payload files a refusal names.
+_SHOW_EXTRAS = 6
 
 _VERBS = {
     "mv": {"would": "Would move", "doing": "Moving", "does": "relocates"},
@@ -77,9 +90,69 @@ def _same_device(a: Path, b: Path) -> bool:
         return False
 
 
-def relocation_plan(
-    bundle_dir: Path, dest_vault: Path, *, force: bool = False, op: str = "mv"
-) -> dict:
+def _landing(source: Path, dest: Path, manifest: dict) -> dict:
+    """What a destination that already holds this bundle has of it.
+
+    A stat walk — path and size against the record — not a hash: the plan
+    must stay cheap. Hashing happens once, in place, when the verb runs.
+    """
+    from .hashing import iter_payload_files
+    from .schema import payload_root
+
+    root = payload_root(manifest)
+    expected = {r["path"]: r["size"] for r in manifest["inventory"]["files"]}
+    there = (
+        {
+            f"{root}/{rel}": path.stat().st_size
+            for rel, path in iter_payload_files(dest / root)
+        }
+        if (dest / root).is_dir()
+        else {}
+    )
+    present = [p for p in expected if p in there and there[p] == expected[p]]
+    resized = [p for p in expected if p in there and there[p] != expected[p]]
+    missing = [p for p in expected if p not in there]
+    curation = None
+    theirs = dest / "curation.md"
+    ours = source / "curation.md"
+    if theirs.is_file():
+        if not ours.is_file():
+            curation = "kept"
+        elif ours.read_bytes() != theirs.read_bytes():
+            curation = "replaced"
+    return {
+        "present": len(present),
+        "resized": len(resized),
+        "missing": len(missing),
+        "copy_bytes": sum(expected[p] for p in resized + missing),
+        "extra": [(p, there[p]) for p in sorted(set(there) - set(expected))],
+        "curation": curation,
+    }
+
+
+def _extras_refusal(
+    dest: Path, dest_vault: Path, bundle_id: str, extra: list[tuple[str, int]]
+) -> str:
+    from .readme_gen import human_size
+
+    plural = "s" if len(extra) != 1 else ""
+    lines = [
+        f"error: {dest} already holds {len(extra)} payload file{plural} this "
+        "bundle's record does not list:"
+    ]
+    lines += [f"  {path}  ({human_size(size)})" for path, size in extra[:_SHOW_EXTRAS]]
+    if len(extra) > _SHOW_EXTRAS:
+        lines.append(f"  … and {len(extra) - _SHOW_EXTRAS} more")
+    lines.append(
+        "  That is another pin of the same revision, or a file put there by hand. "
+        f"Keep one: `darsay --vault {dest_vault} rm {bundle_id} --yes` clears the "
+        "destination and a rerun lands this bundle there; `darsay rm` here keeps "
+        "that one."
+    )
+    return "\n".join(lines)
+
+
+def relocation_plan(bundle_dir: Path, dest_vault: Path, *, op: str = "mv") -> dict:
     """Resolve where a bundle would land and how, running every refusal.
 
     Raises ``SystemExit`` for the cases the real command would refuse, so a
@@ -121,30 +194,48 @@ def relocation_plan(
         raise SystemExit(
             f"error: {dest} and {bundle_dir} nest inside each other — refusing"
         )
-    dest_exists = dest.exists()
-    if dest_exists and not force:
-        raise SystemExit(f"error: {dest} already exists (use --force to replace)")
+    if dest.exists() and not dest.is_dir():
+        raise SystemExit(f"error: {dest} exists and is not a directory")
+    dest_exists = dest.is_dir() and any(dest.iterdir())
+    landing = None
+    if dest_exists:
+        landing = _landing(bundle_dir, dest, manifest)
+        if landing["extra"]:
+            raise SystemExit(
+                _extras_refusal(dest, dest_vault, bundle_id, landing["extra"])
+            )
 
     files = bundle_files(bundle_dir)
     total = sum(path.stat().st_size for _rel, path in files)
-    method = "rename" if op == "mv" and _same_device(bundle_dir, dest) else "copy"
+    inventory_paths = {r["path"] for r in manifest["inventory"]["files"]}
+    beside_payload = sum(
+        path.stat().st_size for rel, path in files if rel not in inventory_paths
+    )
+    if dest_exists:
+        method = "adopt"
+        needed = landing["copy_bytes"] + beside_payload
+    elif op == "mv" and _same_device(bundle_dir, dest):
+        method = "rename"
+        needed = 0
+    else:
+        method = "copy"
+        needed = total
     floor = free_space_floor(dest_vault)
     probe = dest_real
     while not probe.exists():
         probe = probe.parent
     free = shutil.disk_usage(probe).free
-    needed = 0 if method == "rename" else total
     return {
         "op": op,
         "bundle_id": bundle_id,
         "source": bundle_dir,
         "dest": dest,
         "dest_exists": dest_exists,
-        "force": force,
+        "landing": landing,
         "method": method,
         "files": len(files),
         "bytes": total,
-        "payload_files": len(manifest["inventory"]["files"]),
+        "payload_files": len(inventory_paths),
         "leaves_behind": sorted(
             left for left in LEAVE_BEHIND if (bundle_dir / left).exists()
         ),
@@ -159,12 +250,36 @@ def relocation_plan(
     }
 
 
-def move_plan(bundle_dir: Path, dest_vault: Path, *, force: bool = False) -> dict:
-    return relocation_plan(bundle_dir, dest_vault, force=force, op="mv")
+def move_plan(bundle_dir: Path, dest_vault: Path) -> dict:
+    return relocation_plan(bundle_dir, dest_vault, op="mv")
 
 
-def copy_plan(bundle_dir: Path, dest_vault: Path, *, force: bool = False) -> dict:
-    return relocation_plan(bundle_dir, dest_vault, force=force, op="cp")
+def copy_plan(bundle_dir: Path, dest_vault: Path) -> dict:
+    return relocation_plan(bundle_dir, dest_vault, op="cp")
+
+
+def _how_adopt(plan: dict, tail: str) -> str:
+    from .readme_gen import human_size
+
+    landing = plan["landing"]
+    total = plan["payload_files"]
+    to_copy = landing["missing"] + landing["resized"]
+    cost = human_size(landing["copy_bytes"])
+    if landing["present"] and to_copy:
+        return (
+            f"{landing['present']} of {total} payload files are already there at "
+            f"the recorded size — hash them in place, copy the other {to_copy} "
+            f"({cost}), {tail}"
+        )
+    if landing["present"]:
+        return (
+            f"all {total} payload files are already there at the recorded size — "
+            f"hash them in place, copy nothing, {tail}"
+        )
+    return (
+        f"none of the {total} payload files is there at the recorded size — "
+        f"copy all {total} ({cost}), {tail}"
+    )
 
 
 def print_relocation_plan(plan: dict, progress=print, *, dry_run: bool) -> None:
@@ -173,24 +288,27 @@ def print_relocation_plan(plan: dict, progress=print, *, dry_run: bool) -> None:
     words = _VERBS[plan["op"]]
     progress(f"{words['would'] if dry_run else words['doing']} {plan['bundle_id']}")
     progress(f"  from:     {plan['source']}")
-    dest_note = "  (exists — --force replaces it)" if plan["dest_exists"] else "  (new)"
+    dest_note = "  (exists)" if plan["dest_exists"] else "  (new)"
     progress(f"  to:       {plan['dest']}{dest_note}")
+    tail = (
+        "then remove the source"
+        if plan["op"] == "mv"
+        else "and keep the source; both manifests record the replica"
+    )
     if plan["method"] == "rename":
         progress(
             "  how:      rename in place — same filesystem; bytes untouched, "
             "not re-hashed"
         )
+    elif plan["method"] == "adopt":
+        progress(f"  how:      {_how_adopt(plan, tail)}")
     else:
-        tail = (
-            "then remove the source"
-            if plan["op"] == "mv"
-            else "and keep the source; both manifests record the replica"
-        )
         progress(
             f"  how:      copy {plan['files']} files ({human_size(plan['bytes'])}), "
             f"re-hash the {plan['payload_files']} payload files at the "
             f"destination, {tail}"
         )
+    if plan["method"] != "rename":
         disk = plan["disk"]
         floor = disk.get("min_free_bytes")
         floor_note = f" ({human_size(floor)} floor)" if floor else ""
@@ -199,18 +317,28 @@ def print_relocation_plan(plan: dict, progress=print, *, dry_run: bool) -> None:
             f"free {human_size(disk['free_bytes'])}{floor_note} at "
             f"{disk['checked_path']} — {disk['verdict'].upper()}"
         )
+    curation = (plan["landing"] or {}).get("curation")
+    if curation == "replaced":
+        progress(
+            "  notes:    the destination's curation.md differs and is replaced by "
+            "this bundle's"
+        )
+    elif curation == "kept":
+        progress(
+            "  notes:    the destination's curation.md is kept — this bundle has none"
+        )
     if plan["leaves_behind"]:
         progress(
             f"  leaves:   {', '.join(plan['leaves_behind'])} — vault-local; "
             "`darsay hydrate` again at the destination"
         )
-    if plan["network"] and plan["method"] == "copy":
+    if plan["network"] and plan["method"] != "rename":
         then_rm = ", then `darsay rm` the source" if plan["op"] == "mv" else ""
         progress(
             "  warning:  the destination is on a network mount, so verifying "
-            "the copy reads every byte back over the wire. For a large bundle "
-            "prefer: rsync it, `darsay verify` on the host that owns the disk"
-            f"{then_rm}."
+            "there reads every payload byte back over the wire. For a large "
+            "bundle prefer: rsync it, `darsay verify` on the host that owns the "
+            f"disk{then_rm}."
         )
 
 
@@ -218,18 +346,16 @@ print_move_plan = print_relocation_plan
 
 
 def _refuse_if_insufficient(plan: dict) -> None:
-    if plan["method"] == "copy" and plan["disk"]["verdict"] == "insufficient":
+    if plan["method"] != "rename" and plan["disk"]["verdict"] == "insufficient":
         raise SystemExit(
             "error: not enough free space at the destination for the copy "
             "(the free-space floor is `darsay config`'s transfer.min_free)"
         )
 
 
-def _try_rename(source: Path, dest: Path, *, force: bool) -> bool:
+def _try_rename(source: Path, dest: Path) -> bool:
     """Rename ``source`` onto ``dest``; ``False`` when the filesystems differ."""
     dest.parent.mkdir(parents=True, exist_ok=True)
-    if force and dest.exists():
-        shutil.rmtree(dest)
     try:
         os.rename(source, dest)
     except OSError as exc:
@@ -240,7 +366,7 @@ def _try_rename(source: Path, dest: Path, *, force: bool) -> bool:
 
 
 def _copy_and_verify(
-    source: Path, dest: Path, plan: dict, *, force: bool, progress, stamp
+    source: Path, dest: Path, plan: dict, *, progress, stamp
 ) -> tuple[dict, int]:
     """Copy into a staging directory beside ``dest``, verify there, then rename.
 
@@ -281,8 +407,6 @@ def _copy_and_verify(
                 f"{len(checksum['missing'])} missing, {len(checksum['extra'])} extra)"
             )
         stamp(staging)
-        if force and dest.exists():
-            shutil.rmtree(dest)
         dest.parent.mkdir(parents=True, exist_ok=True)
         staging.rename(dest)
     finally:
@@ -290,8 +414,107 @@ def _copy_and_verify(
     return report, cloned
 
 
+def _land_onto(
+    source: Path, dest: Path, plan: dict, *, progress, stamp
+) -> tuple[dict, dict]:
+    """Land the bundle on a destination that already holds some of it.
+
+    One pass over the record's inventory: a file already there at its
+    recorded size is hashed where it is and kept when it matches
+    (adopted); anything missing, at another size, or hashing wrong is
+    copied from the source and hashed again where it landed. Then every
+    other file the bundle carries — the record, the views, the notes, the
+    ledger — replaces the destination's, the verification is recorded,
+    and ``stamp(dest, landed)`` writes the new home. The source is not
+    touched; a failure leaves the destination holding at most more good
+    files than it had. Returns the verification report and the landing
+    counts.
+    """
+    from .archiver import load_manifest
+    from .hashing import hash_file, iter_payload_files
+    from .readme_gen import human_size
+    from .schema import payload_root
+    from .transfer import transfer_lock
+    from .verify import record_verification
+
+    manifest = load_manifest(source)
+    root = payload_root(manifest)
+    expected = {r["path"]: r for r in manifest["inventory"]["files"]}
+    landing = plan["landing"]
+    to_copy = landing["missing"] + landing["resized"]
+    verb = "moved" if plan["op"] == "mv" else "copied"
+
+    with transfer_lock(dest, progress=progress):
+        progress(
+            f"Landing on {dest}: hashing {landing['present']} payload files in "
+            f"place, copying {to_copy} ({human_size(landing['copy_bytes'])}) ..."
+        )
+        actual: dict[str, dict] = {}
+        adopted = 0
+        copied = 0
+        replaced: list[str] = []
+        for rel in sorted(expected):
+            record = expected[rel]
+            target = dest / rel
+            size = record["size"]
+            loud = size >= _ANNOUNCE_BYTES
+            if target.is_file() and target.stat().st_size == size:
+                if loud:
+                    progress(f"  {rel}  ({human_size(size)})  hashing in place")
+                digest = hash_file(target, with_blake3=False)["sha256"]
+                if digest == record["sha256"]:
+                    actual[rel] = {"sha256": digest, "size": size}
+                    adopted += 1
+                    continue
+                progress(
+                    f"  {rel}  differs from the record at the destination — "
+                    "copying from the source"
+                )
+                replaced.append(rel)
+            elif loud:
+                progress(f"  {rel}  ({human_size(size)})  copying")
+            _copy_file(source / rel, target)
+            digest = hash_file(target, with_blake3=False)["sha256"]
+            if digest != record["sha256"]:
+                raise SystemExit(
+                    f"error: {rel} does not match the record after copying to the "
+                    f"destination — nothing {verb}; the source is untouched, but "
+                    f"check it: darsay verify {source}"
+                )
+            actual[rel] = {"sha256": digest, "size": target.stat().st_size}
+            copied += 1
+        # Anything under the payload root the record does not list is
+        # refused at plan time; one that appeared since is recorded as extra.
+        for rel, path in iter_payload_files(dest / root):
+            key = f"{root}/{rel}"
+            if key not in actual:
+                actual[key] = {
+                    "sha256": hash_file(path, with_blake3=False)["sha256"],
+                    "size": path.stat().st_size,
+                }
+        for rel, path in bundle_files(source):
+            if rel not in expected:
+                _copy_file(path, dest / rel)
+        report = record_verification(dest, actual, progress=progress)
+        checksum = report["checksum"]
+        if checksum["status"] != "pass":
+            raise SystemExit(
+                f"error: verification FAILED at the destination — nothing {verb}, "
+                f"source untouched ({len(checksum['mismatched'])} modified, "
+                f"{len(checksum['missing'])} missing, {len(checksum['extra'])} extra)"
+            )
+        landed = {"adopted": adopted, "copied": copied, "replaced": replaced}
+        stamp(dest, landed)
+    return report, landed
+
+
 def _stamp_new_home(
-    bundle_dir: Path, home: Path, came_from: Path, *, method: str
+    bundle_dir: Path,
+    home: Path,
+    came_from: Path,
+    *,
+    method: str,
+    landed: dict | None = None,
 ) -> None:
     """Record a move in the manifest and regenerate the views that name the path."""
     from .archiver import load_manifest, utc_now, write_manifest
@@ -300,13 +523,17 @@ def _stamp_new_home(
     manifest = load_manifest(bundle_dir)
     now = utc_now()
     archive = manifest["archive"]
-    archive.setdefault("moves", []).append(
-        {
-            "at": now,
-            "from_location": str(came_from.resolve()),
-            "method": method,
-        }
-    )
+    move = {
+        "at": now,
+        "from_location": str(came_from.resolve()),
+        "method": method,
+    }
+    if landed is not None:
+        move["adopted"] = landed["adopted"]
+        move["copied"] = landed["copied"]
+        if landed["replaced"]:
+            move["replaced"] = list(landed["replaced"])
+    archive.setdefault("moves", []).append(move)
     archive["location"] = str(home.resolve())
     archive["host"] = socket.gethostname()
     archive["last_accessed"] = now
@@ -319,7 +546,7 @@ def _stamp_replica(bundle_dir: Path, *, home: Path, other: Path, now: str) -> No
 
     Written on both sides of a ``cp``: the copy learns where it came from,
     the source learns where its replica went. Entries are keyed by
-    location — refreshing a backup with ``--force`` updates the timestamp
+    location — a second ``cp`` to the same disk updates the timestamp
     rather than listing the same disk twice.
     """
     from .archiver import load_manifest, write_manifest
@@ -351,11 +578,18 @@ def _remove_source(bundle_dir: Path) -> None:
     prune_empty_parent(bundle_dir)
 
 
+def _landed_note(report: dict, landed: dict) -> str:
+    checked = report["checksum"]["files_checked"]
+    return (
+        f"{checked} payload files verified at the destination — "
+        f"{landed['adopted']} already there, {landed['copied']} copied"
+    )
+
+
 def move_bundle(
     bundle_dir: Path,
     dest_vault: Path,
     *,
-    force: bool = False,
     progress=print,
     dry_run: bool = False,
 ) -> Path:
@@ -365,16 +599,18 @@ def move_bundle(
     the generated views are refreshed. Different filesystems: copy into a
     staging directory, re-hash every payload file there against the
     manifest, stamp the new home, rename into place, and only then remove
-    the source. A failed verification removes the staging copy and leaves
-    the source exactly as it was. ``dry_run`` resolves and reports and
-    touches nothing.
+    the source. A destination already holding the bundle is landed on:
+    what is there is hashed in place, what is missing or differs is
+    copied, and the record travels. A failed verification leaves the
+    source exactly as it was. ``dry_run`` resolves and reports and touches
+    nothing.
     """
     from .transfer import transfer_lock
     from .vault import prune_empty_parent
     from .verify import refresh_verification_md
 
     bundle_dir = Path(bundle_dir)
-    plan = relocation_plan(bundle_dir, dest_vault, force=force, op="mv")
+    plan = relocation_plan(bundle_dir, dest_vault, op="mv")
     print_relocation_plan(plan, progress, dry_run=dry_run)
     dest = plan["dest"]
     if dry_run:
@@ -382,9 +618,23 @@ def move_bundle(
     _refuse_if_insufficient(plan)
 
     with transfer_lock(bundle_dir, progress=progress):
-        renamed = plan["method"] == "rename" and _try_rename(
-            bundle_dir, dest, force=force
-        )
+        if plan["method"] == "adopt":
+            report, landed = _land_onto(
+                bundle_dir,
+                dest,
+                plan,
+                progress=progress,
+                stamp=lambda home, landed: _stamp_new_home(
+                    home, home, bundle_dir, method="adopt", landed=landed
+                ),
+            )
+            _remove_source(bundle_dir)
+            progress(
+                f"Moved {plan['bundle_id']} → {dest}  "
+                f"({_landed_note(report, landed)} — before the source was removed)"
+            )
+            return dest
+        renamed = plan["method"] == "rename" and _try_rename(bundle_dir, dest)
         if renamed:
             # Our own lock travelled with the directory; it is released here.
             (dest / "transfer.lock").unlink(missing_ok=True)
@@ -399,7 +649,6 @@ def move_bundle(
             bundle_dir,
             dest,
             plan,
-            force=force,
             progress=progress,
             stamp=lambda staging: _stamp_new_home(
                 staging, dest, bundle_dir, method="copy"
@@ -419,7 +668,6 @@ def copy_bundle(
     bundle_dir: Path,
     dest_vault: Path,
     *,
-    force: bool = False,
     progress=print,
     dry_run: bool = False,
 ) -> Path:
@@ -428,9 +676,11 @@ def copy_bundle(
     Copy into a staging directory (copy-on-write clones where the
     filesystem offers them), re-hash every payload file there against the
     manifest, rename into place, then record the replica in *both*
-    manifests (``archive.replicas``, ``backup_status: replicated``). The
-    source payload is never touched; a failed verification removes the
-    staging copy and records nothing anywhere. ``dry_run`` resolves and
+    manifests (``archive.replicas``, ``backup_status: replicated``). A
+    destination already holding the bundle — a backup being refreshed —
+    is landed on: what is there is hashed in place, what is missing or
+    differs is copied. The source payload is never touched; a failed
+    verification records nothing anywhere. ``dry_run`` resolves and
     reports and touches nothing.
     """
     from .archiver import utc_now
@@ -438,7 +688,7 @@ def copy_bundle(
     from .verify import refresh_verification_md
 
     bundle_dir = Path(bundle_dir)
-    plan = relocation_plan(bundle_dir, dest_vault, force=force, op="cp")
+    plan = relocation_plan(bundle_dir, dest_vault, op="cp")
     print_relocation_plan(plan, progress, dry_run=dry_run)
     dest = plan["dest"]
     if dry_run:
@@ -447,11 +697,27 @@ def copy_bundle(
 
     now = utc_now()
     with transfer_lock(bundle_dir, progress=progress):
+        if plan["method"] == "adopt":
+            report, landed = _land_onto(
+                bundle_dir,
+                dest,
+                plan,
+                progress=progress,
+                stamp=lambda home, _landed: _stamp_replica(
+                    home, home=home, other=bundle_dir, now=now
+                ),
+            )
+            _stamp_replica(bundle_dir, home=bundle_dir, other=dest, now=now)
+            progress(
+                f"Copied {plan['bundle_id']} → {dest}  "
+                f"({_landed_note(report, landed)}; source kept, replica recorded "
+                "in both manifests)"
+            )
+            return dest
         report, cloned = _copy_and_verify(
             bundle_dir,
             dest,
             plan,
-            force=force,
             progress=progress,
             stamp=lambda staging: _stamp_replica(
                 staging, home=dest, other=bundle_dir, now=now

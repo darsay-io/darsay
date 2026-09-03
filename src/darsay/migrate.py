@@ -37,6 +37,7 @@ moves forward, readers do not move back. Each move is recorded under
 from __future__ import annotations
 
 import shlex
+import socket
 from copy import deepcopy
 from pathlib import Path
 
@@ -144,6 +145,7 @@ def migration_plan(bundle_dir: Path) -> dict:
     plan["changes"] = changes
     plan["carried"] = carried
     plan["payload"] = _payload_check(bundle_dir, record)
+    plan["verified_here"] = _verified_here(bundle_dir, record, plan["payload"])
     plan["writes"] = ["manifest.json", "README.md"] + (
         ["VERIFICATION.md"] if (bundle_dir / "verification.json").is_file() else []
     )
@@ -206,6 +208,31 @@ def _payload_check(bundle_dir: Path, record: dict) -> dict:
         "extra": sorted(set(actual) - set(expected)),
         "checked": "path and size",
     }
+
+
+def _verified_here(bundle_dir: Path, record: dict, payload: dict) -> str | None:
+    """The date the record last saw this payload pass — at this path, on this host.
+
+    ``validation`` and ``archive`` are carried as recorded, so the record's
+    own verification still stands for a bundle that has not moved since:
+    the date, or ``None`` when the record's last pass was somewhere else
+    (an rsync'd-in bundle), failed, or does not match what is on disk.
+    """
+    check = (record.get("validation") or {}).get("checksum_verification") or {}
+    archive = record.get("archive") or {}
+    if check.get("status") != "pass" or not check.get("at"):
+        return None
+    if payload["missing"] or payload["size_mismatch"] or payload["extra"]:
+        return None
+    location = archive.get("location")
+    if not location or archive.get("host") != socket.gethostname():
+        return None
+    try:
+        if Path(location).resolve() != bundle_dir.resolve():
+            return None
+    except OSError:
+        return None
+    return str(check["at"])[:10]
 
 
 # --- 1.x → 2.x ----------------------------------------------------------------
@@ -644,9 +671,15 @@ def print_migration_plan(plan: dict, progress=print, *, dry_run: bool) -> None:
             "`darsay verify` reports the payload"
         )
     else:
+        stands = (
+            f" — passed verification at this path on {plan['verified_here']}, "
+            "per the record"
+            if plan.get("verified_here")
+            else ""
+        )
         progress(
             f"  payload:    {payload['files']} files present at the recorded sizes; "
-            "bytes untouched, not re-hashed"
+            f"bytes untouched, not re-hashed{stands}"
         )
     if plan["ledger"]:
         progress(

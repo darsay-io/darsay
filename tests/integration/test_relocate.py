@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import shlex
+import shutil
 from pathlib import Path
 
 import pytest
@@ -217,16 +218,19 @@ def test_mv_refusals(tmp_path, vault, test_provider):
     with pytest.raises(SystemExit, match="already in"):
         move_bundle(bundle, src_vault, progress=silent)
 
-    # A bundle with the same id already at the destination.
+    # A destination holding payload files this record does not list is another
+    # pin of the same revision: refused, naming the files and `rm` for either side.
     other = archive_quiet("test:acme/toy", vault=vault)
-    with pytest.raises(SystemExit, match=r"already exists \(use --force"):
+    (other / "model" / "extra-print.gguf").write_bytes(b"not in the record")
+    before = _tree(bundle)
+    with pytest.raises(SystemExit) as refused:
         move_bundle(bundle, vault, progress=silent)
-    assert bundle.is_dir() and other.is_dir()
-
-    dest = move_bundle(bundle, vault, force=True, progress=silent)
-    assert dest == other
-    assert (dest / "curation.md").read_text(encoding="utf-8") == "# curated by hand\n"
-    assert not bundle.exists()
+    message = str(refused.value)
+    assert "already holds 1 payload file this bundle's record does not list" in message
+    assert "model/extra-print.gguf  (17 B)" in message
+    assert f"darsay --vault {vault} rm {BUNDLE_ID} --yes" in message
+    assert _tree(bundle) == before
+    assert (other / "model" / "extra-print.gguf").is_file()
 
 
 def test_mv_dry_run_moves_nothing_and_ends_with_the_real_command(
@@ -250,6 +254,234 @@ def test_mv_dry_run_moves_nothing_and_ends_with_the_real_command(
     # The refusal is the same refusal.
     with pytest.raises(SystemExit, match="destination vault does not exist"):
         main(["--vault", str(src_vault), "mv", BUNDLE_ID, str(tmp_path / "nope"), "-n"])
+
+
+def test_mv_onto_an_empty_directory_is_a_fresh_landing(tmp_path, vault, test_provider):
+    src_vault = tmp_path / "src"
+    src_vault.mkdir()
+    bundle = _registered_bundle(src_vault, test_provider)
+    (vault / "test--acme--toy" / "aaaaaaaaaaaa").mkdir(parents=True)
+
+    logs: list[str] = []
+    dest = move_bundle(bundle, vault, progress=logs.append)
+    assert any("  (new)" in line for line in logs)
+    assert load_manifest(dest)["archive"]["moves"][-1]["method"] == "rename"
+    assert not bundle.exists()
+
+
+# --- landing on a copy already there ------------------------------------------
+
+
+def _rsync(bundle: Path, dest_vault: Path) -> Path:
+    """What ``rsync -a`` leaves: the whole directory at ``<vault>/<name>/<rev>/``."""
+    dest = dest_vault / bundle.parent.name / bundle.name
+    shutil.copytree(bundle, dest)
+    return dest
+
+
+def test_mv_lands_on_an_rsync_made_before_the_record_was_migrated(
+    tmp_path, vault, capsys
+):
+    """rsync, migrate, mv — the order an operator actually does them in.
+
+    The copy at the destination carries the older record. ``mv`` hashes
+    its payload in place, copies nothing, replaces the record with the
+    migrated one, and removes the source: one read of the destination.
+    """
+    from darsay import SCHEMA_VERSION
+    from tests.integration.test_migrate import REV, TOY, place
+
+    src_vault = tmp_path / "src"
+    src_vault.mkdir()
+    bundle = place(src_vault, TOY)
+    bundle_id = f"{TOY}@{REV}"
+    copy = _rsync(bundle, vault)
+    assert json.loads((copy / "manifest.json").read_text())["schema_version"] == "1.8.0"
+    payload_before = _payload_hashes(bundle)
+
+    with pytest.raises(SystemExit, match="predates this darsay"):
+        main(["--vault", str(src_vault), "mv", bundle_id, str(vault)])
+    assert main(["--vault", str(src_vault), "migrate", bundle_id]) == 0
+    capsys.readouterr()
+
+    assert main(["--vault", str(src_vault), "mv", bundle_id, str(vault)]) == 0
+    out = capsys.readouterr().out
+    assert f"  to:       {copy}  (exists)" in out
+    assert (
+        "how:      all 7 payload files are already there at the recorded size — "
+        "hash them in place, copy nothing, then remove the source"
+    ) in out
+    assert (
+        f"Landing on {copy}: hashing 7 payload files in place, copying 0 (0 B)" in out
+    )
+    assert "Verification: PASS (7 files; 0 modified, 0 missing, 0 extra)" in out
+    assert (
+        f"Moved {bundle_id} → {copy}  (7 payload files verified at the destination "
+        "— 7 already there, 0 copied — before the source was removed)"
+    ) in out
+
+    assert not bundle.exists() and not bundle.parent.exists()
+    assert _payload_hashes(copy) == payload_before
+    assert not list(vault.glob("*/.mv-*"))
+    manifest = load_manifest(copy)
+    assert manifest["schema_version"] == SCHEMA_VERSION
+    assert manifest["archive"]["migrations"][-1]["from_schema"] == "1.8.0"
+    move = manifest["archive"]["moves"][-1]
+    assert move["from_location"] == str(bundle.resolve())
+    assert (move["method"], move["adopted"], move["copied"]) == ("adopt", 7, 0)
+    assert "replaced" not in move
+    assert manifest["archive"]["location"] == str(copy.resolve())
+    assert manifest["validation"]["checksum_verification"]["status"] == "pass"
+    assert str(copy) in (copy / "VERIFICATION.md").read_text(encoding="utf-8")
+    assert not (copy / "transfer.lock").exists()
+
+    assert main(["--vault", str(vault), "list", "--json"]) == 0
+    rows = json.loads(capsys.readouterr().out)
+    assert [(r["bundle_id"], r["status"]) for r in rows] == [(bundle_id, "have")]
+
+
+def test_mv_lands_copying_only_what_is_missing_or_wrong(
+    tmp_path, vault, test_provider, capsys
+):
+    src_vault = tmp_path / "src"
+    src_vault.mkdir()
+    bundle = _registered_bundle(src_vault, test_provider)
+    before = _payload_hashes(bundle)
+    total = len(before)
+    copy = _rsync(bundle, vault)
+    # Since the rsync: one file rotted in place, one was cut short, one never
+    # arrived, the notes went stale, and the destination hydrated its own copy.
+    rotted = copy / "model" / "model.safetensors"
+    rotted.write_bytes(b"x" * rotted.stat().st_size)
+    (copy / "model" / "config.json").write_bytes(b"{")
+    (copy / "model" / "generation_config.json").unlink()
+    (copy / "curation.md").write_text("# stale notes\n", encoding="utf-8")
+    (copy / "hydration.json").write_text('{"engine": "dest"}\n', encoding="utf-8")
+
+    assert main(["--vault", str(src_vault), "mv", BUNDLE_ID, str(vault)]) == 0
+    out = capsys.readouterr().out
+    assert (
+        f"how:      {total - 2} of {total} payload files are already there at the "
+        "recorded size — hash them in place, copy the other 2 ("
+    ) in out
+    assert (
+        "notes:    the destination's curation.md differs and is replaced by this "
+        "bundle's"
+    ) in out
+    assert (
+        "model/model.safetensors  differs from the record at the destination — "
+        "copying from the source"
+    ) in out
+    assert (
+        f"{total} payload files verified at the destination — {total - 3} already "
+        "there, 3 copied"
+    ) in out
+
+    assert not bundle.exists()
+    assert _payload_hashes(copy) == before
+    assert (copy / "curation.md").read_text(encoding="utf-8") == "# curated by hand\n"
+    assert (copy / "hydration.json").read_text(encoding="utf-8") == (
+        '{"engine": "dest"}\n'
+    ), "the destination's vault-local file is its own"
+    assert not (copy / "transfer.lock").exists()
+    move = load_manifest(copy)["archive"]["moves"][-1]
+    assert (move["method"], move["adopted"], move["copied"], move["replaced"]) == (
+        "adopt",
+        total - 3,
+        3,
+        ["model/model.safetensors"],
+    )
+    history = json.loads((copy / "verification.json").read_text(encoding="utf-8"))
+    assert history["latest"]["checksum"]["status"] == "pass"
+    assert history["latest"]["checksum"]["files_checked"] == total
+
+
+def test_mv_onto_existing_keeps_notes_written_there_when_the_bundle_has_none(
+    tmp_path, vault, test_provider, capsys
+):
+    test_provider.add_repo("acme/toy", model_files())
+    src_vault = tmp_path / "src"
+    src_vault.mkdir()
+    bundle = archive_quiet("test:acme/toy", vault=src_vault)
+    (bundle / "curation.md").unlink()  # the template archive seeds; no notes yet
+    copy = _rsync(bundle, vault)
+    (copy / "curation.md").write_text(
+        "# written at the destination\n", encoding="utf-8"
+    )
+
+    assert main(["--vault", str(src_vault), "mv", BUNDLE_ID, str(vault)]) == 0
+    out = capsys.readouterr().out
+    assert (
+        "notes:    the destination's curation.md is kept — this bundle has none" in out
+    )
+    assert (copy / "curation.md").read_text(encoding="utf-8") == (
+        "# written at the destination\n"
+    )
+
+
+def test_mv_dry_run_onto_existing_touches_nothing(
+    tmp_path, vault, test_provider, capsys
+):
+    src_vault = tmp_path / "src"
+    src_vault.mkdir()
+    bundle = _registered_bundle(src_vault, test_provider)
+    copy = _rsync(bundle, vault)
+    (copy / "model" / "generation_config.json").unlink()
+    source_before = _tree(bundle)
+    copy_before = _tree(copy)
+
+    assert main(["--vault", str(src_vault), "mv", BUNDLE_ID, str(vault), "-n"]) == 0
+    out = capsys.readouterr().out
+    assert out.startswith(f"Would move {BUNDLE_ID}\n")
+    assert f"  to:       {copy}  (exists)" in out
+    assert (
+        "already there at the recorded size — hash them in place, copy the other 1 ("
+        in out
+    )
+    assert "Dry run: nothing copied, nothing removed. To move:" in out
+    assert _tree(bundle) == source_before
+    assert _tree(copy) == copy_before
+
+
+def test_mv_landing_failure_leaves_both_sides_as_they_were(
+    tmp_path, vault, test_provider, monkeypatch
+):
+    src_vault = tmp_path / "src"
+    src_vault.mkdir()
+    bundle = _registered_bundle(src_vault, test_provider)
+    copy = _rsync(bundle, vault)
+    (copy / "model" / "model.safetensors").unlink()
+    source_before = _tree(bundle)
+    record_before = (copy / "manifest.json").read_bytes()
+    _rotting_copy(monkeypatch)
+
+    with pytest.raises(SystemExit, match="does not match the record after copying"):
+        move_bundle(bundle, vault, progress=silent)
+
+    assert _tree(bundle) == source_before
+    assert (copy / "manifest.json").read_bytes() == record_before
+    assert not (bundle / "transfer.lock").exists()
+    assert not (copy / "transfer.lock").exists()
+
+
+def test_mv_onto_existing_warns_about_a_network_mount(
+    tmp_path, vault, test_provider, monkeypatch
+):
+    import darsay.transfer as transfer
+
+    src_vault = tmp_path / "src"
+    src_vault.mkdir()
+    bundle = _registered_bundle(src_vault, test_provider)
+    _rsync(bundle, vault)
+    monkeypatch.setattr(transfer, "is_network_filesystem", lambda path: True)
+
+    logs: list[str] = []
+    move_bundle(bundle, vault, progress=logs.append, dry_run=True)
+    assert any(
+        "warning:  the destination is on a network mount, so verifying there "
+        "reads every payload byte back over the wire" in line
+        for line in logs
+    )
 
 
 def test_mv_payload_is_never_modified(tmp_path, vault, test_provider, monkeypatch):
@@ -352,12 +584,13 @@ def test_cp_verification_failure_records_nothing_anywhere(
     assert not list(vault.glob("*/.cp-*"))
 
 
-def test_cp_refusals_and_force_refresh_dedupes_the_replica(
+def test_cp_refusals_and_a_second_cp_refreshes_the_backup(
     tmp_path, vault, test_provider
 ):
     src_vault = tmp_path / "src"
     src_vault.mkdir()
     bundle = _registered_bundle(src_vault, test_provider)
+    payload = _payload_hashes(bundle)
 
     with pytest.raises(SystemExit, match="destination vault does not exist"):
         copy_bundle(bundle, tmp_path / "not-mounted", progress=silent)
@@ -366,14 +599,33 @@ def test_cp_refusals_and_force_refresh_dedupes_the_replica(
         copy_bundle(bundle, src_vault, progress=silent)
 
     dest = copy_bundle(bundle, vault, progress=silent)
-    with pytest.raises(SystemExit, match=r"already exists \(use --force"):
-        copy_bundle(bundle, vault, progress=silent)
 
-    # Refreshing the backup: one replica entry per location, not two.
+    # Refreshing the backup: the notes changed at the source and one file
+    # rotted on the backup disk. The backup is hashed in place, the rotted
+    # file is the only payload byte copied, and each side lists the other once.
     (bundle / "curation.md").write_text("# revised notes\n", encoding="utf-8")
-    again = copy_bundle(bundle, vault, force=True, progress=silent)
+    rotted = dest / "model" / "model.safetensors"
+    rotted.write_bytes(b"x" * rotted.stat().st_size)
+    logs: list[str] = []
+    again = copy_bundle(bundle, vault, progress=logs.append)
     assert again == dest
+    assert any(
+        "how:      all 7 payload files are already there at the recorded size — "
+        "hash them in place, copy nothing, and keep the source; both manifests "
+        "record the replica" in line
+        for line in logs
+    )
+    assert any(
+        "model/model.safetensors  differs from the record at the destination" in line
+        for line in logs
+    )
+    assert logs[-1].endswith(
+        "(7 payload files verified at the destination — 6 already there, 1 copied; "
+        "source kept, replica recorded in both manifests)"
+    )
+    assert _payload_hashes(dest) == payload
     assert (dest / "curation.md").read_text(encoding="utf-8") == "# revised notes\n"
+    assert "moves" not in load_manifest(dest)["archive"], "a copy is not a move"
     for side in (bundle, dest):
         replicas = load_manifest(side)["archive"]["replicas"]
         assert len(replicas) == 1, replicas

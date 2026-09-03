@@ -55,8 +55,10 @@ These match the list in `CLAUDE.md` / `CONTRIBUTING.md`:
   already marks verified (unless `--rehash`). `darsay mv` / `darsay cp` do
   no less than rsync + verify (+ rm): the copy is re-hashed at the
   destination before the source is removed or the replica is recorded, a
-  failed verification leaves the source untouched and registers nothing,
-  and a partial is refused (`tests/integration/test_relocate.py`).
+  copy already at the destination is hashed in place with only what is
+  missing or differs copied, a failed verification leaves the source
+  untouched and registers nothing, and a partial is refused
+  (`tests/integration/test_relocate.py`).
 - The same bundle state exports to a byte-identical `.mvb.tar` (marker first,
   volatile files excluded, `darsay-verify.py` always the canonical copy).
 - Manifests record what was established; unknown is `null`; query caps are

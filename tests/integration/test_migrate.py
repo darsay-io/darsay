@@ -499,3 +499,57 @@ def test_migration_plan_names_the_ledger_only_when_it_travelled(vault):
     assert edges(with_ledger) == edges(without)
     assert with_ledger["record"]["lineage"]["parents"][0]["declared_by"] == "card"
     assert without["record"]["lineage"]["parents"][0]["declared_by"] == "tag"
+
+
+def test_migrate_says_when_the_records_own_verification_still_stands(vault, capsys):
+    """A bundle archived here and never moved: its record's last pass is at
+    this path on this host, so ``migrate`` says so instead of sending the
+    operator to re-hash a payload nothing has touched."""
+    import socket
+
+    bundle = place(vault, TOY)
+    record = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+    record["archive"]["location"] = str(bundle.resolve())
+    record["archive"]["host"] = socket.gethostname()
+    (bundle / "manifest.json").write_text(
+        json.dumps(record, indent=2) + "\n", encoding="utf-8"
+    )
+    date = record["validation"]["checksum_verification"]["at"][:10]
+
+    assert main(["--vault", str(vault), "migrate", str(bundle), "-n"]) == 0
+    out = capsys.readouterr().out
+    assert (
+        "payload:    7 files present at the recorded sizes; bytes untouched, not "
+        f"re-hashed — passed verification at this path on {date}, per the record"
+    ) in out
+
+    assert main(["--vault", str(vault), "migrate", str(bundle)]) == 0
+    out = capsys.readouterr().out
+    assert "next:" not in out
+    assert (
+        f"done:  the record says the payload passed verification at this path on "
+        f"{date}; `darsay verify {TOY}@{REV}` re-hashes it at any time"
+    ) in out
+
+
+def test_migrate_all_sends_only_the_arrivals_to_verify(vault, capsys):
+    import socket
+
+    stays = place(vault, PLAIN)
+    record = json.loads((stays / "manifest.json").read_text(encoding="utf-8"))
+    record["archive"]["location"] = str(stays.resolve())
+    record["archive"]["host"] = socket.gethostname()
+    (stays / "manifest.json").write_text(
+        json.dumps(record, indent=2) + "\n", encoding="utf-8"
+    )
+    place(vault, ROWS)  # its record's last pass was on another machine
+
+    assert main(["--vault", str(vault), "migrate", "--all"]) == 0
+    out = capsys.readouterr().out
+    assert "  next: re-hash each payload where it landed:\n" in out
+    assert f"  darsay verify {ROWS}@{REV}\n" in out
+    assert f"  darsay verify {PLAIN}@{REV}\n" not in out
+    assert (
+        "  1 record say the payload passed verification at its path; "
+        "`darsay verify` re-hashes at any time"
+    ) in out

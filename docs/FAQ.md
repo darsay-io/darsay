@@ -30,7 +30,9 @@ it was. `-n` shows which of the two it will do and where the bundle
 lands.
 
 Or rsync it — next question. Both are correct. `mv` is the one with the
-refusals built in.
+refusals built in, and it is happy to finish what an rsync started: a
+copy already at the destination is hashed in place, not copied again
+(two questions down).
 
 ### Is rsync still a valid way to move or copy a bundle? Will it stay valid?
 
@@ -47,6 +49,10 @@ darsay --vault /Volumes/big verify qwen--qwen3-0.6b     # on the host that owns 
 darsay rm qwen--qwen3-0.6b --yes
 ```
 
+Or two steps: rsync, then `darsay mv` — which finds the copy already
+there, hashes it in place, copies nothing that matched, and does the
+bookkeeping and the removal for you (next question).
+
 `darsay mv` is those three steps as one verb with the refusals attached.
 It is sugar over the contract rsync already satisfies, and it will never
 become a requirement: nothing `mv` records is needed to open, verify, run,
@@ -56,6 +62,46 @@ whose path is true — never a change to the payload. The design and the
 reasons are in [Incremental transfer §1](INCREMENTAL.md#1-why-this-can-beat-rsync-at-fetching--and-why-rsync-still-copies-disks);
 the tests that hold it are `tests/integration/test_transfer.py`
 (rsync then darsay) and `tests/integration/test_relocate.py`.
+
+### I rsync'd the bundle to the other disk earlier. What does `mv` do with the copy that is already there?
+
+Lands on it. `mv` and `cp` treat a destination that already holds
+`<name>/<rev>/` as a landing site, not a conflict. Each payload file
+already there at its recorded size is hashed *where it is* and kept when
+it matches; a file that is missing, at another size, or hashes wrong is
+copied from the bundle; then the bundle's own record, views, notes, and
+ledger replace the copy's, the verification is recorded, and the source
+is removed. Nothing that already matched crosses the cable again. This
+is adoption — the first step `archive` and `assemble` take over bytes
+they find on disk — and it is what makes "rsync, then `darsay mv`" cost
+one read of the destination and nothing else.
+
+```
+$ darsay mv zai-org--glm-4.5v /Volumes/PIXEL/darsay/vault
+Moving zai-org--glm-4.5v@ed47433b3711
+  from:     ~/darsay/zai-org--glm-4.5v/ed47433b3711
+  to:       /Volumes/PIXEL/darsay/vault/zai-org--glm-4.5v/ed47433b3711  (exists)
+  how:      all 56 payload files are already there at the recorded size — hash them in place, copy nothing, then remove the source
+  disk:     needs 61.4 KiB, free 1.8 TiB (2.0 GiB floor) at /Volumes/PIXEL/darsay/vault/zai-org--glm-4.5v/ed47433b3711 — OK
+Landing on /Volumes/PIXEL/darsay/vault/zai-org--glm-4.5v/ed47433b3711: hashing 56 payload files in place, copying 0 (0 B) ...
+Verification: PASS (56 files; 0 modified, 0 missing, 0 extra)
+Moved zai-org--glm-4.5v@ed47433b3711 → /Volumes/PIXEL/darsay/vault/zai-org--glm-4.5v/ed47433b3711  (56 payload files verified at the destination — 56 already there, 0 copied — before the source was removed)
+```
+
+The copy's record may be older than the bundle's — an rsync made before
+a `darsay migrate`, as here — and that is fine: `mv` never reads it. The
+record that lands is the one you are moving. `archive.moves` says
+`method: adopt`, how many files were already there, how many were
+copied, and which, if any, were there but hashed wrong (`replaced`).
+
+Two things a landing will not do silently. If the destination holds
+payload files this bundle's record does not list — another pin of the
+same revision, or a stray file — `mv` refuses and names them; `darsay rm`
+whichever side you do not want, then rerun. And if the destination's
+`curation.md` differs from the bundle's, the plan says so before anything
+moves: the bundle's is the one that lands. A copy you have been curating
+*at* the destination is the live one — `darsay rm` the source instead of
+moving onto it.
 
 ### What is the difference between `darsay mv` and `assemble --handoff`?
 
@@ -69,7 +115,7 @@ the other's object and names the right verb.
 | What crosses | payload, manifest, `curation.md`, generated views, ledger, export log | verified payload files the destination can vouch for |
 | Verification | re-hashes the copy at the destination before the source is removed | trusts dest's own `verified` record (ledger + size after an rsync, or `--rehash`) |
 | Left at the source | nothing; the empty `<name>/` folder is swept | a **skeleton** — pin, expected inventory, every hash, `handed_off` records, no payload bytes — until the last file is handed over, then nothing |
-| Refuses | partials; a destination vault that does not exist; a destination already holding the bundle (unless `--force`) | registered sources — a registered payload is frozen |
+| Refuses | partials; a destination vault that does not exist; a destination holding payload files this record does not list (a copy of *this* bundle already there is landed on, not refused) | registered sources — a registered payload is frozen |
 | For | a finished bundle changing disks | one pin crossing two disks that never mount together |
 
 `darsay cp` is `mv` without the removal — same copy, same verification at
@@ -141,7 +187,9 @@ the path they print is true; `verification.json`; `exports.json`;
 `transfer.json` (disposable, relative paths only). Stays behind:
 `hydration.json` (vault-local) and `transfer.lock` (process-local).
 `.DS_Store` files are not copied. Symlinks are refused; a bundle never
-contains one, and if you put one there, rsync it deliberately.
+contains one, and if you put one there, rsync it deliberately. Onto a
+copy already at the destination, the same set lands and replaces the
+copy's — except a `hydration.json` there, which is that vault's own.
 
 ### Does moving change the bundle hash?
 
@@ -162,11 +210,12 @@ darsay cp qwen--qwen3-0.6b /Volumes/backup
 copy at the destination, rename it into place, keep the source. Then
 *both* manifests record the other as a replica — `archive.replicas`
 gains `{at, location, host}` and `backup_status` becomes `replicated` —
-so either side can answer "where else does this live?". Refresh a
-backup with `--force`; the replica entry is keyed by location, so the
-timestamp updates rather than the disk being listed twice. Or rsync
-into the same `<name>/<rev>/` layout and `darsay verify` there — the
-bytes are equally good; only the bookkeeping differs.
+so either side can answer "where else does this live?". Run the same
+`cp` again to refresh the backup: the copy is hashed in place, only what
+is missing or differs is copied, and the replica entry — keyed by
+location — updates its timestamp rather than listing the disk twice. Or
+rsync into the same `<name>/<rev>/` layout and `darsay verify` there —
+the bytes are equally good; only the bookkeeping differs.
 
 ## Older records
 
@@ -195,17 +244,21 @@ payload and hashes none of them, and it says what it did in
 ### Does migrating touch the payload or the bundle hash?
 
 No. Nothing under `model/` (or `data/`) is written, and the inventory —
-the hash record — is carried as recorded, which is why `verify` is the
-line `migrate` prints next: the record is now readable, and hashing the
-payload where it landed is the same step it always was after an rsync.
+the hash record — is carried as recorded. So is the record's own last
+verification: a bundle archived at this path on this host and never
+moved still stands, and `migrate` ends with `done:` and the date it
+passed. A record whose last pass was somewhere else — a bundle that
+arrived by rsync — ends with `next: darsay verify …` instead: the record
+is now readable, and hashing the payload where it landed is the same
+step it always was after an rsync.
 
 ### I run a vault that takes submissions. What is the routine?
 
 ```bash
 darsay list                 # rows marked `migrate` are records this darsay cannot read yet
 darsay migrate --all -n     # every such record: what it will say, and where that comes from
-darsay migrate --all        # write them; the last lines are the verify commands
-darsay verify <bundle>      # each one, on the host that owns the disk
+darsay migrate --all        # write them; the last lines are the verify commands for the ones that arrived from elsewhere
+darsay verify <bundle>      # each of those, on the host that owns the disk
 ```
 
 `darsay doctor` reports them too (`bundle.manifest`, a warning with the
@@ -238,6 +291,6 @@ first disk *and* keep fetching on it, that is a hand-off:
 | **hand-off** | a partial's verified files cross vaults one by one; the source keeps a skeleton | `darsay assemble … --handoff` |
 | **skeleton** | a partial whose verified bytes were handed off: pin + hashes, no payload | made by a hand-off, dissolved by the last one |
 | **relocate a partial** | copy a partial's directory to another vault and continue there | `cp -a` / rsync, then the same `archive` |
-| **adoption** | bytes already on disk that hash to the pin are kept, wherever they came from | what `archive` / `assemble` do first |
+| **adoption** | bytes already on disk that hash to the record are kept, wherever they came from | what `archive` / `assemble` do first; what `mv` / `cp` do onto a copy already at the destination |
 | **export / import** | pack a bundle into one verified file / unpack it with verification | `darsay export`, `darsay import` |
 | **migrate** | a record written under an earlier schema major is re-read under the current model and rewritten in the current shape; the payload is untouched | `darsay migrate` — `import` does it for an older export |

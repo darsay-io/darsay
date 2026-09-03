@@ -24,21 +24,43 @@ def _utc_now():
 
 
 def verify_bundle(bundle_dir: Path, progress=print) -> dict:
+    """Re-hash every payload file where it lives and record the outcome."""
+    from .archiver import load_manifest
+
+    manifest = load_manifest(bundle_dir)
+    actual = hash_payload(bundle_dir, manifest, progress=progress)
+    return record_verification(bundle_dir, actual, progress=progress)
+
+
+def hash_payload(bundle_dir: Path, manifest: dict, progress=print) -> dict:
+    """Every payload file's sha256 and size, keyed by its recorded path."""
+    root = payload_root(manifest)
+    payload_dir = bundle_dir / root
+    progress(
+        f"Re-hashing {len(manifest['inventory']['files'])} files in {payload_dir} ..."
+    )
+    actual = {}
+    for rel, abs_path in iter_payload_files(payload_dir):
+        actual[f"{root}/{rel}"] = {
+            "sha256": hash_file(abs_path, with_blake3=False)["sha256"],
+            "size": abs_path.stat().st_size,
+        }
+    return actual
+
+
+def record_verification(bundle_dir: Path, actual: dict, progress=print) -> dict:
+    """Compare hashes read where the payload lives against the record, and write it.
+
+    ``actual`` is what ``hash_payload`` returns — or what ``darsay mv`` /
+    ``cp`` gather in their one pass over a destination they land on. The
+    outcome goes to the manifest (validation, ``archive.last_integrity_check``,
+    security flags), ``verification.json`` (history), and ``VERIFICATION.md``.
+    """
     from .archiver import load_manifest, write_manifest
 
     manifest = load_manifest(bundle_dir)
     root = payload_root(manifest)
-    payload_dir = bundle_dir / root
     expected = {r["path"]: r for r in manifest["inventory"]["files"]}
-
-    progress(f"Re-hashing {len(expected)} files in {payload_dir} ...")
-    actual = {}
-    for rel, abs_path in iter_payload_files(payload_dir):
-        path = f"{root}/{rel}"
-        actual[path] = {
-            "sha256": hash_file(abs_path, with_blake3=False)["sha256"],
-            "size": abs_path.stat().st_size,
-        }
 
     missing = sorted(set(expected) - set(actual))
     extra = sorted(set(actual) - set(expected))

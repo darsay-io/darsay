@@ -9,8 +9,46 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Breaking
+
+- **`darsay mv` and `darsay cp` land on a destination that already holds
+  the bundle; `--force` is gone.** A copy already at `<vault>/<name>/<rev>/`
+  — an rsync made earlier, a backup being refreshed, a partial someone
+  started there — is a landing site, not a conflict. Every payload file
+  there at its recorded size is hashed in place and kept when it matches;
+  only what is missing, at another size, or hashes wrong is copied; the
+  bundle's own record, views, notes, and ledger replace the copy's (a
+  `hydration.json` there is that vault's own and stays); the verification
+  is recorded; then the source is removed (`mv`) or the replica recorded
+  on both sides (`cp`). This is the *rsync is a first-class copy*
+  invariant applied to the verbs: rsync, then `darsay mv`, reads the
+  destination once and copies nothing that matched — where before it
+  refused, and `--force` threw the rsync'd bytes away and copied them
+  again. The copy's record is never read, so an rsync made before a
+  `darsay migrate` lands fine. The plan says `(exists)` and how many
+  files are already there; `archive.moves` records `method: adopt` with
+  `adopted` and `copied` counts and, for files that were there but hashed
+  wrong, `replaced`. What a landing refuses: a destination holding payload
+  files the record does not list — another pin of the same revision — is
+  named, with `darsay rm` for either side. When the destination's
+  `curation.md` differs from the bundle's, the plan says so before
+  anything moves; the bundle's lands. Recovery: drop `--force` from any
+  script — a second `cp` refreshes a backup by itself.
+
 ### Changed
 
+- **`darsay migrate` sends only arrivals to `darsay verify`.** A record
+  whose last verification passed at this path on this host — a bundle
+  archived here and never moved — still stands after migration, and the
+  `payload:` line and the closing `done:` line say so with the date.
+  `next: darsay verify …` is printed for a record whose last pass was
+  somewhere else (a bundle that arrived by rsync) or whose payload no
+  longer matches the record by path and size; under `--all`, only those
+  are listed. Migration never touched the payload, so the record's own
+  verification is as true after it as before.
+- `verify.py` is two steps — `hash_payload` reads the payload where it
+  lives, `record_verification` writes the outcome — so `mv` / `cp` can
+  record their single landing pass without hashing anything twice.
 - **A docs page no longer breaks the website after the tag.** The release
   gate reads the docs' links: every relative link in `README.md`,
   `CONTRIBUTING.md`, `examples/README.md`, and every `docs/*.md` — Markdown

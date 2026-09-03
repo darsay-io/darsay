@@ -111,8 +111,9 @@ The short list that every document, and every change, is measured against:
    ledger loss, and copying to another vault. No source-machine absolute
    paths in the ledger. rsync is a first-class copy: the next darsay
    command trusts dest ledger + size and fetches only what is still missing.
-   `darsay mv` / `darsay cp` are that contract as verbs (copy, verify where
-   it landed, then remove or keep the source) and are never a requirement.
+   `darsay mv` / `darsay cp` are that contract as verbs (copy — or land on
+   a copy already there, hashing it in place — verify where it landed,
+   then remove or keep the source) and are never a requirement.
 3. **Export determinism.** The same bundle state produces a byte-identical
    `.mvb.tar`. Volatile machine-local files are excluded.
 4. **Record, don't fabricate.** Manifests contain only what was established.

@@ -1626,19 +1626,36 @@ def cmd_migrate(args) -> int:
         print()
         _dry_run_done(args, "nothing written", "migrate")
         return 0
+    # A record whose last pass was at this path on this host still stands;
+    # one that arrived from elsewhere is hashed where it landed.
+    pending = [plan for plan in todo if not plan.get("verified_here")]
+    stands = [plan for plan in todo if plan.get("verified_here")]
     print()
     if len(todo) == 1:
-        print(
-            f"  next:  darsay verify {todo[0]['bundle_id']}   "
-            "(re-hash the payload where it landed)"
-        )
-    else:
-        print(
-            f"Migrated {len(todo)} records to schema {todo[0]['to_schema']}."
-            "  next: re-hash each payload where it landed:"
-        )
-        for plan in todo:
+        plan = todo[0]
+        if pending:
+            print(
+                f"  next:  darsay verify {plan['bundle_id']}   "
+                "(re-hash the payload where it landed)"
+            )
+        else:
+            print(
+                f"  done:  the record says the payload passed verification at this "
+                f"path on {plan['verified_here']}; `darsay verify "
+                f"{plan['bundle_id']}` re-hashes it at any time"
+            )
+        return 0
+    print(f"Migrated {len(todo)} records to schema {todo[0]['to_schema']}.")
+    if pending:
+        print("  next: re-hash each payload where it landed:")
+        for plan in pending:
             print(f"  darsay verify {plan['bundle_id']}")
+    if stands:
+        print(
+            f"  {len(stands)} record{'s' if len(stands) != 1 else ''} say the "
+            "payload passed verification at its path; `darsay verify` re-hashes "
+            "at any time"
+        )
     return 0
 
 
@@ -1648,12 +1665,7 @@ def cmd_mv(args) -> int:
     # Resolve partials too, so a partial gets the verb that fits it instead
     # of "no manifest.json"; move_plan does the refusing.
     bundle = _bundle_dir(args, require_manifest=False)
-    move_bundle(
-        bundle,
-        Path(args.dest_vault).expanduser(),
-        force=args.force,
-        dry_run=args.dry_run,
-    )
+    move_bundle(bundle, Path(args.dest_vault).expanduser(), dry_run=args.dry_run)
     if args.dry_run:
         _dry_run_done(args, "nothing copied, nothing removed", "move")
     return 0
@@ -1663,12 +1675,7 @@ def cmd_cp(args) -> int:
     from .relocate import copy_bundle
 
     bundle = _bundle_dir(args, require_manifest=False)
-    copy_bundle(
-        bundle,
-        Path(args.dest_vault).expanduser(),
-        force=args.force,
-        dry_run=args.dry_run,
-    )
+    copy_bundle(bundle, Path(args.dest_vault).expanduser(), dry_run=args.dry_run)
     if args.dry_run:
         _dry_run_done(args, "nothing copied", "copy")
     return 0
@@ -2498,7 +2505,9 @@ def build_parser() -> argparse.ArgumentParser:
         "mv",
         help=(
             "move a registered bundle into another vault: copy, verify the "
-            "copy there, then remove the source (a rename on the same disk)"
+            "copy there, then remove the source (a rename on the same disk; "
+            "a copy already there is hashed in place and only what differs "
+            "is copied)"
         ),
     )
     p.add_argument("bundle", help=bundle_help)
@@ -2507,14 +2516,10 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="VAULT",
         help="destination vault root; must already exist (an unmounted disk is not a vault)",
     )
-    p.add_argument(
-        "--force",
-        action="store_true",
-        help="replace an existing bundle at the destination",
-    )
     _add_dry_run(
         p,
-        "print where the bundle would land and how (rename, or copy + verify); move nothing",
+        "print where the bundle would land and how (rename, copy + verify, or "
+        "land on what is already there); move nothing",
     )
     p.set_defaults(func=cmd_mv)
 
@@ -2522,7 +2527,8 @@ def build_parser() -> argparse.ArgumentParser:
         "cp",
         help=(
             "copy a registered bundle into another vault: copy, verify the "
-            "copy there, keep the source; both manifests record the replica"
+            "copy there, keep the source; both manifests record the replica "
+            "(run it again to refresh a backup — only what differs is copied)"
         ),
     )
     p.add_argument("bundle", help=bundle_help)
@@ -2530,11 +2536,6 @@ def build_parser() -> argparse.ArgumentParser:
         "dest_vault",
         metavar="VAULT",
         help="destination vault root; must already exist (an unmounted disk is not a vault)",
-    )
-    p.add_argument(
-        "--force",
-        action="store_true",
-        help="replace an existing bundle at the destination (refresh a backup)",
     )
     _add_dry_run(p, "print where the copy would land and what it costs; copy nothing")
     p.set_defaults(func=cmd_cp)

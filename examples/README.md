@@ -520,9 +520,37 @@ darsay --vault /Volumes/big verify qwen--qwen3-0.6b     # on the host that owns 
 darsay rm qwen--qwen3-0.6b --yes
 ```
 
-Over SMB or NFS, prefer that form: `mv` verifies by reading the copy back,
-which over the wire is a second trip of the whole payload, and it says so
-before it starts. `mv` refuses a partial — that is
+Or rsync and then `mv`. A destination that already holds the bundle is
+landed on, not refused: every payload file already there at its recorded
+size is hashed in place and kept when it matches, only what is missing or
+differs is copied, and the bundle's own record replaces the copy's — even
+when the copy's record is older, from an rsync made before a `darsay
+migrate`. The copy is read once and nothing that matched crosses again.
+
+```
+$ darsay mv qwen--qwen3-0.6b /Volumes/big
+Moving qwen--qwen3-0.6b@c1899de289a0
+  from:     ~/darsay/qwen--qwen3-0.6b/c1899de289a0
+  to:       /Volumes/big/qwen--qwen3-0.6b/c1899de289a0  (exists)
+  how:      6 of 7 payload files are already there at the recorded size — hash them in place, copy the other 1 (1.4 GiB), then remove the source
+  disk:     needs 1.4 GiB, free 400.2 GiB (2.0 GiB floor) at /Volumes/big/qwen--qwen3-0.6b/c1899de289a0 — OK
+Landing on /Volumes/big/qwen--qwen3-0.6b/c1899de289a0: hashing 6 payload files in place, copying 1 (1.4 GiB) ...
+  model/model.safetensors  (1.4 GiB)  copying
+Verification: PASS (7 files; 0 modified, 0 missing, 0 extra)
+Moved qwen--qwen3-0.6b@c1899de289a0 → /Volumes/big/qwen--qwen3-0.6b/c1899de289a0  (7 payload files verified at the destination — 6 already there, 1 copied — before the source was removed)
+```
+
+`archive.moves` records `method: adopt` with those counts. A file that
+was there at the right size but hashed wrong is copied over and listed
+under `replaced`. The one landing `mv` refuses is onto payload files this
+record does not list — another pin of the same revision — and it names
+them and `darsay rm` for either side. When the destination's `curation.md`
+differs from the bundle's, the plan says so before anything moves; the
+bundle's lands.
+
+Over SMB or NFS, prefer the rsync form: `mv` verifies by reading the
+destination back, which over the wire is a second trip of the whole
+payload, and it says so before it starts. `mv` refuses a partial — that is
 [`assemble --handoff`](#archive-in-halves-across-two-disks) or the recipe
 below. Which verb when: [FAQ](../docs/FAQ.md#moving-bundles).
 
@@ -552,8 +580,10 @@ Copied qwen--qwen3-0.6b@c1899de289a0 → /Volumes/backup/qwen--qwen3-0.6b/c1899d
 
 Afterwards `darsay info` on either side shows `Replicas: 1`, and the
 manifest's `archive.replicas` names the other location. Refresh the backup
-later with `--force`: the entry is keyed by location, so the timestamp
-updates instead of the disk being listed twice. On the same APFS volume
+later by running the same `cp` again: the backup is hashed in place, only
+what is missing or differs is copied, and the replica entry — keyed by
+location — updates its timestamp instead of the disk being listed twice.
+On the same APFS volume
 the files arrive as copy-on-write clones and cost no space until they
 diverge. rsync into the same layout, then `darsay verify` there, is the
 same copy without the bookkeeping — and always will be.
@@ -600,8 +630,9 @@ payload back over the wire). `assemble` warns before it hashes a dest
 that sits on a network mount.
 A registered payload is frozen: rsync it, verify dest on the dest host,
 then `darsay rm` the source — or [`darsay mv`](#move-a-bundle-to-another-vault),
-which is those three steps with the refusals built in. `--handoff` is the
-verb for partials.
+which is those three steps with the refusals built in, and after an rsync
+lands on the copy instead of making another. `--handoff` is the verb for
+partials.
 
 ---
 

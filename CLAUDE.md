@@ -39,8 +39,11 @@ are not optional, and *master* is not one of them.
   `relocate.py` (`darsay mv` / `darsay cp`: relocate or replicate a registered
   bundle into another vault — `mv` renames on one filesystem, else copy →
   verify at the destination → remove the source; `cp` copies → verifies →
-  keeps the source and records the replica in both manifests; partials are
-  refused, `assemble --handoff` is their verb),
+  keeps the source and records the replica in both manifests; a
+  destination already holding the bundle is landed on — payload hashed in
+  place, only what is missing or differs copied, `method: adopt` — and
+  never refused or re-copied; partials are refused, `assemble --handoff`
+  is their verb),
   `migrate.py` (`darsay migrate`: brings a record written under an earlier
   schema major to the schema this darsay writes — offline, from the record
   and the payload, hashing nothing; the one place an older major is read;
@@ -129,10 +132,11 @@ are not optional, and *master* is not one of them.
   and it must not pull dest back over a network mount to re-hash a copy.
   Hash dest where it is a local disk (`assemble --rehash` / `verify`).
   **This stays true forever:** `darsay mv` and `darsay cp` are that same
-  contract folded into verbs (copy, verify where it landed, then remove or
-  keep the source; `mv` is a rename on one filesystem) and must never become
-  a requirement — nothing they record is needed to open, verify, run, or
-  export a bundle. Vocabulary:
+  contract folded into verbs (copy — or, onto a copy already there, hash
+  in place and copy only what is missing or differs — verify where it
+  landed, then remove or keep the source; `mv` is a rename on one
+  filesystem) and must never become a requirement — nothing they record
+  is needed to open, verify, run, or export a bundle. Vocabulary:
   *move* = a registered bundle changes vault (`mv`); *hand-off* = a
   partial's verified files cross vaults one by one, leaving a skeleton
   (`assemble --handoff`, ledger state `handed_off`). Never call the second
@@ -163,7 +167,10 @@ are not optional, and *master* is not one of them.
   bundle enters the vault; failures register nothing and exit non-zero.
 - **Generated vs hand-edited:** bundle `README.md` is a derived view
   (`regen`); `curation.md` is the curator's file and must never be
-  overwritten once it exists.
+  overwritten by a generated view once it exists. `mv` / `cp` carry the
+  bundle's own `curation.md` onto a copy already at the destination and
+  say so in the plan when the two differ; a bundle with none leaves the
+  copy's in place.
 - **Extensibility:** new artifact types are added via the `ARTIFACT_TYPES`
   registry in `schema.py`, new inference runtimes via the `ENGINES`
   registry in `hydrate.py`, and new acquisition hosts via `SourceProvider`

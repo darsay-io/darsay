@@ -164,8 +164,9 @@ def test_flags_by_command_walks_every_subparser():
     assert "--prune" in flags["envs"]
     assert "--handoff" in flags["assemble"]
     assert "--rehash" in flags["assemble"]
-    assert "--force" in flags["mv"]
-    assert "--force" in flags["cp"]
+    # A destination already holding the bundle is landed on, never replaced.
+    assert "--force" not in flags["mv"]
+    assert "--force" not in flags["cp"]
     assert {"--all", "--json", "--dry-run"} <= flags["migrate"]
 
 
