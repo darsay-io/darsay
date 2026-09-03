@@ -9,6 +9,7 @@ verification.json (history), and VERIFICATION.md (human report).
 from __future__ import annotations
 
 import json
+import socket
 from pathlib import Path
 
 from .hashing import bundle_hash, hash_file, iter_payload_files
@@ -29,7 +30,14 @@ def verify_bundle(bundle_dir: Path, progress=print) -> dict:
 
     manifest = load_manifest(bundle_dir)
     actual = hash_payload(bundle_dir, manifest, progress=progress)
-    return record_verification(bundle_dir, actual, progress=progress)
+    report = record_verification(bundle_dir, actual, progress=progress)
+    came_from = report.get("relocated_from")
+    if came_from:
+        progress(
+            f"Location: {report['location']} on {report['host']}  "
+            f"(the record said {came_from['location']} on {came_from['host']})"
+        )
+    return report
 
 
 def hash_payload(bundle_dir: Path, manifest: dict, progress=print) -> dict:
@@ -48,13 +56,22 @@ def hash_payload(bundle_dir: Path, manifest: dict, progress=print) -> dict:
     return actual
 
 
-def record_verification(bundle_dir: Path, actual: dict, progress=print) -> dict:
+def record_verification(
+    bundle_dir: Path, actual: dict, progress=print, *, at: Path | None = None
+) -> dict:
     """Compare hashes read where the payload lives against the record, and write it.
 
     ``actual`` is what ``hash_payload`` returns — or what ``darsay mv`` /
     ``cp`` gather in their one pass over a destination they land on. The
     outcome goes to the manifest (validation, ``archive.last_integrity_check``,
     security flags), ``verification.json`` (history), and ``VERIFICATION.md``.
+
+    A verification is a fact about bytes at a path on a host, so
+    ``archive.location`` / ``archive.host`` become where the payload was
+    read: an rsync'd copy verified where it landed carries a true location
+    without a ``mv``. The report says ``relocated_from`` when they changed.
+    ``at`` names that path when it is not ``bundle_dir`` — a staging copy
+    about to be renamed into place is recorded at its final home.
     """
     from .archiver import load_manifest, write_manifest
 
@@ -110,8 +127,25 @@ def record_verification(bundle_dir: Path, actual: dict, progress=print) -> dict:
         # again. Archive-time upstream-mismatch is a recorded fact and stays.
         manifest["security"]["integrity_status"] = "verified-against-upstream"
 
+    here = str((at or bundle_dir).resolve())
+    host = socket.gethostname()
+    archive = manifest["archive"]
+    relocated_from = None
+    if archive.get("location") != here or archive.get("host") != host:
+        relocated_from = {
+            "location": archive.get("location"),
+            "host": archive.get("host"),
+        }
+        archive["location"] = here
+        archive["host"] = host
     write_manifest(bundle_dir, manifest)
+    if relocated_from:
+        from .readme_gen import write_bundle_readme
+
+        write_bundle_readme(bundle_dir, manifest)
     report = write_verification_report(bundle_dir, checksum, completeness)
+    if relocated_from:
+        report["relocated_from"] = relocated_from
 
     progress(
         f"Verification: {status.upper()} "
@@ -130,6 +164,8 @@ def write_verification_report(
         "at": checksum["at"],
         "bundle_id": manifest["bundle_id"],
         "type": "initial-archive" if first_run else "re-verification",
+        "location": manifest["archive"].get("location"),
+        "host": manifest["archive"].get("host"),
         "checksum": checksum,
         "completeness": {
             "status": completeness.get("status"),
@@ -188,6 +224,7 @@ def _write_verification_md(
         f"- **Result:** {report['result'].upper()}",
         f"- **Run at:** {report['at']}",
         f"- **Run type:** {report['type']} (run {run_count} recorded in verification.json)",
+        f"- **Where:** `{report.get('location')}` on {report.get('host')}",
         f"- **Files checked:** {c['files_checked']}",
         f"- **Bundle hash:** `{manifest['inventory']['bundle_hash']['value']}`"
         + (

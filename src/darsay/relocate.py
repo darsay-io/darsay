@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import errno
 import os
+import shlex
 import shutil
 import socket
 from pathlib import Path
@@ -37,6 +38,13 @@ from pathlib import Path
 # generated views, the disposable-but-portable transfer ledger, export log)
 # travels.
 LEAVE_BEHIND = frozenset({"hydration.json", "transfer.lock"})
+
+# What an rsync of a bundle should not carry: the two files above, and the
+# Finder droppings that would count as an unlisted payload file at the
+# destination. Never ``--delete``: a stray file at the destination is
+# refused by name, and ``--delete`` pointed one directory too high empties
+# a vault.
+RSYNC_EXCLUDES = ("hydration.json", "transfer.lock", ".DS_Store")
 
 # Files at least this large announce themselves while copying or hashing,
 # so a multi-gigabyte shard is not minutes of silence.
@@ -56,6 +64,22 @@ def _copy_file(source: Path, destination: Path) -> str:
     from .transfer import _copy_local_file
 
     return _copy_local_file(source, destination)
+
+
+def rsync_command(source: Path, dest: Path) -> str:
+    """The rsync line that puts ``source`` at ``dest`` the way ``mv`` would.
+
+    ``-a`` keeps mtimes so a rerun skips what already arrived; ``-P`` keeps
+    a shard that was cut off and shows progress; the excludes are the
+    files a bundle does not carry across vaults. Trailing slashes on both
+    sides: the contents of one directory into the other, whatever the
+    destination's name.
+    """
+    excludes = " ".join(f"--exclude={name}" for name in RSYNC_EXCLUDES)
+    return (
+        f"rsync -aP {excludes} "
+        f"{shlex.quote(str(Path(source).resolve()))}/ {shlex.quote(str(dest))}/"
+    )
 
 
 def bundle_files(bundle_dir: Path) -> list[tuple[str, Path]]:
@@ -122,6 +146,7 @@ def _landing(source: Path, dest: Path, manifest: dict) -> dict:
             curation = "replaced"
     return {
         "present": len(present),
+        "present_bytes": sum(expected[p] for p in present),
         "resized": len(resized),
         "missing": len(missing),
         "copy_bytes": sum(expected[p] for p in resized + missing),
@@ -229,6 +254,7 @@ def relocation_plan(bundle_dir: Path, dest_vault: Path, *, op: str = "mv") -> di
         "op": op,
         "bundle_id": bundle_id,
         "source": bundle_dir,
+        "dest_vault": dest_vault,
         "dest": dest,
         "dest_exists": dest_exists,
         "landing": landing,
@@ -333,13 +359,57 @@ def print_relocation_plan(plan: dict, progress=print, *, dry_run: bool) -> None:
             "`darsay hydrate` again at the destination"
         )
     if plan["network"] and plan["method"] != "rename":
-        then_rm = ", then `darsay rm` the source" if plan["op"] == "mv" else ""
-        progress(
-            "  warning:  the destination is on a network mount, so verifying "
-            "there reads every payload byte back over the wire. For a large "
-            "bundle prefer: rsync it, `darsay verify` on the host that owns the "
-            f"disk{then_rm}."
+        for line in _over_the_wire(plan, dry_run=dry_run):
+            progress(line)
+
+
+def _over_the_wire(plan: dict, *, dry_run: bool) -> list[str]:
+    """The network-mount warning: what the wire will carry, and the local way.
+
+    A verb that verifies at the destination reads the payload back; over
+    SMB or NFS that is a trip of every byte. The lines end with the exact
+    commands that hash the bytes where the disk is instead — rsync carries
+    what is not there yet (with a copy already there, only the record),
+    ``verify`` runs on the host that owns the disk, and ``mv`` finishes with
+    ``rm`` here.
+    """
+    from .readme_gen import human_size
+
+    landing = plan["landing"]
+    if plan["method"] == "adopt":
+        cost = (
+            f"hashing the {landing['present']} payload files already there reads "
+            f"{human_size(landing['present_bytes'])} back over the wire"
         )
+        why_rsync = "the record; payload files already there are skipped"
+    else:
+        cost = (
+            f"copying {human_size(plan['bytes'])} over the wire and reading it "
+            "all back to verify is two trips"
+        )
+        why_rsync = "one trip"
+    lines = [
+        f"  warning:  {plan['dest_vault']} is a network mount: {cost}. To hash "
+        "the bytes where the disk is instead:",
+        f"              {rsync_command(plan['source'], plan['dest'])}    # {why_rsync}",
+        f"              darsay verify {shlex.quote(str(plan['dest']))}    "
+        "# on the host that owns the disk, by its own path for that directory",
+    ]
+    if plan["op"] == "mv":
+        lines.append(
+            f"              darsay rm {plan['bundle_id']} --yes    # here, once that passed"
+        )
+    else:
+        lines.append(
+            "              (that copy is not recorded as a replica; the bytes are "
+            "just as good)"
+        )
+    if not dry_run:
+        lines.append(
+            "            Continuing over the wire; Ctrl-C at any point leaves the "
+            "source untouched."
+        )
+    return lines
 
 
 print_move_plan = print_relocation_plan
@@ -377,8 +447,9 @@ def _copy_and_verify(
     right before it is renamed into place. Returns the verification report
     and how many files arrived as copy-on-write clones.
     """
+    from .archiver import load_manifest
     from .readme_gen import human_size
-    from .verify import verify_bundle
+    from .verify import hash_payload, record_verification
 
     rev = dest.name
     staging_root = dest.parent / f".{plan['op']}-{rev}"
@@ -397,7 +468,8 @@ def _copy_and_verify(
             if _copy_file(path, staging / rel) == "clonefile":
                 cloned += 1
         progress("Verifying the copy at the destination ...")
-        report = verify_bundle(staging, progress=progress)
+        actual = hash_payload(staging, load_manifest(staging), progress=progress)
+        report = record_verification(staging, actual, progress=progress, at=dest)
         checksum = report["checksum"]
         if checksum["status"] != "pass":
             raise SystemExit(

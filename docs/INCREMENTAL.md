@@ -493,7 +493,8 @@ assemble on the dest host). A second `--handoff` is a no-op for files already
 vault root:
 
 ```bash
-rsync -a ~/darsay/qwen--qwen3.8-27b/<rev>/ /Volumes/big/qwen--qwen3.8-27b/<rev>/
+rsync -aP --exclude=hydration.json --exclude=transfer.lock --exclude=.DS_Store \
+  ~/darsay/qwen--qwen3.8-27b/<rev>/ /Volumes/big/qwen--qwen3.8-27b/<rev>/
 darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --handoff
 ```
 

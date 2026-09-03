@@ -218,7 +218,7 @@ lineage — family, generation, member — lives in `identity`
 |---|---|
 | `date_archived` | Creation time of the bundle. Also the fixed mtime used in exports. |
 | `archived_by` | **curator** (or automation identity). |
-| `location`, `host` | Absolute path and machine. Rewritten on import, by `darsay mv`, and on both sides of `darsay cp`. |
+| `location`, `host` | Absolute path and machine where darsay last attested the bundle. Rewritten on import, by `darsay mv`, on both sides of `darsay cp`, and by `darsay verify` when it runs somewhere other than the record says — an rsync'd copy verified where it landed. Each `verification.json` entry carries the pair as well. |
 | `storage_tier` | `local-disk` until a curator or workflow records otherwise. |
 | `backup_status`, `replicas` | `none` / `[]` until `darsay cp` records a verified copy; then `backup_status` is `replicated` and `replicas` lists the *other* known locations of this bundle as `{at, location, host}`, written on both sides of the copy and keyed by location (a second `cp` to the same disk updates the timestamp rather than adding a row). An rsync leaves no entry — it is a first-class copy darsay never sees happen. Entry shape and `replicated` since 1.8.0. |
 | `last_integrity_check`, `last_accessed` | Maintained by `verify`, `smoke`, `hydrate` / `run`, import. `info` is read-only and does not rewrite the manifest. |

@@ -472,7 +472,8 @@ verified (size match), then skeletonizes the laptop copy. It does not
 re-hash dest over SMB:
 
 ```bash
-rsync -a ~/darsay/qwen--qwen3.8-27b/<rev>/ /Volumes/big/qwen--qwen3.8-27b/<rev>/
+rsync -aP --exclude=hydration.json --exclude=transfer.lock --exclude=.DS_Store \
+  ~/darsay/qwen--qwen3.8-27b/<rev>/ /Volumes/big/qwen--qwen3.8-27b/<rev>/
 darsay --vault /Volumes/big assemble ~/darsay/qwen--qwen3.8-27b/<rev> --handoff
 ```
 
@@ -515,7 +516,8 @@ Moved qwen--qwen3-0.6b@c1899de289a0 → /Volumes/big/qwen--qwen3-0.6b/c1899de289
 rsync is the same move without the verb, and always will be:
 
 ```bash
-rsync -a ~/darsay/qwen--qwen3-0.6b/<rev>/ /Volumes/big/qwen--qwen3-0.6b/<rev>/
+rsync -aP --exclude=hydration.json --exclude=transfer.lock --exclude=.DS_Store \
+  ~/darsay/qwen--qwen3-0.6b/<rev>/ /Volumes/big/qwen--qwen3-0.6b/<rev>/
 darsay --vault /Volumes/big verify qwen--qwen3-0.6b     # on the host that owns the disk
 darsay rm qwen--qwen3-0.6b --yes
 ```
@@ -549,8 +551,12 @@ differs from the bundle's, the plan says so before anything moves; the
 bundle's lands.
 
 Over SMB or NFS, prefer the rsync form: `mv` verifies by reading the
-destination back, which over the wire is a second trip of the whole
-payload, and it says so before it starts. `mv` refuses a partial — that is
+destination back, which over the wire is a trip of the whole payload, and
+it says so before it starts — with the three lines to paste, paths filled
+in: the rsync above, `darsay verify` on the host that owns the disk,
+`darsay rm` here. With the bytes already there, the rsync carries only
+the record. rsync `--delete` is never part of it
+([FAQ](../docs/FAQ.md#should-the-rsync-use---delete)). `mv` refuses a partial — that is
 [`assemble --handoff`](#archive-in-halves-across-two-disks) or the recipe
 below. Which verb when: [FAQ](../docs/FAQ.md#moving-bundles).
 
@@ -617,7 +623,8 @@ bundle at `<vault>/<slug>/<rev>/`, not at the vault root.
 
 ```bash
 # resume a partial on the other disk
-rsync -a ~/darsay/qwen--qwen3.8-27b/<rev>/ /Volumes/big/qwen--qwen3.8-27b/<rev>/
+rsync -aP --exclude=hydration.json --exclude=transfer.lock --exclude=.DS_Store \
+  ~/darsay/qwen--qwen3.8-27b/<rev>/ /Volumes/big/qwen--qwen3.8-27b/<rev>/
 darsay --vault /Volumes/big archive Qwen/Qwen3.8-27B
 
 # or free the laptop after the copy (trust dest ledger + size, delete source payload)

@@ -75,3 +75,45 @@ def test_verify_does_not_heal_upstream_mismatch(vault, test_provider):
     )
     assert verify_bundle(bundle, progress=silent)["result"] == "pass"
     assert load_manifest(bundle)["security"]["integrity_status"] == "upstream-mismatch"
+
+
+def test_verify_records_where_it_ran(tmp_path, vault, test_provider, capsys):
+    """An rsync'd copy verified where it landed carries a true location."""
+    import shutil
+    import socket
+
+    from darsay.cli import main
+
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    old = load_manifest(bundle)["archive"]["location"]
+    assert old == str(bundle.resolve())
+
+    # In place: nothing to say, nothing changes.
+    report = verify_bundle(bundle, progress=silent)
+    assert "relocated_from" not in report
+    assert report["location"] == old and report["host"] == socket.gethostname()
+
+    other = tmp_path / "nas"
+    copy = other / bundle.parent.name / bundle.name
+    shutil.copytree(bundle, copy)
+    assert main(["--vault", str(other), "verify", str(copy)]) == 0
+    out = capsys.readouterr().out
+    assert "Verification: PASS" in out
+    assert (
+        f"Location: {copy.resolve()} on {socket.gethostname()}  "
+        f"(the record said {old} on {socket.gethostname()})"
+    ) in out
+
+    manifest = load_manifest(copy)
+    assert manifest["archive"]["location"] == str(copy.resolve())
+    assert "moves" not in manifest["archive"], "an rsync is not a move"
+    assert str(copy.resolve()) in (copy / "README.md").read_text(encoding="utf-8")
+    history = json.loads((copy / "verification.json").read_text(encoding="utf-8"))
+    assert history["latest"]["location"] == str(copy.resolve())
+    assert history["history"][0]["location"] == old, "archive-time entry kept"
+    assert f"- **Where:** `{copy.resolve()}` on" in (
+        copy / "VERIFICATION.md"
+    ).read_text(encoding="utf-8")
+    # The original is untouched.
+    assert load_manifest(bundle)["archive"]["location"] == old

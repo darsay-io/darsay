@@ -44,7 +44,8 @@ that puts the right bytes at `<vault>/<name>/<rev>/` has put a bundle in
 the vault: rsync, `cp -a`, a USB stick, a restic restore.
 
 ```bash
-rsync -a ~/darsay/qwen--qwen3-0.6b/<rev>/ /Volumes/big/qwen--qwen3-0.6b/<rev>/
+rsync -aP --exclude=hydration.json --exclude=transfer.lock --exclude=.DS_Store \
+  ~/darsay/qwen--qwen3-0.6b/<rev>/ /Volumes/big/qwen--qwen3-0.6b/<rev>/
 darsay --vault /Volumes/big verify qwen--qwen3-0.6b     # on the host that owns the disk
 darsay rm qwen--qwen3-0.6b --yes
 ```
@@ -57,8 +58,9 @@ bookkeeping and the removal for you (next question).
 It is sugar over the contract rsync already satisfies, and it will never
 become a requirement: nothing `mv` records is needed to open, verify, run,
 or export the bundle. What `mv` does that rsync does not is bookkeeping —
-`archive.location`, the `archive.moves` record, a regenerated `README.md`
-whose path is true — never a change to the payload. The design and the
+the `archive.moves` record, and `archive.location` with a `README.md`
+whose path is true, which `verify` also sets wherever it runs — never a
+change to the payload. The design and the
 reasons are in [Incremental transfer §1](INCREMENTAL.md#1-why-this-can-beat-rsync-at-fetching--and-why-rsync-still-copies-disks);
 the tests that hold it are `tests/integration/test_transfer.py`
 (rsync then darsay) and `tests/integration/test_relocate.py`.
@@ -144,19 +146,59 @@ treats them as missing and re-fetches those files — slower, never lossy.
 Nothing. Put it at `<vault>/<name>/<rev>/` — not in the vault root — and
 `darsay list` sees it. Run `darsay verify` **on the host that owns the
 disk** if you want the copy attested — rsync's default check is size and
-mtime, not content, unless you run rsync with `--checksum`. Machine-local files
+mtime, not content, unless you run rsync with `--checksum` — and the
+record then says the bundle lives there (`archive.location`,
+`archive.host`). Machine-local files
 travel harmlessly: `hydration.json` points at the old vault's `.runtime`,
 so `darsay hydrate` again there (or `darsay dehydrate` it); `darsay doctor`
 flags a record whose interpreter is gone.
 
 ### `mv` warned that my destination is a network mount. Why, and what should I do?
 
-Verifying the copy means reading it back. Over SMB or NFS that is the
-whole payload crossing the wire a second time — the thing darsay promises
-never to do *silently* after an rsync. For a NAS, prefer the three-step
-form: rsync (one trip), `darsay verify` on the NAS itself (a local read),
-`darsay rm` on the laptop. `mv` still works and still verifies; it just
-says up front what that costs.
+Verifying at the destination means reading the payload back. Over SMB or
+NFS that is every byte crossing the wire — a second trip for a fresh
+copy, and for a copy already there, one read of what an rsync just wrote
+— the thing darsay promises never to do *silently*. So the plan names the
+vault, says what the wire would carry, and prints the local way with the
+real paths filled in:
+
+```
+  warning:  /Volumes/PIXEL/darsay/vault is a network mount: hashing the 56 payload files already there reads 200.7 GiB back over the wire. To hash the bytes where the disk is instead:
+              rsync -aP --exclude=hydration.json --exclude=transfer.lock --exclude=.DS_Store /Users/me/darsay/zai-org--glm-4.5v/ed47433b3711/ /Volumes/PIXEL/darsay/vault/zai-org--glm-4.5v/ed47433b3711/    # the record; payload files already there are skipped
+              darsay verify /Volumes/PIXEL/darsay/vault/zai-org--glm-4.5v/ed47433b3711    # on the host that owns the disk, by its own path for that directory
+              darsay rm zai-org--glm-4.5v@ed47433b3711 --yes    # here, once that passed
+            Continuing over the wire; Ctrl-C at any point leaves the source untouched.
+```
+
+Paste the three lines instead when the bundle is large and the link is
+slow. The rsync is one trip; with the bytes already there it carries only
+the record and the views (rsync skips a file whose size and mtime already
+match), so a `darsay migrate` done here since the first rsync lands too.
+`verify` on the host that owns the disk is a local read, and it records
+that the bundle now lives there — `archive.location` and `archive.host`
+follow wherever `verify` runs. `rm` here finishes the move. What that
+three-step does not leave is an `archive.moves` entry; nothing reads one.
+
+Or let it continue: `mv` still verifies and still lands; it just told you
+what the wire will carry first. Ctrl-C at any point leaves the source as
+it was — hashing reads, and a file half-copied to the destination is one
+the next landing copies again.
+
+### Should the rsync use `--delete`?
+
+No, and the line darsay prints does not. darsay never needs it: a file at
+the destination that the record does not list is refused by name when
+`mv` lands and reported by `verify`, never silently removed — you decide
+what it is. And rsync `--delete` pointed one directory too high (the vault root
+instead of `<name>/<rev>/`) empties the vault. If a rerun of rsync does
+leave a file behind that you know is stale, delete that file; do not
+reach for the flag. The flags the line does carry: `-a` keeps mtimes so a
+rerun skips what already arrived; `-P` keeps a shard that was cut off
+mid-transfer and shows progress; rsync's three `--exclude`s are the files a
+bundle does not carry across vaults — `hydration.json` and
+`transfer.lock` belong to the vault and the process they came from, and
+a `.DS_Store` under `model/` would count as a payload file the record
+does not list.
 
 ### `mv` on the same disk was instant. Was anything verified?
 

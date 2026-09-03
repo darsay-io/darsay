@@ -102,8 +102,12 @@ def test_mv_same_filesystem_is_a_rename(tmp_path, vault, test_provider, capsys):
     assert move["method"] == "rename"
     assert move["from_location"] == old_location == str(bundle.resolve())
     assert str(dest.resolve()) in (dest / "README.md").read_text(encoding="utf-8")
-    assert str(dest) in (dest / "VERIFICATION.md").read_text(encoding="utf-8")
-    assert str(bundle) not in (dest / "VERIFICATION.md").read_text(encoding="utf-8")
+    report_md = (dest / "VERIFICATION.md").read_text(encoding="utf-8")
+    assert f"Re-run with: `darsay verify {dest}`" in report_md
+    assert f"- **Where:** `{bundle.resolve()}`" in report_md, (
+        "a rename verifies nothing; the last run was before the move, and says where"
+    )
+    assert report_md.count(str(bundle.resolve())) == 1
 
     assert main(["--vault", str(vault), "list", "--ids"]) == 0
     assert BUNDLE_ID in capsys.readouterr().out
@@ -464,23 +468,103 @@ def test_mv_landing_failure_leaves_both_sides_as_they_were(
     assert not (copy / "transfer.lock").exists()
 
 
-def test_mv_onto_existing_warns_about_a_network_mount(
+def test_rsync_command_is_the_line_the_docs_show():
+    from darsay.relocate import rsync_command
+
+    line = rsync_command(Path("/src/v/n/rev"), Path("/Volumes/my nas/v/n/rev"))
+    assert line == (
+        "rsync -aP --exclude=hydration.json --exclude=transfer.lock "
+        "--exclude=.DS_Store /src/v/n/rev/ '/Volumes/my nas/v/n/rev'/"
+    )
+    assert "--delete" not in line
+
+
+def _network(monkeypatch) -> None:
+    import darsay.transfer as transfer
+
+    monkeypatch.setattr(transfer, "is_network_filesystem", lambda path: True)
+
+
+def test_mv_onto_existing_over_a_network_mount_prints_the_local_way(
     tmp_path, vault, test_provider, monkeypatch
 ):
-    import darsay.transfer as transfer
+    from darsay.readme_gen import human_size
+    from darsay.relocate import rsync_command
 
     src_vault = tmp_path / "src"
     src_vault.mkdir()
     bundle = _registered_bundle(src_vault, test_provider)
-    _rsync(bundle, vault)
-    monkeypatch.setattr(transfer, "is_network_filesystem", lambda path: True)
+    copy = _rsync(bundle, vault)
+    payload_bytes = load_manifest(bundle)["inventory"]["total_size_bytes"]
+    _network(monkeypatch)
 
     logs: list[str] = []
     move_bundle(bundle, vault, progress=logs.append, dry_run=True)
+    text = "\n".join(logs)
+    assert (
+        f"  warning:  {vault} is a network mount: hashing the 7 payload files "
+        f"already there reads {human_size(payload_bytes)} back over the wire. "
+        "To hash the bytes where the disk is instead:"
+    ) in text
+    assert (
+        f"{rsync_command(bundle, copy)}    # the record; payload files already there are skipped"
+        in text
+    )
+    assert (
+        f"darsay verify {copy}    # on the host that owns the disk, by its own "
+        "path for that directory"
+    ) in text
+    assert f"darsay rm {BUNDLE_ID} --yes    # here, once that passed" in text
+    assert "Continuing over the wire" not in text, "a dry run continues nothing"
+
+    logs.clear()
+    move_bundle(bundle, vault, progress=logs.append)
     assert any(
-        "warning:  the destination is on a network mount, so verifying there "
-        "reads every payload byte back over the wire" in line
+        "Continuing over the wire; Ctrl-C at any point leaves the source untouched."
+        in line
         for line in logs
+    )
+    assert not bundle.exists()
+
+
+def test_mv_fresh_copy_over_a_network_mount_counts_two_trips(
+    tmp_path, vault, test_provider, monkeypatch
+):
+    from darsay.readme_gen import human_size
+
+    src_vault = tmp_path / "src"
+    src_vault.mkdir()
+    bundle = _registered_bundle(src_vault, test_provider)
+    monkeypatch.setattr(relocate, "_same_device", lambda a, b: False)
+    _network(monkeypatch)
+    total = sum(p.stat().st_size for _rel, p in relocate.bundle_files(bundle))
+
+    logs: list[str] = []
+    move_bundle(bundle, vault, progress=logs.append, dry_run=True)
+    text = "\n".join(logs)
+    assert (
+        f"copying {human_size(total)} over the wire and reading it all back to "
+        "verify is two trips" in text
+    )
+    assert "    # one trip" in text
+    assert f"darsay rm {BUNDLE_ID} --yes" in text
+
+
+def test_cp_over_a_network_mount_has_no_rm_line(
+    tmp_path, vault, test_provider, monkeypatch
+):
+    src_vault = tmp_path / "src"
+    src_vault.mkdir()
+    bundle = _registered_bundle(src_vault, test_provider)
+    _network(monkeypatch)
+
+    logs: list[str] = []
+    copy_bundle(bundle, vault, progress=logs.append, dry_run=True)
+    text = "\n".join(logs)
+    assert "rsync -aP" in text and "darsay verify" in text
+    assert "darsay rm" not in text
+    assert (
+        "(that copy is not recorded as a replica; the bytes are just as good)" in text
     )
 
 

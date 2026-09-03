@@ -9,6 +9,33 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Added
+
+- **The network-mount warning ends with the commands to paste.** When a
+  `mv` / `cp` destination is on SMB or NFS, the plan names the vault,
+  says what the wire would carry — two trips of the payload for a fresh
+  copy, one read of the files already there for a landing — and prints
+  the local way with both paths filled in: the rsync line (`-aP`,
+  `--exclude` for `hydration.json`, `transfer.lock`, and `.DS_Store`,
+  trailing slashes on both sides, never `--delete`), `darsay verify` on
+  the host that owns the disk, and for `mv` the `darsay rm` here. With
+  the bytes already there the rsync carries only the record. The verb
+  then continues over the wire and says that Ctrl-C leaves the source
+  untouched; `-n` shows the same lines and continues nothing.
+
+### Changed
+
+- **`darsay verify` records where it ran.** A pass or a fail is a fact
+  about bytes at a path on a host, so `archive.location` and
+  `archive.host` become where the payload was read, `README.md` is
+  regenerated when they changed, and the verb prints the old and new
+  location. An rsync'd copy verified where it landed now carries a true
+  location without a `mv`; a bundle verified in place changes nothing.
+  Each `verification.json` entry carries `location` and `host`, and
+  `VERIFICATION.md` prints them.
+- Every rsync line in the docs is the one the warning prints, and the FAQ
+  answers whether it should use `--delete`: no, and why.
+
 ## [0.14.13] - 2026-09-03
 
 
