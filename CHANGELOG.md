@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.13] - 2026-09-03
+
+
 ### Breaking
 
 - **`darsay mv` and `darsay cp` land on a destination that already holds
