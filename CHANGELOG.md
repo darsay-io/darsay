@@ -9,8 +9,25 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Added
+
+- An interactive collection room for fresh multi-variant GGUF archives:
+  explicit 4-bit, 4+8-bit, and whole-publication starting points; complete
+  shard groups; separate projector choices; live disk totals; field notes;
+  and pinned-scope review before archive creation. Board and terminal share
+  the guidance. No quality, hardware-fit, or recreation-cost claim is inferred
+  from an encoding label.
+
 ### Changed
 
+- Direct-source archive reruns resume the pinned collection without repeating
+  its include patterns. Board/catalog jobs still require their row's identity.
+  Explicit includes, `--full`, shards, non-interactive runs, and `--yes` bypass
+  the picker. `--yes` uses the default archive policy, not a default quant.
+- Conflicting explicit includes are refused instead of being ignored in favor
+  of another pin's scope. This protects reviewed collections and board jobs,
+  including a pin created by another process while the picker was open.
+  `--force` deliberately re-pins partial as well as completed collections.
 - Automatic omission requires hash-identical content for every omitted file retained
   in the same bundle. GGUFs beside candidate source weights and weights
   matching a remote base remain retained; a vault address match is not

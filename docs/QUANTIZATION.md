@@ -22,6 +22,11 @@ from are both legitimate collection targets.
 `estimate` names the size basis and lists GGUF variants; `--include`
 pins an explicit subset; `--full` fetches everything.
 
+An interactive fresh GGUF-pack archive first offers the
+[collection room](COLLECTIONS.md). Its starting points are editable scope
+choices, separate from classification. Explicit includes, full publications,
+board/catalog jobs, and unattended runs keep their specified archive policy.
+
 ## 1. Negatives and prints
 
 The photography analogy is useful for talking about ancestry, but it is

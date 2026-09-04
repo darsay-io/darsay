@@ -175,8 +175,8 @@ def load_manifest(bundle_dir: Path) -> dict:
     return data
 
 
-def _warn_include_vs_pin(
-    include: list[str] | None, ledger: dict, progress, *, full: bool = False
+def _check_pin_scope(
+    include: list[str] | None, ledger: dict, *, full: bool = False
 ) -> None:
     from .catalog import include_key
 
@@ -185,18 +185,19 @@ def _warn_include_vs_pin(
     if include_key(include) == include_key(pinned):
         return
     if pinned is None:
-        progress(
-            "WARNING: --include ignored; this pin is the full file set. "
-            "Use --force to pin a subset."
+        raise SystemExit(
+            "error: this pin is the full file set; the requested collection differs\n"
+            "  hint: resume its existing scope, or use --force to re-pin deliberately"
         )
-        return
     if include:
-        progress(
-            "WARNING: --include differs from the pinned subset "
-            f"{pinned}; resuming the pin. Use --force to re-pin."
+        raise SystemExit(
+            f"error: the requested collection differs from the pinned subset {pinned}\n"
+            "  hint: use matching --include selectors to resume, or --force to re-pin\n"
+            "  hint: one source/revision has one collection per vault; combine variants or use separate vaults"
         )
-        return
     if full:
+        if pinned == ["/*"]:
+            return
         raise SystemExit(
             f"error: this pin is a subset {pinned}; --full cannot widen it\n"
             "  hint: --force --full re-pins the full file set"
@@ -229,6 +230,8 @@ def archive(
     full: bool = False,
     progress=print,
     confirm=None,
+    choose=None,
+    resume_scope: bool = False,
 ) -> Path | None:
     """Archive a source through pin → reconcile → transfer → register.
 
@@ -244,6 +247,14 @@ def archive(
     transfer the disk preflight says cannot finish; declining pauses the
     archive cleanly before any byte moves. ``None`` proceeds, as an
     unattended run must.
+
+    ``choose(snapshot) -> include | None`` optionally chooses scope for a
+    fresh model before any archive directory or transfer ledger is created.
+    Explicit includes, full publications, shards, and existing pins bypass
+    it. The library has no interactive default; the CLI supplies its picker.
+    ``resume_scope=True`` lets an unqualified direct-source command resume
+    the recorded subset without repeating its includes. Board/catalog jobs
+    keep this false: their row's scope is a requirement, not a new choice.
     """
     from .config import free_space_floor, offline_patience, rate_cap
     from .readme_gen import human_size
@@ -275,7 +286,7 @@ def archive(
     cap = rate_cap(vault, max_rate)
     patience = offline_patience(vault, max_offline)
     root = payload_root_for(ref.artifact_type)
-    resume = find_resume(vault, ref, revision, root)
+    resume = None if force else find_resume(vault, ref, revision, root)
     pinned = resume[1] if resume else None
     orphan_dir = resume[0] if resume and pinned is None else None
 
@@ -286,6 +297,10 @@ def archive(
             f"{pinned['revision'][:12]} (no metadata refresh) ..."
         )
         snapshot = None
+        if resume_scope and not include and not full and not force:
+            include = (pinned.get("subset") or {}).get("include")
+            if include:
+                progress(f"Collection scope: resuming the pinned selectors {include}")
     else:
         pin_revision = orphan_dir.name if orphan_dir is not None else revision
         progress(
@@ -309,6 +324,22 @@ def archive(
             ref = snapshot.source
             root = payload_root_for(ref.artifact_type)
         bundle_dir = bundle_dir_for(vault, ref, snapshot.revision)
+
+    if (
+        choose is not None
+        and snapshot is not None
+        and resume is None
+        and ref.artifact_type == "model"
+        and not include
+        and not full
+        and shard is None
+        and not (bundle_dir / "manifest.json").exists()
+    ):
+        selected = choose(snapshot)
+        if selected is not None:
+            if not selected:
+                raise SystemExit("No collection selected; no archive has started.")
+            include = selected
 
     payload_dir = bundle_dir / root
 
@@ -347,12 +378,12 @@ def archive(
 
         if pinned is not None:
             ledger = load_ledger(bundle_dir)
-            _warn_include_vs_pin(include, ledger, progress, full=full)
+            _check_pin_scope(include, ledger, full=full)
         else:
             if manifest_path.exists() and dry_run and not force:
                 try:
                     ledger = load_ledger(bundle_dir)
-                    _warn_include_vs_pin(include, ledger, progress, full=full)
+                    _check_pin_scope(include, ledger, full=full)
                 except LedgerError:
                     ledger = _fresh_ledger()
             elif force:
@@ -362,7 +393,7 @@ def archive(
             else:
                 try:
                     ledger = load_ledger(bundle_dir)
-                    _warn_include_vs_pin(include, ledger, progress, full=full)
+                    _check_pin_scope(include, ledger, full=full)
                 except LedgerError:
                     ledger = _fresh_ledger()
                     # A dry run of a new source records the pin — and only

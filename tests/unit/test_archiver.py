@@ -5,7 +5,7 @@ import json
 import pytest
 
 from darsay.archiver import (
-    _warn_include_vs_pin,
+    _check_pin_scope,
     archive_model,
     bundle_dir_for,
     bundle_name_for,
@@ -114,15 +114,16 @@ def test_load_manifest_refuses_wrong_kind(tmp_path):
         load_manifest(tmp_path)
 
 
-def test_warn_include_refuses_full_repo_resume_of_subset_pin():
-    notes = []
+def test_pin_scope_refuses_a_different_collection():
     ledger = {"subset": {"include": ["*Q4_K_M*"]}}
     with pytest.raises(SystemExit, match="this pin is a subset"):
-        _warn_include_vs_pin(None, ledger, notes.append)
-    _warn_include_vs_pin(["*Q4_K_M*"], ledger, notes.append)
-    assert notes == []
-    _warn_include_vs_pin(["*.gguf", "*Q4_K_M*"], ledger, notes.append)
-    assert any("differs from the pinned subset" in n for n in notes)
+        _check_pin_scope(None, ledger)
+    _check_pin_scope(["*Q4_K_M*"], ledger)
+    with pytest.raises(SystemExit, match="differs from the pinned subset"):
+        _check_pin_scope(["*.gguf", "*Q4_K_M*"], ledger)
+    with pytest.raises(SystemExit, match="full file set"):
+        _check_pin_scope(["*Q4*"], {"subset": None})
+    _check_pin_scope(None, {"subset": {"include": ["/*"]}}, full=True)
 
 
 def test_load_manifest_missing_kind_is_implied_on_1x(tmp_path):

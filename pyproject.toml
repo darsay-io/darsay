@@ -75,6 +75,9 @@ darsay = "darsay.cli:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+darsay = ["collection_guide.json"]
+
 [tool.setuptools.dynamic]
 version = { attr = "darsay.__version__" }
 

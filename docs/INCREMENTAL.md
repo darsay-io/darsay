@@ -537,7 +537,7 @@ recorded hashes for bytes this pin handed to a named vault.
 | `--max-gb N` / `--max-bytes SIZE` (`500M`, `20G`) | stop cleanly once network bytes this session exceed the cap |
 | `--max-minutes N` | stop cleanly at the deadline |
 | `--min-free SIZE` | pause cleanly once destination free space drops below SIZE (default 2 GiB via config; `0` disables) |
-| `--yes` / `-y` | start without asking when the disk preflight says the transfer cannot finish (a non-interactive run never asks) |
+| `--yes` / `-y` | skip the collection picker (use the default archive policy) and disk-preflight confirmation; non-interactive runs never prompt |
 | `--max-rate SIZE` | cap network transfer at SIZE per second across every worker (`5M`, `500K`; default unlimited via config; `0` lifts a configured cap) |
 | `--max-offline DURATION` | keep waiting for a lost network up to DURATION before pausing cleanly (`30m`, `2h`; default 1 h via config; `0` pauses at the first failure) |
 | `--revision REF` | pin a branch, tag, or commit instead of `main`; the resolved commit is frozen for every later run |

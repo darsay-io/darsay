@@ -68,6 +68,7 @@ required to open a bundle. Everything else is how we got there.
 | [**Getting started**](GETTING-STARTED.md) | You have never run `darsay` |
 | [**Concepts**](CONCEPTS.md) | You want the objects named before the flags |
 | [**Examples**](../examples/README.md) | You want a copy-paste recipe |
+| [**Choose your collection**](COLLECTIONS.md) | The board dialog or terminal picker: variants, starting points, companions, storage, and recovery evidence |
 | [**Hydration**](HYDRATION.md) | `hydrate` / `run` / `envs` — isolated engines, offline inference |
 | [**Incremental transfer**](INCREMENTAL.md) | Budgets, Ctrl-C, Range partials, the free-space floor and `config.toml`, `--shard N/T`, `assemble`, `assemble --handoff` |
 | [**FAQ**](FAQ.md) | Moving or copying a bundle to another disk (`mv` / `cp`, or rsync — always valid); `mv` vs `assemble --handoff`; what travels, what stays |

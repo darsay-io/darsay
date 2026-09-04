@@ -598,6 +598,20 @@ def cmd_archive(args) -> int:
     # Ask before a transfer that cannot finish only when someone is there
     # to answer; cron and pipes proceed, as they always have.
     confirm = None if args.yes or not _on_a_terminal() else _tty_confirm
+    choose = None
+    if (
+        _on_a_terminal()
+        and os.environ.get("TERM", "dumb") not in {"", "dumb"}
+        and not args.yes
+        and not args.full
+        and not include
+        and not args.shard
+        and not getattr(args, "board", None)
+        and getattr(args, "next", None) is None
+    ):
+        from .collection_tui import choose_collection
+
+        choose = choose_collection
     try:
         bundle = archive(
             source,
@@ -616,6 +630,9 @@ def cmd_archive(args) -> int:
             include=include,
             full=args.full,
             confirm=confirm,
+            choose=choose,
+            resume_scope=not getattr(args, "board", None)
+            and getattr(args, "next", None) is None,
         )
     except PartialTransfer as stop:
         _push_board_progress(args, state="paused", bundle_dir=stop.bundle_dir)
@@ -2108,8 +2125,8 @@ def build_parser() -> argparse.ArgumentParser:
         "-y",
         "--yes",
         action="store_true",
-        help="start without asking when the disk preflight says the transfer "
-        "cannot finish (a non-interactive run never asks)",
+        help="skip the collection picker (use the default archive policy) and "
+        "disk-preflight confirmation; non-interactive runs never prompt",
     )
     p.add_argument(
         "--max-rate",

@@ -110,6 +110,13 @@ Friends overlay the same file against *their* vault
 
 ### What just landed on disk
 
+For a fresh multi-variant GGUF pack, `archive` first opens an interactive
+collection room: choose a starting point, compare the variants and their
+disk sizes, select any needed companions, and review the pinned scope.
+Nothing is selected until you act. `--include`, `--full`, `--yes`, board
+jobs, and non-interactive commands bypass that picker. `--yes` uses the
+default archive policy, not a default quant. See [Choose your collection](COLLECTIONS.md).
+
 ```
 ~/darsay/sshleifer--tiny-gpt2/<rev>/
 ├── model/            # the repo, frozen

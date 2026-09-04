@@ -110,6 +110,14 @@ line in `estimate` — each names a concept from the model above and opens
 onto its explanation applied to that row. Nothing is shown that cannot be
 explained in one card.
 
+**Guidance is an invitation, not a verdict.** The collection room offers
+explicit starting points and lets the collector change them. It names the
+rule behind each starting point, shows the resulting pinned scope, and
+separates measured storage from unmeasured quality, hardware fit, and
+recreation cost. The board and terminal teach the same distinctions. No
+payload moves merely because a person opened a chooser. See
+[Choose your collection](COLLECTIONS.md).
+
 **Names are evidence, not verdicts.** Family and variant are read from the
 repo name and say so. Whether bytes are a negative or a print is decided
 from recorded evidence, never from a name. A BF16 encoding need not be

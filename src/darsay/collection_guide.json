@@ -1,0 +1,19 @@
+{
+  "intents": {
+    "single": {"title": "One considered copy", "description": "Start with one 4-bit encoding, then make it yours.", "note": "A storage-oriented starting point, not a benchmark or a hardware-fit guarantee."},
+    "compare": {"title": "A comparison pair", "description": "Keep a compact encoding and an 8-bit counterpart.", "note": "Compare these published encodings on your own tasks. More bytes alone do not prove better answers."},
+    "whole": {"title": "The whole publication", "description": "Every published file, every variant, every companion.", "note": "For collecting this repository as published. This includes every file at the inspected revision."}
+  },
+  "families": {
+    "float": {"label": "Floating-point encoding", "meaning": "A wide numerical representation. BF16 and F16 use 16 bits per stored weight; F32 uses 32.", "collect": "Keep this when this particular published encoding matters, or when a compatible toolchain needs it. A wider encoding does not establish an original training checkpoint."},
+    "wide": {"label": "Roomier quantization", "meaning": "A 6- or 8-bit family leaves more room to represent weights than a lower-bit encoding. Actual files also contain scales and metadata.", "collect": "A useful counterpart when comparing published quantizations. Quality and speed still depend on the model, recipe, runtime, and hardware."},
+    "middle": {"label": "Middle-ground footprint", "meaning": "A 4- or 5-bit family trades numerical detail for a smaller stored representation. Mixed-precision recipes can use wider types for some tensors.", "collect": "A place to start exploring a compact copy, provided your runtime supports it. Evaluate your own tasks; the label is not a quality score."},
+    "compact": {"label": "Small-footprint encoding", "meaning": "A 1-, 2-, or 3-bit family pushes storage lower. These are encoding families, not literal file-size formulas or performance rankings.", "collect": "Collect for constrained storage, experimentation, or the history of an aggressive quantization recipe. Check model-specific evaluations before relying on it."},
+    "unknown": {"label": "Published encoding", "meaning": "The filename does not identify an encoding family darsay understands. Its files and measured size still matter.", "collect": "Inspect the publisher's model card and runtime requirements. Unknown terminology is not a reason to discard a publication."}
+  },
+  "recovery": {"label": "Exact recovery unverified", "description": "An inventory and a precision label cannot tell us how hard these exact bytes are to recreate. That needs pinned source weights, tools, settings, any calibration inputs, and matching output hashes.", "note": "A related base model or a working conversion is not a verified reconstruction. No recreation-cost estimate is claimed."},
+  "companions": "Projectors are companions, not smaller copies of the language model. Multimodal use may need a matching projector. Choose one according to the publisher and runtime; darsay does not infer compatibility from precision.",
+  "companion_collect": "Keep the companion needed by the multimodal workflow you intend to preserve, or collect its published alternatives. Consult the publisher and runtime for compatibility; companions are not interchangeable just because their precision labels match.",
+  "scope": "Unselected artifacts are outside this collection, not proven disposable. Adding to a board downloads no model bytes.",
+  "sizing": "Sizes include every shard. Selection totals count shared support files once. Disk size is not a RAM or VRAM requirement."
+}

@@ -75,6 +75,7 @@ CLI_DOCS = (
     "docs/GETTING-STARTED.md",
     "docs/CONCEPTS.md",
     "docs/CATALOGS.md",
+    "docs/COLLECTIONS.md",
     "docs/DOCTOR.md",
     "docs/INCREMENTAL.md",
     "docs/FAQ.md",

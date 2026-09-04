@@ -315,6 +315,19 @@ declares them.
 
 ## Price one quant from a pack repo
 
+For an interactive walkthrough, run the archive command without includes:
+
+```bash
+darsay archive unsloth/GLM-5.3-Flash-GGUF
+```
+
+A fresh multi-variant pin opens the collection room. `1` starts with the
+smallest complete, known-size 4-bit variant; `2` adds an 8-bit counterpart;
+`3` selects every published file. Space edits the choice, `?` explains a
+variant, and Enter reviews before confirming. Projectors remain explicit.
+These are storage-oriented starting points, not quality or hardware claims.
+See [Choose your collection](../docs/COLLECTIONS.md).
+
 Some GGUF repos are hundreds of gigabytes of named quants. `--include`
 prices a glob against Hub metadata, then archives only those files
 (plus config/tokenizer/license sidecars). The manifest records the
