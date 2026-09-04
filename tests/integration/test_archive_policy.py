@@ -1,4 +1,4 @@
-"""The negatives archive default: skip prints, freeze the pin, degrade safely."""
+"""The archive default: omit only local exact duplicates, freeze the pin."""
 
 from __future__ import annotations
 
@@ -13,12 +13,13 @@ from tests.payloads import make_gguf, model_files
 
 
 def _repo_with_print(test_provider, locator="acme/toy"):
-    files = model_files(extra={"Q4_K_M.gguf": make_gguf({"general.file_type": 15})})
+    files = model_files()
+    files["mirror/model.safetensors"] = files["model.safetensors"]
     test_provider.add_repo(locator, files)
     return files
 
 
-def test_archive_default_skips_confident_prints(vault, test_provider):
+def test_archive_default_skips_only_same_bundle_duplicates(vault, test_provider):
     _repo_with_print(test_provider)
     notes = []
     bundle = archive_quiet("test:acme/toy", vault=vault, progress=notes.append)
@@ -26,19 +27,19 @@ def test_archive_default_skips_confident_prints(vault, test_provider):
     assert manifest["schema_version"] == SCHEMA_VERSION == "2.1.0"
     subset = manifest["source"]["subset"]
     assert subset["policy"] == "negatives"
-    assert subset["include"] == ["model.safetensors"]
+    assert subset["include"] == ["/model.safetensors"]
     classification = subset["classification"]
     assert classification["read"]["caps"]["header_file_cap"] == 64
     rules = {s["rule"]: s for s in classification["sets"]}
-    assert rules["R9"]["action"] == "skip"
+    assert rules["R15"]["action"] == "skip"
     assert rules["R4"]["verdict"] == "negative"
     # The skipped print was never requested from the provider.
-    assert "Q4_K_M.gguf" not in test_provider.downloads
-    assert not (bundle / "model" / "Q4_K_M.gguf").exists()
+    assert "mirror/model.safetensors" not in test_provider.downloads
+    assert not (bundle / "model" / "mirror/model.safetensors").exists()
     assert (bundle / "model" / "model.safetensors").is_file()
     assert (bundle / "model" / "config.json").is_file()
-    assert "Q4_K_M.gguf" in {f["path"] for f in subset["full_files"]}
-    assert any("negatives: fetching" in str(line) for line in notes)
+    assert "mirror/model.safetensors" in {f["path"] for f in subset["full_files"]}
+    assert any("archive: fetching" in str(line) for line in notes)
     assert any("--full fetches everything" in str(line) for line in notes)
 
 
@@ -79,12 +80,17 @@ def test_archive_force_reclassifies(vault, test_provider):
 
 
 def test_archive_include_bypasses_policy(vault, test_provider):
-    _repo_with_print(test_provider)
+    test_provider.add_repo(
+        "acme/toy",
+        model_files(extra={"Q4_K_M.gguf": make_gguf({"general.file_type": 15})}),
+    )
     bundle = archive_quiet("test:acme/toy", vault=vault, include=["*Q4_K_M*"])
     subset = load_manifest(bundle)["source"]["subset"]
     assert subset["include"] == ["*Q4_K_M*"]
     assert "policy" not in subset
     assert test_provider.reads == []  # no classification ran
+    assert (bundle / "model" / "Q4_K_M.gguf").is_file()
+    assert not (bundle / "model" / "model.safetensors").exists()
 
 
 def test_archive_full_bypasses_policy(vault, test_provider):
@@ -92,12 +98,15 @@ def test_archive_full_bypasses_policy(vault, test_provider):
     bundle = archive_quiet("test:acme/toy", vault=vault, full=True)
     manifest = load_manifest(bundle)
     assert manifest["source"]["subset"] is None
-    assert (bundle / "model" / "Q4_K_M.gguf").is_file()
+    assert (bundle / "model" / "mirror/model.safetensors").is_file()
     assert test_provider.reads == []
 
 
 def test_archive_classification_failure_degrades_to_full(vault, test_provider):
-    _repo_with_print(test_provider)
+    test_provider.add_repo(
+        "acme/toy",
+        model_files(extra={"Q4_K_M.gguf": make_gguf({"general.file_type": 15})}),
+    )
     # config.json unreadable -> the weight set cannot be established ->
     # the GGUF is ambiguous -> nothing skippable -> full fetch.
     test_provider.fail_next_read("config.json", SourceError("error: reset"))
@@ -162,3 +171,68 @@ def test_archive_default_skips_intra_repo_duplicates(vault, test_provider):
     assert (bundle / "model" / "unique" / "model.safetensors").is_file()
     # The duplicate's sidecar config still rides along.
     assert (bundle / "model" / "FL2VA" / "config.json").is_file()
+
+
+def test_archive_retains_colocated_gguf_without_regeneration_proof(
+    vault, test_provider
+):
+    files = model_files(extra={"Q4_K_M.gguf": make_gguf({"general.file_type": 15})})
+    test_provider.add_repo("acme/gguf", files)
+    bundle = archive_quiet("test:acme/gguf", vault=vault)
+    manifest = load_manifest(bundle)
+    assert manifest["source"]["subset"] is None
+    assert (bundle / "model" / "Q4_K_M.gguf").read_bytes() == files["Q4_K_M.gguf"]
+    assert manifest["inventory"]["total_size_bytes"] == sum(map(len, files.values()))
+
+
+def test_archive_retains_base_match_when_archived_base_revision_is_older(
+    vault, test_provider
+):
+    old_base = model_files(param_shape=[2, 4])
+    test_provider.add_repo("acme/base", old_base, revision="a" * 40)
+    base_bundle = archive_quiet("test:acme/base", vault=vault, full=True)
+    new_base = model_files(param_shape=[3, 4])
+    test_provider.add_repo("acme/base", new_base, revision="b" * 40)
+    child_files = model_files(
+        param_shape=[4, 4],
+        extra={"copy/model.safetensors": new_base["model.safetensors"]},
+    )
+    test_provider.add_repo(
+        "acme/child",
+        child_files,
+        revision="c" * 40,
+        metadata={"tags": ["base_model:acme/base"], "card_data": {}, "gated": False},
+    )
+    bundle = archive_quiet("test:acme/child", vault=vault)
+    assert load_manifest(base_bundle)["source"]["revision"] == "a" * 40
+    assert (bundle / "model" / "copy/model.safetensors").read_bytes() == new_base[
+        "model.safetensors"
+    ]
+    assert load_manifest(bundle)["source"]["subset"] is None
+
+
+def test_policy_preserves_arbitrary_support_and_literal_paths(vault, test_provider):
+    from darsay.estimate import estimate
+
+    files = model_files()
+    files["model[raw]*?.safetensors"] = files.pop("model.safetensors")
+    files["copy/model[raw]*?.safetensors"] = files["model[raw]*?.safetensors"]
+    files["calibration.dat"] = b"preserve calibration inputs"
+    files["recipes/calibration[1]*?.dat"] = b"preserve every support path"
+    test_provider.add_repo("acme/support", files)
+    priced = estimate("test:acme/support", vault=vault, progress=lambda _: None)
+    bundle = archive_quiet("test:acme/support", vault=vault)
+    retained = set(files) - {"copy/model[raw]*?.safetensors"}
+    payload = bundle / "model"
+    assert {
+        p.relative_to(payload).as_posix() for p in payload.rglob("*") if p.is_file()
+    } == retained
+    for path in retained:
+        assert (payload / path).read_bytes() == files[path]
+    manifest = load_manifest(bundle)
+    assert (
+        priced["payload"]["total_size_bytes"]
+        == manifest["inventory"]["total_size_bytes"]
+        == sum(len(files[p]) for p in retained)
+    )
+    assert {f["path"] for f in manifest["source"]["subset"]["full_files"]} == set(files)

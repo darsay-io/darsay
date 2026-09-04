@@ -94,6 +94,24 @@ def test_select_weights_gguf():
     assert select_weights(manifest, "transformers", None) is None
 
 
+def test_select_weights_loads_first_shard_of_complete_model_and_excludes_projector():
+    files = [
+        {"path": p}
+        for p in [
+            "model/Q4/toy-00001-of-00002.gguf",
+            "model/Q4/toy-00002-of-00002.gguf",
+            "model/mmproj-F16.gguf",
+        ]
+    ]
+    manifest = {"inventory": {"files": files}}
+    assert select_weights(manifest, "llama-cpp", None) == files[0]["path"]
+    with pytest.raises(SystemExit, match="is not a"):
+        select_weights(manifest, "llama-cpp", files[1]["path"])
+    files.pop(1)
+    with pytest.raises(SystemExit, match="incomplete GGUF shard set"):
+        select_weights(manifest, "llama-cpp", None)
+
+
 def test_engine_supports_causal_lm_and_rejects_vlm():
     causal = {"model_metadata": {"architecture": "Qwen3ForCausalLM"}}
     assert engine_supports_payload("transformers", causal) == (True, None)

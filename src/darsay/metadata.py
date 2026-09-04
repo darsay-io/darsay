@@ -14,6 +14,7 @@ from pathlib import Path
 
 from .precision import bytes_per_param, precision_facts
 from .safetensors_meta import summarize_safetensors
+from .weight_variants import model_weight_bytes
 
 
 def _load_json(path: Path) -> dict | None:
@@ -71,15 +72,21 @@ def extract_model_metadata(payload_root: Path, card_data: dict | None = None) ->
     weight_files = [
         p
         for suffix in ("*.safetensors", "*.gguf", "*.bin", "*.pt", "*.pth")
-        for p in payload_root.glob(suffix)
+        for p in payload_root.rglob(suffix)
     ]
     gguf_files = [p for p in weight_files if p.suffix.lower() == ".gguf"]
-    weight_bytes = sum(p.stat().st_size for p in weight_files if p.is_file())
+    weight_bytes = model_weight_bytes(
+        [
+            {"path": p.relative_to(payload_root).as_posix(), "size": p.stat().st_size}
+            for p in weight_files
+            if p.is_file()
+        ]
+    )
     precision = precision_facts(
         config=config,
         dominant_dtype=weights["dominant_dtype"] if weights else None,
         dominant_format="gguf" if gguf_files and not safetensors_files else None,
-        weight_paths=[p.name for p in gguf_files],
+        weight_paths=[p.relative_to(payload_root).as_posix() for p in weight_files],
     )
 
     return {
@@ -261,13 +268,16 @@ def extract_dataset_metadata(
 def estimate_runtime(payload_root: Path, model_metadata: dict) -> dict:
     """Runtime requirements. Sizes are estimates from weight bytes; tested_hardware
     stays null until a curator actually runs the model somewhere."""
-    weight_bytes = sum(p.stat().st_size for p in payload_root.glob("*.safetensors"))
-    weight_bytes += sum(p.stat().st_size for p in payload_root.glob("*.bin"))
-    weight_bytes += sum(p.stat().st_size for p in payload_root.glob("*.gguf"))
+    files = [
+        {"path": p.relative_to(payload_root).as_posix(), "size": p.stat().st_size}
+        for p in payload_root.rglob("*")
+        if p.is_file() and p.suffix.lower() in (".safetensors", ".bin", ".gguf")
+    ]
+    weight_bytes = model_weight_bytes(files)
     est_gb = round(weight_bytes * 1.2 / 1024**3, 1) if weight_bytes else None
 
-    has_safetensors = any(payload_root.glob("*.safetensors"))
-    has_gguf = any(payload_root.glob("*.gguf"))
+    has_safetensors = any(f["path"].endswith(".safetensors") for f in files)
+    has_gguf = any(f["path"].endswith(".gguf") for f in files)
     engines = []
     if has_safetensors:
         engines.append("transformers")
@@ -285,5 +295,7 @@ def estimate_runtime(payload_root: Path, model_metadata: dict) -> dict:
         "cuda_notes": None,
         "rocm_notes": None,
         "cpu_inference": True if (has_safetensors or has_gguf) else None,
-        "notes": "RAM/VRAM figures are estimates (weight bytes x1.2); engines listed from shipped formats only.",
+        "notes": "RAM/VRAM is not estimated for a GGUF pack or an incomplete model selection. Engines are listed from shipped formats only."
+        if has_gguf and weight_bytes is None
+        else "RAM/VRAM figures are estimates (weight bytes x1.2); engines listed from shipped formats only.",
     }

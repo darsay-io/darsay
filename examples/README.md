@@ -227,53 +227,59 @@ Design: [Incremental transfer](../docs/INCREMENTAL.md#network-loss).
 
 ---
 
-## Archive the negatives (the default)
+## Archive conservatively (the default)
 
-Some repos ship the model *and* a pile of its own derivatives — a BF16
-negative plus every GGUF print of it. `archive` classifies a fresh model
-pin by default and fetches the artifacts that are genuinely hard to
-regenerate: negatives, everything it cannot classify, and all support
-files. Mechanically derivable prints are skipped, named in the
-preflight, and recorded in the manifest with the full omitted inventory.
+Some repositories ship several variants or duplicate weight layouts.
+`archive` classifies a fresh model pin and retains every weight and support
+file except weight sets whose every file has a hash-identical twin in a
+retained same-bundle set. Every omission is named in the preflight and recorded
+in the manifest with the full inventory. A GGUF is not omitted merely
+because safetensors sit beside it; no preferred precision is chosen.
 
 ```bash
 darsay estimate owner/model-with-quants        # prices what archive will fetch
 darsay classify owner/model-with-quants        # the per-set evidence table
-darsay archive  owner/model-with-quants        # the negatives, on the record
+darsay archive  owner/model-with-quants        # the classified archive selection
 darsay archive  owner/model-with-quants --full # every published byte instead
 ```
 
-A skipped print is functionally regenerable from the kept negative under a
-recorded toolchain — not bit-identical to the published bytes. When
-darsay cannot establish what a file is (two differing weight sets, an
-orphaned shard set, an unreadable header), it refuses to guess and
-fetches it. Policy and rules: [Quantization](../docs/QUANTIZATION.md).
+A skipped duplicate's exact content remains in the bundle, but its
+original path does not. Use `--full` to retain all published layouts.
+Unknown weights and remote-base duplicates are retained. A negative/print
+label is separate from the action; neither label proves a reconstruction
+recipe exists. Policy and rules: [Quantization](../docs/QUANTIZATION.md).
 
 ---
 
 ## Read a size: precision and bytes per parameter
 
-Two frontier models with a similar parameter count and a threefold
-difference in disk. `estimate` says why on the `precision:` line —
-every size is parameters times bytes per parameter, and the second
-factor is the precision the publisher released at:
+A repository can hold many complete variants of the same model.
+`estimate` lists GGUF variants with all their shards; its payload line
+names whether it prices the repository, a selection, or a classified
+archive:
 
 ```bash
-darsay estimate Qwen/Qwen3.8-2.4T-A95B
-#   parameters:   2.45T BF16
-#   precision:    BF16 — 2.00 B/param: about one full-fidelity copy (16-bit)
-#   payload:      224 files, 4.4 TiB
+darsay estimate unsloth/GLM-5.3-Flash-GGUF --full
+# Repository: 2.315 TiB across twelve model variants and supporting files.
+# BF16: 597.6 GiB across fourteen shards.
+# UD-Q4_K_XL: 186.0 GiB across six shards.
 
-darsay estimate moonshotai/Kimi-K3
-#   parameters:   2.78T (2.72T U8 (packed), 57.18B BF16, 11.1M F32)
-#   precision:    MXFP4 (compressed-tensors · 4-bit · group 32) — 0.56 B/param: a 4-bit release
-#                 a native low-precision release is the negative — no higher-fidelity public copy exists to prefer
-#   payload:      119 files, 1.4 TiB
+darsay estimate zai-org/GLM-5.3-Flash
+# Publisher's FP8 release: 305.8 GiB including support.
+# This is a different repository, not a subset of the Unsloth pack.
+
+darsay estimate unsloth/GLM-5.3-Flash-GGUF --include '/UD-Q4_K_XL/GLM-5.3-Flash-UD-Q4_K_XL-*-of-00006.gguf'
+# Selection: six model shards plus supporting metadata.
+# Total model parameters: 320,759,404,382, from upstream GGUF metadata.
+# Selected model weights: about 0.623 bytes per parameter.
 ```
 
-Neither is bigger. Both are negatives. Far above two bytes a parameter
-is the smell of several weight sets in one repo — the `redundant` hint —
-and `darsay classify` lays them out.
+These figures are pinned in the [GLM case study](../docs/QUANTIZATION.md#a-gguf-pack-in-practice).
+Whole GGUF packs have no single-model bytes-per-parameter or RAM estimate.
+Classification separately explains retention evidence; selecting a
+precision does not establish provenance or a recovery guarantee. Choose
+the publisher release, whole pack, or a variant deliberately. Selecting
+one variant does not preserve every release of the work.
 
 ## Hold a place for a closed work
 
@@ -313,6 +319,10 @@ Some GGUF repos are hundreds of gigabytes of named quants. `--include`
 prices a glob against Hub metadata, then archives only those files
 (plus config/tokenizer/license sidecars). The manifest records the
 omitted upstream files.
+
+Select every shard of the desired variant. Variant inventories provide
+exact globs for this; a small first shard does not represent the model's
+full size. Include any required projector separately.
 
 ```bash
 darsay estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
@@ -359,8 +369,12 @@ with whatever already reads the format. Design: [Datasets](../docs/DATASETS.md).
 
 ## Use the files directly
 
-The payload is a Hub snapshot. Loaders that understand Hugging Face
-directories understand a bundle.
+The payload keeps selected Hub files in their published formats. Point a
+compatible loader at `model/`, with all the files and paths that loader
+requires. Use `--full` when you need every upstream layout; a classified
+selection can omit duplicate paths, and an explicit subset can omit
+companions. Hash verification and a successful offline run test different
+properties.
 
 **Model**
 
@@ -821,8 +835,10 @@ preflight that writes nothing at all.
 
 A board is a catalog with a URL, and the URL works wherever a catalog
 name does. One command fetches it, re-prices every row with
-classification (the board alone can only price the shipping box), and
-pushes the result back — sizes, hints, precision, and the negatives markers included:
+classification, and pushes the result back — size basis, verdict counts,
+GGUF variants, hints, precision, and parameter provenance included. The
+board's own quick estimates describe repository or selection inventories;
+the CLI adds the archive retention decision:
 
 ```bash
 darsay estimate https://darsay.io/b/<board-id>

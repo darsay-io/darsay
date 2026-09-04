@@ -30,7 +30,7 @@ def test_a_home_url_is_a_closed_work_that_holds_its_place(vault, test_provider, 
     catalog = json.loads((vault / "catalogs" / "summer" / "catalog.json").read_text())
     sources = [e["source"] for e in catalog["entries"]]
     assert HOME in sources
-    assert catalog["catalog_schema_version"] == "2.0.0"
+    assert catalog["catalog_schema_version"] == "3.0.0"
 
     # The overlay lists it as closed, priced as closed, in the same family.
     assert main(["--vault", str(vault), "list", "summer", "--json"]) == 0
@@ -107,7 +107,7 @@ def test_estimate_refresh_leaves_closed_rows_in_place(vault, test_provider, caps
     assert by_source[HOME]["estimate"] is None
     digest = by_source["test:Qwen/Qwen3.8-27B"]["estimate"]
     # Classified by the CLI, nothing to skip: still priced as the negative set.
-    assert digest["policy"] == "negatives"
+    assert digest["size_basis"] == "archive"
     assert digest["precision"] == "F32"
     assert digest["bytes_per_param"] is not None
     assert digest["architecture"] == "testlm"
@@ -215,5 +215,5 @@ def test_estimate_reports_precision_and_lineage(vault, test_provider, capsys):
     assert (
         "lineage:      finetune of test:Qwen/Qwen3.8-27B  [declared upstream]" in human
     )
-    assert "negatives:    the whole repo — 1 negative set" in human
+    assert "archive:      the whole repo — 1 negative set" in human
     assert "nothing here is a print" in human

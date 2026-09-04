@@ -171,10 +171,10 @@ def test_bytes_per_param_is_measured_and_described():
     assert bytes_per_param(None, 5) is None
     assert bytes_per_param(5, 0) is None
     assert bytes_per_param(True, 5) is None
-    assert describe_bytes_per_param(2.0) == "about one full-fidelity copy (16-bit)"
+    assert describe_bytes_per_param(2.0) == "about one 16-bit weight copy"
     assert describe_bytes_per_param(0.56).startswith("about half a byte")
     assert describe_bytes_per_param(1.0).startswith("about one byte")
-    assert describe_bytes_per_param(8.6).startswith("well over one")
+    assert describe_bytes_per_param(8.6).startswith("more than two bytes per weight")
     assert describe_bytes_per_param(0.2).startswith("under half")
     assert describe_bytes_per_param(None) is None
     assert human_bytes_per_param(0.562) == "0.56 B/param"

@@ -5,9 +5,10 @@ the genesis machine of archives
 Tools for archiving full model ecosystems as museum-grade but directly usable
 bundles. One Python package: `darsay` in `src/darsay/`, CLI entry
 point `darsay` (argparse, subcommands in `cli.py`). The mission and the
-vocabulary every surface shares — work, negative and print, precision,
-family / generation / member — are in `docs/NORTH-STAR.md`; the words
-are not optional, and *master* is not one of them.
+vocabulary every surface shares — collection scope, artifact identity and
+lineage, recovery evidence, retention decisions — are in
+`docs/NORTH-STAR.md`. Negative and print are qualified classifier terms,
+not proofs of originality or permission to omit artifacts.
 
 ## Environment
 
@@ -64,7 +65,11 @@ are not optional, and *master* is not one of them.
   dtypes / GGUF names, and measured bytes per parameter; mirrored in
   `website/src/lib/precision.ts`),
   `classify.py` (negative / print / support / unknown verdicts over a
-  repo's weight sets; the archive default keeps the negatives),
+  repo's weight sets; the archive default retains all weights and support
+  except weight sets whose every file has a hash-identical same-bundle twin;
+  negative/print verdicts do not establish originality or recoverability),
+  `weight_variants.py` (groups complete GGUF shard sets and produces exact
+  selectors; projectors are companions, not model variants),
   `verify.py`, `standalone_verify.py` (stdlib-only; frozen into `.mvb.tar`
   as `darsay-verify.py` — changing it is an MVB minor bump), `smoke.py`,
   `export.py` (.mvb.tar), `readme_gen.py`,
@@ -90,7 +95,7 @@ are not optional, and *master* is not one of them.
   `docs/MVB-FORMAT.md` — single-file export format spec.
   `docs/HYDRATION.md` — bundle→runnable-install design (envs, runner
   contract, hydration.json).
-  `docs/QUANTIZATION.md` — negatives and prints, precision and bytes per
+  `docs/QUANTIZATION.md` — collection scope, preservation evidence, precision and bytes per
   parameter: what gets archived vs derived when a model has quantized
   variants.
   `docs/DESIGN.md` — implementation rationale: why Python, why transfer
@@ -162,8 +167,12 @@ are not optional, and *master* is not one of them.
   from upstream or the payload; unknown = `null` (curator fills in later).
   Query caps must be recorded (`query_limit`), never silently truncated.
   Anything derived says what from: lineage read from a name carries
-  `read_from: "name"`, bytes per parameter is measured from the priced
-  bytes, a precision label names its source.
+  `read_from: "name"`, bytes per parameter is measured from one complete
+  model weight variant, a precision label names its source. Every catalog
+  size has a `size_basis` (`repository`, `selection`, or `archive`);
+  classification verdicts describe preservation separately. Unknown file
+  sizes make the known byte sum a lower bound. Never turn pack bytes into
+  one model's RAM requirement or infer an original release from precision.
 - **Fix forward:** darsay is greenfield. A change to the model of the
   models bumps the schema major and every reader follows; no
   compatibility knobs, no fields kept to describe how things used to be,

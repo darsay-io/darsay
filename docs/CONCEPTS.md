@@ -13,10 +13,10 @@ darsay is small once the objects are named. This page is the naming.
 A vault is a folder of bundles. A bundle is a pinned snapshot whose payload
 never changes. The manifest records facts and leaves blanks as blanks. **A
 catalog is a curated list of works; the vault is that list, realized.**
-You load `model/` (or `data/`) the way you would load the original repo.
-Five more words carry the model of the models — negative, print,
-precision, family, generation — and every surface uses them the same way
-([North star](NORTH-STAR.md)).
+The selected files in `model/` (or `data/`) retain their published formats.
+Collection scope, artifact identity and lineage, recovery evidence, and
+the retention decision explain what that snapshot means. Every surface
+uses these distinctions ([North star](NORTH-STAR.md)).
 
 Have not run it yet? [Start here](GETTING-STARTED.md) first — five minutes,
 then come back. The ideas land harder after you have a bundle on disk.
@@ -94,8 +94,11 @@ Field-by-field: [Catalogs](CATALOGS.md). Cookbook:
 
 ## Bundle
 
-A bundle is **one pinned revision of one source**, stored so it is both
-a museum record and a working checkout.
+A bundle is **one pinned revision of one source**, with its selected
+files unchanged and its inventory documented. A runnable selection must
+include the paths and companions its intended loader requires. Use
+`--full` to retain every upstream layout; a classified subset may omit
+duplicate paths even though their content remains elsewhere in the bundle.
 
 ```
 vault/<name>/<revision12>/
@@ -124,9 +127,9 @@ bundle root can change without the archive “changing.”
 
 1. Resolve the ref (`main`, a tag, a commit) to an **immutable revision**.
 2. Freeze the file set for that revision. For a model this is the
-   **negatives** by default: the irreplaceable weights, everything
-   darsay cannot classify, and all support files — mechanically
-   derivable prints are skipped on the record
+   **archive selection** by default: all weight and support files except
+   weight sets whose every file has a hash-identical same-bundle twin.
+   Every omission is recorded
    ([Quantization §4](QUANTIZATION.md#4-mechanics); `--full` freezes the
    whole repo, `--include` freezes exactly what you say).
 3. Transfer those files, and only those files, until every one verifies.
@@ -151,10 +154,11 @@ The next `archive` fetches only what no vault has yet.
 
 This distinction is the whole design.
 
-- **Payload** — the files a loader needs. Never rewritten. Copied,
-  hashed, verified, exported. For models, `model/` is a pristine Hub
-  snapshot: `transformers` loads it as a local directory. For datasets,
-  `data/` is the same idea for parquet/jsonl/csv.
+- **Payload** — the selected upstream files. Never rewritten. Copied,
+  hashed, verified, exported. For models, compatible loaders open `model/`
+  as a local directory when their required files and paths are present.
+  For datasets, `data/` is the same idea for parquet/jsonl/csv. A verified
+  inventory proves byte integrity, not runtime compatibility.
 - **Metadata** — `manifest.json` and the sibling reports. The tool owns
   these. They record facts (hashes, license text, parameter counts from
   safetensors headers, Hub tags *at archive time*). Unknown is `null`.
@@ -284,32 +288,49 @@ A second host is another `SourceProvider`, not a new CLI flag.
 
 ## Negatives and prints
 
-Photography had the words first. A **negative** is the original exposure
-— the weights nothing can regenerate: the full-fidelity release, a native
-FP8 or MXFP4 release with no higher-fidelity public copy, a quant with
-calibration baked in, an abliteration whose prompts were never published,
-the only format a repo ships. A **print** is a mechanical transformation
-of a negative the repo also holds — a plain `llama-quantize` GGUF beside
-its source, a byte-identical twin. There is no third word.
+The photography analogy describes ancestry, not everything preservation
+needs to know. A classifier **negative** is a preservation candidate
+retained by a conservative rule, not proof of originality or
+irrecoverability. A **print** has an established duplicate or derivative
+relationship; it is not automatically expendable. **Unknown** means the
+evidence leaves the classification unresolved, so the files are retained.
 
-`archive` keeps the negatives by default and skips confident prints on
-the record; `classify` shows the evidence; `--full` takes every published
-byte. Published prints that the world actually ran are ordinary
-**satellite bundles**, linked to the negative through lineage. Running
-the model smaller on your machine is hydration-time derivation, never
-archival. [Quantization](QUANTIZATION.md).
+`archive` automatically skips only non-GGUF weight sets whose every file
+has a hash-identical twin in a retained set in the same bundle. A remote base match, a base
+repository present elsewhere in the vault, or a GGUF beside safetensors
+does not provide that guarantee. `classify` shows the evidence and the
+separate action. All support files remain. Duplicate paths do not; use
+`--full` for every published file and layout.
+
+Start by choosing a publisher release, a whole variant pack, or an explicit
+subset. A selected variant is not a complete collection of the work, and a
+derived release can matter in its own right. Published derivatives are
+ordinary bundles connected by declared lineage. Functional recreation is
+different from byte-exact reconstruction; hydration-time quantization is
+proposed, not an implemented reason to omit published bytes.
+[Quantization](QUANTIZATION.md).
 
 ## Precision
 
-Every size is **parameters × bytes per parameter**, and the second factor
-is the **release precision**: BF16 is two bytes a weight, FP8 one, a
-packed 4-bit release about half. A 2.45T-parameter BF16 model is 4.4 TiB;
-a 2.78T-parameter MXFP4 model is 1.4 TiB. Neither is bigger — they were
-exposed at different precisions, and a native low-precision release is
-still the negative. `estimate` names the precision and the measured bytes
-per parameter on every model, the catalog digest carries both, and a
-board row shows them beside the size
-([Quantization §2](QUANTIZATION.md#2-precision-and-the-one-number-that-explains-a-size)).
+For one complete model weight variant, **parameters × bytes per
+parameter** explains its weight size. **Release precision** sets the
+approximate storage per weight: BF16 is two bytes, FP8 one, a packed
+4-bit release about half plus scales. Precision alone does not establish
+that a release is original or that no higher-fidelity public copy exists.
+
+Every size names its scope: **repository** for the upstream inventory,
+**selection** for the chosen files and support, or **archive** for the
+files retained by preservation policy. An archive can include several
+model variants and weights whose provenance is unknown. Negative, print,
+and unknown counts are a separate classification; unknown file sizes make
+the price a lower bound.
+
+GGUF variants group all shards of one model at one precision. Their
+totals exclude projectors, which are companions. Whole GGUF packs,
+incomplete selections, and projector-only selections have no single-model
+bytes-per-parameter or RAM estimate. Total model parameters, including
+inactive experts, are recorded with their safetensors or GGUF source
+([Quantization §2](QUANTIZATION.md#2-precision-and-size-scope)).
 
 ## Lineage
 
@@ -343,8 +364,9 @@ weights are published, add the source ref and drop the home.
 1. A vault is a folder of bundles.
 2. A bundle is a pinned snapshot whose payload never changes.
 3. The manifest records facts and leaves blanks as blanks.
-4. You load `model/` (or `data/`) the way you would load the original repo.
-5. Archive the negative; a size is parameters times bytes per parameter;
-   every work sits in a family.
+4. Files keep their published formats; the intended loader still needs
+   a complete compatible selection.
+5. Choose the collection scope, require evidence for omissions, and keep
+   every size explicit about what it includes.
 
 That is darsay. The rest is resume, proof, and packing.

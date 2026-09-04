@@ -58,15 +58,21 @@ files any reader opens directly (see [DATASETS.md](DATASETS.md)).
 | Engine | Detected from | Installs | Runner |
 |---|---|---|---|
 | `transformers` (preferred) | `model/config.json` + safetensors/`.bin`/`.pt` weights | `torch`, `transformers>=X` (floor taken from the payload's own `config.json` `transformers_version`) | `runners/transformers_runner.py` — device auto (cuda → mps → cpu), chat template when the tokenizer ships one, greedy by default (`--sample` for the model's own sampling defaults) |
-| `llama-cpp` | `model/*.gguf` | `llama-cpp-python` | `runners/llama_cpp_runner.py` — GPU offload when available; context length from the GGUF (`n_ctx=0`); with several GGUF files, pick one with `--weights model/foo.gguf` |
+| `llama-cpp` | GGUF files anywhere under `model/` | `llama-cpp-python` | `runners/llama_cpp_runner.py` — GPU offload when available; context length from the GGUF (`n_ctx=0`); one complete variant is selected automatically, including its first shard; with several variants, choose one with `--weights model/foo.gguf` |
 | `mlx` (macOS) | auto: `config.json` + `*.npz`; opt-in: `--engine mlx` on a safetensors snapshot | `mlx`, `mlx-lm` | `runners/mlx_runner.py` — Metal; same prompt / `--repl` contract |
 
 Auto-detection prefers the first matching registry entry; override with
 `--engine`.
 
+A split GGUF is one model variant. Hydration selects its first shard and
+requires the complete shard set; projectors are companions and are not
+model candidates.
+
 `hydrate` / `run` preflight the payload before installing packages:
 the transformers runner only serves `*ForCausalLM` architectures, and
-RAM is compared to `runtime.estimated_min_ram_gb` (weights × 1.2). A
+RAM is compared to `runtime.estimated_min_ram_gb` (one complete model
+variant's weight bytes × 1.2). A GGUF pack, an incomplete shard set, or a
+projector-only payload has no single-model RAM estimate. A
 mismatch exits non-zero *before* downloading torch. Pass
 `--ignore-preflight` to try anyway. The first hydrate of an engine
 prints the expected install size (torch + transformers is often 1–2 GiB).

@@ -9,7 +9,7 @@ immutable payload, recorded facts, still loadable as-is.
 
     darsay estimate huggingface:Qwen/Qwen3-0.6B   preflight: size, params, disk — no download
     darsay estimate datasets/<owner>/<name>       Hugging Face shorthand; same for a dataset
-    darsay classify <owner>/<name>    negative/print verdicts per weight set (bounded header reads)
+    darsay classify <owner>/<name>    preservation evidence and retention per weight set
     darsay archive huggingface:Qwen/Qwen3-0.6B    download + hash + manifest + reports
     darsay archive datasets/<owner>/<name>        archive a dataset (payload under data/)
     darsay verify  <bundle>           re-hash and compare against manifest
@@ -344,15 +344,10 @@ def cmd_estimate(args) -> int:
 
 
 def cmd_classify(args) -> int:
-    from .classify import (
-        base_bundle_in_vault,
-        classify_source,
-        print_classification,
-    )
+    from .classify import classify_source, print_classification
     from .providers.huggingface import parse_base_model_tags
     from .sources import SourceError, get_provider, parse_source
 
-    vault = _vault_path(args)
     ref = parse_source(args.source)
     provider = get_provider(ref.provider)
     progress = (lambda *a, **k: None) if args.json else print
@@ -383,16 +378,12 @@ def cmd_classify(args) -> int:
     tags = list((snapshot.metadata or {}).get("tags") or [])
     base_ids, _ = parse_base_model_tags(tags)
     base_locator = base_ids[0] if base_ids else None
-    base_in_vault = (
-        base_bundle_in_vault(vault, provider, base_locator) if base_locator else False
-    )
     result = classify_source(
         provider,
         ref,
         snapshot.revision,
         files,
         base_locator=base_locator,
-        base_in_vault=base_in_vault,
     )
     result["source"] = {
         "provider": ref.provider,
@@ -400,7 +391,6 @@ def cmd_classify(args) -> int:
         "revision": snapshot.revision,
         "revision_ref": snapshot.revision_ref,
         "base_model": base_locator,
-        "base_in_vault": base_in_vault,
     }
     result["subset"] = subset
     if args.json:
@@ -2026,7 +2016,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--full",
         action="store_true",
-        help="price the whole repo (skip the default negatives classification)",
+        help="price the whole repo, including exact duplicate weight files",
     )
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.add_argument(
@@ -2039,7 +2029,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = add_cmd(
         "classify",
-        help="negative/print verdicts for a model's weight files (bounded header reads)",
+        help="preservation evidence and retention for model weights (bounded header reads)",
     )
     p.add_argument(
         "source", help="e.g. huggingface:Qwen/Qwen3-0.6B or a huggingface.co URL"
@@ -2077,7 +2067,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument(
         "--full",
         action="store_true",
-        help="fetch the whole repo (skip the default negatives classification)",
+        help="fetch the whole repo, including exact duplicate weight files",
     )
     p.add_argument(
         "--board",

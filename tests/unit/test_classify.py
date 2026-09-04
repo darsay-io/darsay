@@ -1,6 +1,8 @@
-"""Classification rules R1-R14, the set model, and selection synthesis."""
+"""Classification rules R1-R15, the set model, and selection synthesis."""
 
 from __future__ import annotations
+
+import pytest
 
 from darsay.classify import (
     attach_selection,
@@ -23,7 +25,7 @@ def _facts(**overrides):
         "indexes": {},
         "gguf": {},
         "st_headers": {},
-        "base": {"locator": None, "sha256": {}, "in_vault": False, "error": None},
+        "base": {"locator": None, "sha256": {}, "error": None},
     }
     facts.update(overrides)
     return facts
@@ -118,7 +120,7 @@ def test_r1_support_kept_always():
     assert support["action"] == "fetch"
 
 
-def test_r2_base_identical_skips_only_when_base_in_vault():
+def test_r2_upstream_base_identity_is_retained():
     files = [
         F("copy/base.safetensors", sha256="aa"),
         F("model.safetensors", sha256="bb"),
@@ -126,16 +128,13 @@ def test_r2_base_identical_skips_only_when_base_in_vault():
     base = {
         "locator": "acme/base",
         "sha256": {"aa": "base.safetensors"},
-        "in_vault": False,
         "error": None,
     }
     result = evaluate(files, _facts(base=base), locator="a/t")
     copy_set = _set_for(result, "copy/base.safetensors")
     assert (copy_set["verdict"], copy_set["rule"]) == ("print", "R2")
-    assert copy_set["action"] == "fetch"  # base not archived here
-    base["in_vault"] = True
-    result = evaluate(files, _facts(base=base), locator="a/t")
-    assert _set_for(result, "copy/base.safetensors")["action"] == "skip"
+    assert copy_set["action"] == "fetch"
+    assert result["skip"]["files"] == 0
 
 
 def test_r3_indexed_full_fidelity_master():
@@ -207,6 +206,26 @@ def test_r7_imatrix_gguf_master():
     assert _by_rule(result)["R7"]["verdict"] == "negative"
 
 
+def test_sharded_gguf_is_one_set_and_retained_without_recovery_proof():
+    paths = ["model-Q4-00001-of-00002.gguf", "model-Q4-00002-of-00002.gguf"]
+    files = [F("model.safetensors"), *[F(p) for p in paths]]
+    headers = {p: {"kv": {}} for p in paths}
+    result = evaluate(files, _facts(gguf=headers), locator="acme/toy")
+    group = _set_for(result, paths[0])
+    assert group["paths"] == paths
+    assert (group["verdict"], group["action"]) == ("unknown", "fetch")
+    headers[paths[1]]["kv"]["quantize.imatrix.file"] = "private.dat"
+    result = evaluate(files, _facts(gguf=headers), locator="acme/toy")
+    assert _set_for(result, paths[0])["verdict"] == "negative"
+    assert result["skip"]["files"] == 0
+    del headers[paths[1]]
+    result = evaluate(files, _facts(gguf=headers), locator="acme/toy")
+    assert _set_for(result, paths[0])["verdict"] == "unknown"
+    assert result["skip"]["files"] == 0
+    result = evaluate(files[:-1], _facts(gguf=headers), locator="acme/toy")
+    assert _set_for(result, paths[0])["reason"] == "incomplete GGUF shard set"
+
+
 def test_r8_external_source_claim_unknown():
     gguf = {
         "Q4.gguf": {"kv": {"general.source.huggingface.repository": "someone/else"}}
@@ -218,14 +237,15 @@ def test_r8_external_source_claim_unknown():
     assert "someone/else" in external["reason"]
 
 
-def test_r9_single_candidate_print_skipped():
+def test_r9_single_candidate_does_not_establish_regeneration():
     gguf = {"Q4.gguf": {"kv": {"general.file_type": 15}}}
     files = [F("model.safetensors"), F("Q4.gguf")]
     result = evaluate(files, _facts(gguf=gguf), locator="acme/toy")
-    print_set = _by_rule(result)["R9"]
-    assert (print_set["verdict"], print_set["action"]) == ("print", "skip")
+    gguf_set = _by_rule(result)["R9"]
+    assert (gguf_set["verdict"], gguf_set["action"]) == ("unknown", "fetch")
+    assert "regeneration are not established" in gguf_set["reason"]
     assert result["candidates"] == 1
-    # A matching source claim does not downgrade.
+    # A publisher's matching source claim still does not prove regeneration.
     gguf = {
         "Q4.gguf": {
             "kv": {
@@ -234,7 +254,7 @@ def test_r9_single_candidate_print_skipped():
         }
     }
     result = evaluate(files, _facts(gguf=gguf), locator="acme/toy")
-    assert _by_rule(result)["R9"]["action"] == "skip"
+    assert _by_rule(result)["R9"]["action"] == "fetch"
 
 
 def test_r10_pure_quant_pack_all_master():
@@ -321,11 +341,12 @@ def test_selection_none_without_skips():
 
 def test_selection_globs_verified():
     files = [
-        F("model-00001-of-00002.safetensors"),
-        F("model-00002-of-00002.safetensors"),
+        F("model-00001-of-00002.safetensors", sha256="a"),
+        F("model-00002-of-00002.safetensors", sha256="b"),
+        F("copy/part-a.safetensors", sha256="a"),
+        F("copy/part-b.safetensors", sha256="b"),
         F("model.safetensors.index.json", 10),
         F("config.json", 10),
-        F("Q4.gguf"),
     ]
     indexes = {
         "model.safetensors.index.json": {
@@ -335,13 +356,12 @@ def test_selection_globs_verified():
             }
         }
     }
-    gguf = {"Q4.gguf": {"kv": {}}}
-    result = _classified(files, _facts(indexes=indexes, gguf=gguf))
+    result = _classified(files, _facts(indexes=indexes))
     assert result["selection"] == {
         "include": ["model-*-of-00002.safetensors"],
         "explicit_paths": False,
     }
-    assert result["skip"]["files"] == 1
+    assert result["skip"]["files"] == 2
 
 
 def test_selection_anchors_past_basename_collisions():
@@ -349,48 +369,62 @@ def test_selection_anchors_past_basename_collisions():
     # root-anchored pattern tells them apart.
     files = [
         F("model.safetensors", sha256="bb"),
-        F("copy/model.safetensors", sha256="aa"),
+        F("copy/model.safetensors", sha256="bb"),
     ]
-    base = {
-        "locator": "acme/base",
-        "sha256": {"aa": "model.safetensors"},
-        "in_vault": True,
-        "error": None,
-    }
-    result = _classified(files, _facts(base=base))
+    result = _classified(files, _facts())
     assert result["selection"]["include"] == ["/model.safetensors"]
     assert result["skip"]["files"] == 1
 
 
-def test_selection_degrades_to_none_when_unverifiable():
-    # Glob metacharacters in a kept path defeat fnmatch at every tier —
-    # the honest outcome is the full fetch.
+def test_selection_escapes_literal_metacharacters_and_keeps_all_support():
+    from darsay.subset import select_subset
+
     files = [
-        F("we[i]rd.safetensors", sha256="bb"),
-        F("copy/we[i]rd.safetensors", sha256="aa"),
+        F("we[i]*?rd.safetensors", sha256="bb"),
+        F("copy/we[i]*?rd.safetensors", sha256="bb"),
+        F("calibration.dat"),
+        F("support/[a]*?.dat"),
+        F("copy/config.json"),
     ]
-    base = {
-        "locator": "acme/base",
-        "sha256": {"aa": "we[i]rd.safetensors"},
-        "in_vault": True,
-        "error": None,
+    result = _classified(files, _facts())
+    selection = result["selection"]
+    assert selection["explicit_paths"] is True
+    assert "/we[[]i][*][?]rd.safetensors" in selection["include"]
+    selected, _ = select_subset(files, selection["include"])
+    assert {f["path"] for f in selected} == {
+        "we[i]*?rd.safetensors",
+        "calibration.dat",
+        "support/[a]*?.dat",
+        "copy/config.json",
     }
-    result = _classified(files, _facts(base=base))
+    assert result["skip"]["files"] == 1
+
+
+def test_selection_degrades_to_full_when_sidecars_prevent_exact_selection():
+    # README.* sidecar inclusion brings back this duplicate regardless of
+    # the patterns. Decisions and totals must describe the full fetch.
+    files = [
+        F("model.safetensors", sha256="bb"),
+        F("copy/README.safetensors", sha256="bb"),
+    ]
+    result = _classified(files, _facts())
     assert result["selection"] is None
     assert any("could not be verified" in note for note in result["notes"])
+    assert result["skip"] == {"files": 0, "bytes": 0}
+    assert result["keep"] == {"files": 2, "bytes": 200}
+    assert all(s["action"] == "fetch" for s in result["sets"])
 
 
-def test_selection_none_when_everything_would_skip():
+def test_selection_none_for_upstream_identical_only_weights():
     files = [F("model.safetensors", sha256="aa")]
     base = {
         "locator": "acme/base",
         "sha256": {"aa": "model.safetensors"},
-        "in_vault": True,
         "error": None,
     }
     result = _classified(files, _facts(base=base))
     assert result["selection"] is None
-    assert any("full repo" in note for note in result["notes"])
+    assert result["skip"]["files"] == 0
 
 
 # ---------------------------------------------------------- fact gathering
@@ -414,8 +448,12 @@ def test_classify_source_end_to_end_hermetic():
     ]
     result = classify_source(provider, ref, snapshot.revision, files)
     gguf_set = _set_for(result, "Q4_K_M.gguf")
-    assert (gguf_set["rule"], gguf_set["action"]) == ("R9", "skip")
-    assert result["selection"]["include"] == ["model.safetensors"]
+    assert (gguf_set["rule"], gguf_set["verdict"], gguf_set["action"]) == (
+        "R9",
+        "unknown",
+        "fetch",
+    )
+    assert result["selection"] is None
     receipt = result["read"]
     assert receipt["requests"] >= 2
     assert receipt["bytes_fetched"] > 0
@@ -488,15 +526,11 @@ def test_classify_source_base_identity_via_pin():
         snapshot.revision,
         files,
         base_locator="acme/base",
-        base_in_vault=True,
     )
     copy_set = _set_for(result, "copyof/base_model.safetensors")
-    assert (copy_set["rule"], copy_set["action"]) == ("R2", "skip")
+    assert (copy_set["rule"], copy_set["action"]) == ("R2", "fetch")
     assert result["read"]["base_pinned"] is True
-    assert result["selection"] == {
-        "include": ["model.safetensors"],
-        "explicit_paths": False,
-    }
+    assert result["selection"] is None
 
 
 def test_collect_facts_ticks_every_read(monkeypatch):
@@ -578,7 +612,7 @@ def test_r15_never_claims_on_missing_hashes_or_different_bytes():
 
 
 def test_r15_duplicates_do_not_inflate_gguf_ambiguity():
-    # Two byte-identical BF16 sets are one source: the GGUF stays R9.
+    # Identical BF16 sets are one candidate, still no regeneration proof.
     files = [
         F("model.safetensors", sha256="s"),
         F("mirror/model.safetensors", sha256="s"),
@@ -591,3 +625,61 @@ def test_r15_duplicates_do_not_inflate_gguf_ambiguity():
     assert result["candidates"] == 1
     assert _set_for(result, "Q4.gguf")["rule"] == "R9"
     assert _set_for(result, "mirror/model.safetensors")["rule"] == "R15"
+    assert _set_for(result, "Q4.gguf")["action"] == "fetch"
+
+
+@pytest.mark.parametrize(
+    "source_files",
+    [
+        {
+            "config.json": b'{"torch_dtype": "float32"}',
+            "model.safetensors.index.json": (
+                b'{"weight_map":{"a":"model-00001-of-00002.safetensors",'
+                b'"b":"model-00002-of-00002.safetensors"}}'
+            ),
+            "model-00001-of-00002.safetensors": make_safetensors(
+                {"a": ("F32", [2, 2])}
+            ),
+        },
+        {"weights.bin": b"no dtype or tensor evidence"},
+    ],
+    ids=["missing-source-shard", "opaque-legacy-source"],
+)
+def test_r9_incomplete_or_unread_source_never_justifies_omission(source_files):
+    provider = FakeProvider()
+    provider.add_repo("acme/toy", {**source_files, "Q4.gguf": make_gguf({})})
+    ref = provider.parse("acme/toy")
+    snapshot = provider.pin(ref, None)
+    files = [
+        {"path": f.path, "size": f.size, "sha256": f.sha256} for f in snapshot.files
+    ]
+    result = classify_source(provider, ref, snapshot.revision, files)
+    gguf_set = _set_for(result, "Q4.gguf")
+    assert (gguf_set["rule"], gguf_set["verdict"], gguf_set["action"]) == (
+        "R9",
+        "unknown",
+        "fetch",
+    )
+    assert result["selection"] is None
+    assert result["skip"] == {"files": 0, "bytes": 0}
+
+
+def test_r15_retains_one_local_copy_even_when_both_match_the_upstream_base():
+    files = [
+        F("model.safetensors", sha256="aa"),
+        F("copy/model.safetensors", sha256="aa"),
+    ]
+    base = {
+        "locator": "acme/base",
+        "sha256": {"aa": "model.safetensors"},
+        "error": None,
+    }
+    result = _classified(files, _facts(base=base))
+    assert (
+        _set_for(result, "model.safetensors")["rule"],
+        _set_for(result, "model.safetensors")["action"],
+    ) == ("R2", "fetch")
+    assert (
+        _set_for(result, "copy/model.safetensors")["rule"],
+        _set_for(result, "copy/model.safetensors")["action"],
+    ) == ("R15", "skip")

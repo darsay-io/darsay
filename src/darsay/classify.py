@@ -4,7 +4,8 @@ Mechanizes the QUANTIZATION.md line the way docs/proposals/classify.md
 ratified it: verdicts come from a closed enum — ``negative``, ``print``,
 ``support``, ``unknown`` — where ``unknown`` always means *fetch*. Every
 undecidable, unreadable, capped, or gated case degrades toward keeping
-bytes, never toward skipping them; only a confident print is skipped.
+bytes, never toward skipping them; only exact duplicates retained in the
+same bundle are skipped.
 
 ``collect_facts`` is the only networked door: it gathers what the rules
 need through a provider's bounded ``read_bytes`` (``config.json``,
@@ -28,7 +29,8 @@ from .gguf_meta import DEFAULT_FETCH_CAP, GGUFError, read_kv
 from .precision import quantization_config_of, torch_dtype_of
 from .providers.base import SourceError
 from .safetensors_meta import read_header_via
-from .subset import matches_include
+from .subset import is_sidecar, select_subset
+from .weight_variants import gguf_groups
 
 WEIGHT_SUFFIXES = (".safetensors", ".bin", ".gguf", ".pt", ".pth")
 FULL_FIDELITY_DTYPES = frozenset({"F64", "F32", "F16", "BF16"})
@@ -176,9 +178,16 @@ def build_sets(files: list[dict], indexes: dict) -> list[dict]:
                 sets.append(
                     _new_set("standalone", directory, st_rest, format="safetensors")
                 )
-        for item in items:
-            if _suffix_kind(item["path"]) == "gguf":
-                sets.append(_new_set("gguf", directory, [item], format="gguf"))
+        for group in gguf_groups(items):
+            sets.append(
+                _new_set(
+                    "gguf",
+                    directory,
+                    group["items"],
+                    format="gguf",
+                    complete=group["complete"],
+                )
+            )
         legacy = [
             item
             for item in items
@@ -285,7 +294,7 @@ def _judge_safetensors(weight_set: dict, facts: dict) -> tuple[str, str, str]:
         return (
             "unknown",
             "R6",
-            f"full-fidelity {dtype} in no index — not loadable as shipped, "
+            f"{dtype} weights in no index — not loadable as shipped, "
             "possibly a distinct build",
         )
     if weight_set["kind"] == "indexed":
@@ -295,7 +304,7 @@ def _judge_safetensors(weight_set: dict, facts: dict) -> tuple[str, str, str]:
             f"selected by {_name_of(weight_set['index'])}; {dtype} "
             f"(dtype from {established})",
         )
-    return "negative", "R4", f"standalone full-fidelity {dtype}"
+    return "negative", "R4", f"standalone floating-point weights ({dtype})"
 
 
 def _judge_legacy(weight_set: dict, facts: dict, has_safetensors: bool):
@@ -313,26 +322,47 @@ def _judge_legacy(weight_set: dict, facts: dict, has_safetensors: bool):
             "legacy-format weights beside safetensors — equivalence is not "
             "cheaply verifiable",
         )
-    return "negative", "R13", "only weight format in this repo"
+    return (
+        "negative",
+        "R13",
+        "legacy-format weights without safetensors; retained conservatively",
+    )
 
 
 def _judge_gguf(
     weight_set: dict, facts: dict, established: int, uncertain: int, locator: str
 ):
-    path = weight_set["paths"][0]
-    info = (facts.get("gguf") or {}).get(path)
-    if not isinstance(info, dict) or "__error__" in info:
-        reason = (info or {}).get("__error__", "header not read")
-        return "unknown", "R14", f"GGUF header unreadable — {reason}"
-    kv = info.get("kv") or {}
-    if any(key.startswith(IMATRIX_PREFIX) for key in kv):
+    if not weight_set["complete"]:
+        return "unknown", "R14", "incomplete GGUF shard set"
+    headers = []
+    for path in weight_set["paths"]:
+        info = (facts.get("gguf") or {}).get(path)
+        if not isinstance(info, dict) or "__error__" in info:
+            reason = (info or {}).get("__error__", "header not read")
+            return "unknown", "R14", f"GGUF header unreadable ({path}) — {reason}"
+        kv = info.get("kv") or {}
+        if len(weight_set["paths"]) > 1 and "split.count" in kv:
+            shard = re.search(r"-(\d+)-of-\d+\.gguf$", path, re.IGNORECASE)
+            if kv["split.count"] != len(weight_set["paths"]) or (
+                "split.no" in kv and kv["split.no"] != int(shard[1]) - 1
+            ):
+                return (
+                    "unknown",
+                    "R14",
+                    f"GGUF split metadata disagrees with the shard set ({path})",
+                )
+        headers.append(kv)
+    if any(key.startswith(IMATRIX_PREFIX) for kv in headers for key in kv):
         return "negative", "R7", "importance matrix baked in (quantize.imatrix.*)"
-    claims = [kv[k] for k in SOURCE_CLAIM_KEYS if isinstance(kv.get(k), str)]
-    if claims and not any(locator.lower() in claim.lower() for claim in claims):
+    claims = [
+        kv[k] for kv in headers for k in SOURCE_CLAIM_KEYS if isinstance(kv.get(k), str)
+    ]
+    external = [claim for claim in claims if locator.lower() not in claim.lower()]
+    if external:
         return (
             "unknown",
             "R8",
-            f"header records an external source ({claims[0]!r})",
+            f"header records an external source ({external[0]!r})",
         )
     if uncertain:
         # A weight set of unestablished nature could itself be the source
@@ -347,14 +377,14 @@ def _judge_gguf(
         return (
             "negative",
             "R10",
-            "no full-fidelity source in this repo — the only surviving form here",
+            "no established non-GGUF conversion source — preserve this published GGUF variant",
         )
     if established == 1:
         return (
-            "print",
+            "unknown",
             "R9",
-            "no imatrix — mechanical quant of the sole full-fidelity set; "
-            "regenerable under a recorded toolchain, not bit-identical",
+            "one colocated candidate source and no recorded imatrix — "
+            "derivation and byte-exact regeneration are not established",
         )
     return (
         "unknown",
@@ -377,11 +407,9 @@ def _gguf_evidence(info) -> dict:
     }
 
 
-# Rules whose sets count as established (or presumed, for legacy) GGUF
-# conversion sources. Not R5: a calibrated quant is not a conversion
-# source. R14 sets are counted separately as *uncertain* — an
-# unestablished set widens ambiguity toward fetching, and can never
-# anchor an R9 print.
+# Candidate GGUF conversion sources, not proof of complete inputs or a
+# reproducible conversion. R14 sets are counted separately as uncertain.
+# R5 does not establish a full-fidelity conversion source.
 _CANDIDATE_RULES = frozenset({"R2", "R3", "R4", "R6", "R12", "R13"})
 
 
@@ -416,11 +444,10 @@ def evaluate(files: list[dict], facts: dict, *, locator: str) -> dict:
             continue  # incomplete hashes: never a claim
         groups.setdefault(tuple(sorted(shas)), []).append(weight_set)
     for twins in groups.values():
-        keepable = [t for t in twins if t.get("verdict") in ("negative", "unknown")]
-        if len(twins) < 2 or not keepable:
+        if len(twins) < 2:
             continue
         keeper = min(
-            keepable,
+            twins,
             key=lambda t: (
                 -1 if t["dir"] == "." else t["dir"].count("/"),
                 t["dir"],
@@ -454,9 +481,13 @@ def evaluate(files: list[dict], facts: dict, *, locator: str) -> dict:
                 weight_set, facts, established, uncertain, locator
             )
             weight_set.update(verdict=verdict, rule=rule, reason=reason)
-            weight_set["evidence"] = _gguf_evidence(
-                (facts.get("gguf") or {}).get(weight_set["paths"][0])
-            )
+            weight_set["evidence"] = {
+                "headers": {
+                    path: _gguf_evidence((facts.get("gguf") or {}).get(path))
+                    for path in weight_set["paths"]
+                },
+                "complete": weight_set["complete"],
+            }
         elif weight_set["kind"] == "support":
             weight_set.update(verdict="support", rule="R1", reason="kept always")
         elif "verdict" not in weight_set:
@@ -466,7 +497,6 @@ def evaluate(files: list[dict], facts: dict, *, locator: str) -> dict:
                 reason="unrecognized set shape — kept",
             )
 
-    base_in_vault = bool((facts.get("base") or {}).get("in_vault"))
     verdict_bytes = {"negative": 0, "print": 0, "support": 0, "unknown": 0}
     keep = {"files": 0, "bytes": 0}
     skip = {"files": 0, "bytes": 0}
@@ -481,9 +511,7 @@ def evaluate(files: list[dict], facts: dict, *, locator: str) -> dict:
             else weight_set["glob"]
             or f"{weight_set['file_count']} files in {weight_set['dir']}"
         )
-        skippable = weight_set["rule"] in ("R9", "R15") or (
-            weight_set["rule"] == "R2" and base_in_vault
-        )
+        skippable = weight_set["rule"] == "R15"
         weight_set["action"] = "skip" if skippable else "fetch"
         verdict_bytes[weight_set["verdict"]] += weight_set["bytes"]
         bucket = skip if weight_set["action"] == "skip" else keep
@@ -506,25 +534,32 @@ def evaluate(files: list[dict], facts: dict, *, locator: str) -> dict:
 def attach_selection(classification: dict, files: list[dict]) -> None:
     """Turn verdicts into a verified ``--include`` selection, or refuse.
 
-    The selection keeps every negative, unknown, and support file and drops
-    skipped prints only. Globs must reproduce the intended weight set
-    exactly against the full inventory (via the same matcher
-    ``select_subset`` uses); exact paths are the fallback, and when even
-    those cannot be verified the selection is ``None`` — the caller
-    fetches the full repo and says why.
+    The selection must preserve every fetch path, including arbitrary
+    support files. Verify with ``select_subset`` itself, including its
+    automatic sidecars. Literal escaped paths are the fallback; if no
+    selection reproduces the decisions, retain everything and say why.
     """
     sets = classification["sets"]
     skipped = [s for s in sets if s["action"] == "skip"]
     if not skipped:
         classification["selection"] = None
         return
-    kept_weight_paths: set[str] = set()
+    kept_paths = {p for s in sets if s["action"] == "fetch" for p in s["paths"]}
     kept_sets = [s for s in sets if s["action"] == "fetch" and s["kind"] != "support"]
-    for weight_set in kept_sets:
-        kept_weight_paths.update(weight_set["paths"])
-    if not kept_weight_paths:
+
+    def fetch_all(reason: str) -> None:
         classification["selection"] = None
-        classification["notes"].append(
+        classification["notes"].append(reason)
+        for weight_set in sets:
+            weight_set["action"] = "fetch"
+        classification["keep"] = {
+            "files": sum(s["file_count"] for s in sets),
+            "bytes": sum(s["bytes"] for s in sets),
+        }
+        classification["skip"] = {"files": 0, "bytes": 0}
+
+    if not kept_sets:
+        fetch_all(
             "every weight file classified as a skippable print — the policy "
             "keeps the full repo rather than archive an empty payload; "
             "review with darsay classify"
@@ -532,16 +567,27 @@ def attach_selection(classification: dict, files: list[dict]) -> None:
         return
 
     def verified(patterns: list[str]) -> bool:
-        matched = {
-            f["path"]
-            for f in files
-            if _is_weight(f["path"]) and matches_include(f["path"], patterns)
-        }
-        return matched == kept_weight_paths
+        try:
+            selected, _ = select_subset(files, patterns)
+        except SystemExit:
+            return False
+        return {f["path"] for f in selected} == kept_paths
+
+    def literal_path(path: str) -> str:
+        escapes = {"*": "[*]", "?": "[?]", "[": "[[]"}
+        return "/" + "".join(escapes.get(char, char) for char in path)
+
+    support = [
+        literal_path(p)
+        for s in sets
+        if s["action"] == "fetch" and s["kind"] == "support"
+        for p in s["paths"]
+        if not is_sidecar(p)
+    ]
 
     globs = [s["glob"] for s in kept_sets]
     if all(globs):
-        patterns = sorted(set(globs))
+        patterns = sorted(set(globs + support))
         if verified(patterns):
             classification["selection"] = {
                 "include": patterns,
@@ -550,19 +596,18 @@ def attach_selection(classification: dict, files: list[dict]) -> None:
             return
         # Root-anchored globs disable filename matching: how a kept root
         # file is told apart from a skipped twin with the same basename.
-        anchored = sorted({f"/{g}" for g in globs})
+        anchored = sorted({f"/{g}" for g in globs} | set(support))
         if verified(anchored):
             classification["selection"] = {
                 "include": anchored,
                 "explicit_paths": False,
             }
             return
-    paths = sorted(f"/{p}" for p in kept_weight_paths)
+    paths = sorted(literal_path(p) for p in kept_paths)
     if verified(paths):
         classification["selection"] = {"include": paths, "explicit_paths": True}
         return
-    classification["selection"] = None
-    classification["notes"].append(
+    fetch_all(
         "selection could not be verified against the inventory — the full "
         "repo is fetched instead"
     )
@@ -598,7 +643,6 @@ def collect_facts(
     files: list[dict],
     *,
     base_locator: str | None = None,
-    base_in_vault: bool = False,
     gguf_fetch_cap: int = DEFAULT_FETCH_CAP,
     header_file_cap: int = HEADER_FILE_CAP,
     json_cap: int = JSON_CAP_BYTES,
@@ -637,7 +681,6 @@ def collect_facts(
         "base": {
             "locator": base_locator,
             "sha256": {},
-            "in_vault": bool(base_in_vault),
             "error": None,
         },
     }
@@ -767,30 +810,12 @@ def collect_facts(
 
 
 def _display_rows(result: dict) -> list[tuple[str, str, str, str, str]]:
-    """Table rows; per-file GGUF sets sharing a verdict merge for display."""
+    """One row per weight set, with GGUF shards counted as one variant."""
     from .readme_gen import human_size
 
     weight_sets = [s for s in result["sets"] if s["kind"] != "support"]
     support_sets = [s for s in result["sets"] if s["kind"] == "support"]
-    ggufs = [s for s in weight_sets if s["kind"] == "gguf"]
-    others = [s for s in weight_sets if s["kind"] != "gguf"]
-    merged: list[dict] = []
-    groups: dict[tuple, dict] = {}
-    for weight_set in ggufs:
-        key = (weight_set["verdict"], weight_set["rule"], weight_set["action"])
-        group = groups.get(key)
-        if group is None:
-            group = groups[key] = {**weight_set, "paths": list(weight_set["paths"])}
-            merged.append(group)
-        else:
-            group["paths"].extend(weight_set["paths"])
-            group["file_count"] += weight_set["file_count"]
-            group["bytes"] += weight_set["bytes"]
-            group["unknown_size_count"] += weight_set["unknown_size_count"]
-    for group in merged:
-        if group["file_count"] > 1:
-            group["name"] = f"*.gguf ({group['file_count']} files)"
-    display = sorted(others + merged, key=lambda s: -s["bytes"]) + support_sets
+    display = sorted(weight_sets, key=lambda s: -s["bytes"]) + support_sets
 
     rows = []
     for weight_set in display:
@@ -837,9 +862,8 @@ def print_classification(result: dict, progress=print) -> None:
         )
 
     p(
-        "\n  print = regenerable from kept files: a mechanical "
-        "re-quantization (not bit-identical) or a byte-identical twin "
-        "kept in this bundle [R15]."
+        "\n  print = hash-identical published bytes. A match in the upstream "
+        "base is retained [R2]; only a twin kept in this bundle is omitted [R15]."
     )
     unknown_sets = [s for s in result["sets"] if s["verdict"] == "unknown"]
     if unknown_sets:
@@ -867,9 +891,10 @@ def print_classification(result: dict, progress=print) -> None:
     if selection and skip["bytes"]:
         total = keep["bytes"] + skip["bytes"]
         p(
-            f"\nnegatives: fetch {human_size(keep['bytes'])} of "
+            f"\narchive: fetch {human_size(keep['bytes'])} of "
             f"{human_size(total)} — skip {human_size(skip['bytes'])} of "
-            "prints. darsay archive keeps the negatives by default; --full "
+            "same-bundle duplicates. All other weights and support files "
+            "are retained; --full "
             "fetches everything."
         )
         if src.get("address"):
@@ -883,29 +908,8 @@ def print_classification(result: dict, progress=print) -> None:
                 + format_archive_command(src["address"], revision, selection["include"])
             )
     else:
-        p("\nNothing here is a print — the negatives are the whole repo.")
+        p("\nThe archive retains the whole repository; no files were safely omitted.")
     p("")
-
-
-def base_bundle_in_vault(vault, provider, base_locator: str) -> bool:
-    """A registered full-repo bundle of the base exists in this vault.
-
-    The R2 skip gate: byte-identical prints are skipped only when the
-    identical bytes are verified locally. A subset bundle of the base is
-    not enough — it may not hold the matched files.
-    """
-    from .vault import bundle_records
-
-    try:
-        canonical = provider.parse(base_locator).canonical
-    except SystemExit:
-        return False
-    for row in bundle_records(vault):
-        if row.get("partial") or row.get("include"):
-            continue
-        if row.get("source_address") == canonical:
-            return True
-    return False
 
 
 def _print_policy_preflight(result: dict, ref, progress) -> None:
@@ -916,9 +920,9 @@ def _print_policy_preflight(result: dict, ref, progress) -> None:
     if not skip["bytes"] and not unknown_sets and not result["notes"]:
         return
     total = skip["bytes"] + keep["bytes"]
-    line = f"negatives: fetching {human_size(keep['bytes'])} of {human_size(total)}"
+    line = f"archive: fetching {human_size(keep['bytes'])} of {human_size(total)}"
     if skip["bytes"]:
-        line += f" — skipping {human_size(skip['bytes'])} of derivable prints"
+        line += f" — skipping {human_size(skip['bytes'])} of same-bundle duplicates"
     progress(line)
     for weight_set in result["sets"]:
         if weight_set["action"] == "skip":
@@ -943,8 +947,8 @@ def _print_policy_preflight(result: dict, ref, progress) -> None:
 
 
 def negatives_policy(
-    provider, ref, snapshot, vault, progress=print, on_read=None
-) -> tuple[list[str] | None, dict | None]:
+    provider, ref, snapshot, progress=print, on_read=None
+) -> tuple[list[str] | None, dict | None, dict | None]:
     """The archive default: classify a fresh model pin, derive its selection.
 
     Returns ``(include patterns, policy record, classification)``. The
@@ -970,18 +974,12 @@ def negatives_policy(
         tags = list((snapshot.metadata or {}).get("tags") or [])
         base_ids, _ = parse_base_model_tags(tags)
         base_locator = base_ids[0] if base_ids else None
-        base_in_vault = (
-            base_bundle_in_vault(vault, provider, base_locator)
-            if base_locator
-            else False
-        )
         result = classify_source(
             provider,
             ref,
             snapshot.revision,
             files,
             base_locator=base_locator,
-            base_in_vault=base_in_vault,
             on_read=on_read,
         )
     except Exception as exc:  # every failure degrades to the full repo
@@ -1023,7 +1021,6 @@ def classify_source(
     files: list[dict],
     *,
     base_locator: str | None = None,
-    base_in_vault: bool = False,
     on_read=None,
     **caps,
 ) -> dict:
@@ -1034,7 +1031,6 @@ def classify_source(
         revision,
         files,
         base_locator=base_locator,
-        base_in_vault=base_in_vault,
         on_read=on_read,
         **caps,
     )

@@ -102,16 +102,26 @@ def _license_from_tags(tags: list[str] | None) -> str | None:
     return None
 
 
-def _safetensors_params(info) -> dict | None:
+def _model_parameters(info) -> dict | None:
     st = getattr(info, "safetensors", None)
-    if st is None:
-        return None
     by_dtype = dict(getattr(st, "parameters", None) or {})
     total = getattr(st, "total", None) or sum(by_dtype.values())
+    source = "safetensors"
+    if not total:
+        gguf = getattr(info, "gguf", None)
+        total = gguf.get("total") if isinstance(gguf, dict) else None
+        source = "gguf"
     if not total:
         return None
+    if not isinstance(total, int) or isinstance(total, bool) or total <= 0:
+        return None
     dominant = max(by_dtype, key=by_dtype.get) if by_dtype else None
-    return {"total": total, "by_dtype": by_dtype or None, "dominant_dtype": dominant}
+    return {
+        "total": total,
+        "by_dtype": by_dtype or None,
+        "dominant_dtype": dominant,
+        "source": source,
+    }
 
 
 def _variant_formats(model_id: str, tags: list[str] | None) -> list[str] | None:
@@ -847,8 +857,13 @@ class HuggingFaceProvider(SourceProvider):
                 "last_modified": last_modified,
                 "downloads": getattr(info, "downloads", None),
                 "likes": getattr(info, "likes", None),
+                "gguf": {
+                    key: value
+                    for key, value in (getattr(info, "gguf", None) or {}).items()
+                    if key in ("total", "architecture")
+                },
             },
-            parameters=_safetensors_params(info),
+            parameters=_model_parameters(info),
             pipeline_tag=getattr(info, "pipeline_tag", None),
             license_id=_license_from_tags(getattr(info, "tags", None)),
             last_modified=last_modified,

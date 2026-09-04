@@ -75,7 +75,7 @@ Provenance of the download.
 | `upstream_stats_at_archive` | Downloads/month and likes at archive time — a popularity snapshot for the historical record. |
 | `upstream_tags` | Raw repo tags at archive time. |
 | `subset` | Present when the pin is not the whole repo — an explicit `archive --include`, or the default negatives selection. `{include, sidecars, sidecar_file_count, full_file_count, full_total_size_bytes, kept_file_count, kept_total_size_bytes, omitted_file_count, full_files[]}`. `full_files` is the complete upstream inventory (path, size, sha256, git_sha1, sorted by path) so the bundle states exactly what it left out. `inventory.files` is only the kept payload. `null` when the pin is the whole repo (`--full`, datasets, or nothing skippable). |
-| `subset.policy` | `"negatives"` when the selection was made by the default classification — the negative set ([Quantization §4](QUANTIZATION.md#4-mechanics)); absent for explicit `--include` subsets. |
+| `subset.policy` | `"negatives"` when the selection was made by default classification: retain all weights and support except weight sets whose every file has a hash-identical retained same-bundle twin ([Quantization §4](QUANTIZATION.md#4-mechanics)); absent for explicit `--include` subsets. It names the preservation policy, not the verdict for every retained byte. Duplicate paths are omitted; their content remains. |
 | `subset.classification` | The recorded rationale of a policy selection: `classifier.darsay` (the version that classified), the read receipt (`requests`, `bytes_fetched`, `caps` — the classification's `query_limit`s), and one row per weight set (`{name, kind, verdict, rule, action, file_count, bytes, reason}`; `verdict` ∈ `negative`, `print`, `support`, `unknown`). Recorded facts about a decision the tool actually made, not curator claims. |
 
 ## `licensing`
@@ -110,9 +110,9 @@ torch required).
 | `parameter_count`, `parameters_by_dtype`, `weight_shards` | Counted from safetensors headers. Null for `.bin`/`.gguf`-only payloads, and when any shard's header cannot be read (never a partial count). |
 | `architecture`, `model_type` | From `config.json` (`Qwen3ForCausalLM`, `qwen3`). |
 | `context_length` | `max_position_embeddings`. |
-| `precision` | The release precision label — `BF16`, `FP8`, `MXFP4`, `AWQ INT4`, `Q4_K_M` — from `config.json`'s `quantization_config` (wherever a multimodal config nests it), else the dominant tensor dtype, else a GGUF-only payload's file name ([Quantization §2](QUANTIZATION.md#2-precision-and-the-one-number-that-explains-a-size)). |
+| `precision` | The release precision label — `BF16`, `FP8`, `MXFP4`, `AWQ INT4`, `Q4_K_M` — from `config.json`'s `quantization_config` (wherever a multimodal config nests it), else the dominant tensor dtype, else a GGUF-only payload's file name ([Quantization §2](QUANTIZATION.md#2-precision-and-size-scope)). Precision does not establish original-release status. |
 | `precision_detail` | The recipe behind the label when there is one (`compressed-tensors · mxfp4-pack-quantized · 4-bit · group 32`), else null. |
-| `bytes_per_param` | Measured: weight bytes in the payload over `parameter_count`. Null when either is unknown. |
+| `bytes_per_param` | Measured: model weight bytes over `parameter_count`. Null when either is unknown, and for GGUF packs, incomplete shard selections, or projector-only selections. |
 | `quantization` | `quantization_config.quant_method` when present, else null. |
 | `hidden_size`, `num_hidden_layers`, `num_attention_heads`, `num_key_value_heads`, `tie_word_embeddings` | Architecture shape. |
 | `tokenizer` | `class`, `vocab_size`, `model_max_length`, `special_tokens` (bos/eos/pad/…), `chat_template_present`. |

@@ -234,7 +234,7 @@ def archive(
 
     A fresh model pin with no explicit ``include`` is classified and
     pinned negatives by default — negatives, everything unclassifiable,
-    and support files are fetched; confident derivable prints are skipped
+    and support files are fetched; only same-bundle exact duplicates are skipped
     on the record (``source.subset.policy``). ``full=True`` pins the
     whole repo instead; re-runs resume whatever the pin selected.
 
@@ -320,7 +320,7 @@ def archive(
             from .classify import negatives_policy
 
             effective_include, policy, _classification = negatives_policy(
-                provider, ref, snapshot, vault, progress
+                provider, ref, snapshot, progress
             )
         return new_ledger(snapshot, include=effective_include, policy=policy)
 

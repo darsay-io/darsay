@@ -868,7 +868,7 @@ def test_cli_catalog_dry_runs_write_nothing(vault, test_provider, tmp_path, caps
     (friend / "catalog.json").write_text(
         json.dumps(
             {
-                "catalog_schema_version": "2.0.0",
+                "catalog_schema_version": "3.0.0",
                 "kind": "darsay.catalog",
                 "id": "friend",
                 "title": "Friend",

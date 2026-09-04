@@ -204,7 +204,7 @@ def test_resolve_miss_hints_catalog(tmp_path):
     (cat / "catalog.json").write_text(
         json.dumps(
             {
-                "catalog_schema_version": "2.0.0",
+                "catalog_schema_version": "3.0.0",
                 "kind": "darsay.catalog",
                 "id": "summer",
                 "title": "summer",

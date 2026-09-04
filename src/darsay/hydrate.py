@@ -319,6 +319,23 @@ def select_weights(manifest: dict, engine: str, requested: str | None) -> str | 
         return None
     inventory_paths = [f["path"] for f in manifest["inventory"]["files"]]
     candidates = _matches(inventory_paths, globs)
+    if engine == "llama-cpp":
+        from .weight_variants import gguf_groups, is_projector
+
+        groups = [
+            g
+            for g in gguf_groups([{"path": p} for p in candidates])
+            if not is_projector(g["items"][0]["path"])
+        ]
+        incomplete = [g for g in groups if not g["complete"]]
+        if incomplete and (
+            not requested
+            or any(requested in {f["path"] for f in g["items"]} for g in incomplete)
+        ):
+            raise SystemExit(
+                "error: incomplete GGUF shard set — archive every shard before running"
+            )
+        candidates = [g["items"][0]["path"] for g in groups if g["complete"]]
     if requested:
         if requested not in candidates:
             raise SystemExit(

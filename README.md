@@ -14,8 +14,8 @@ darsay run     qwen--qwen3-0.6b "Say hello"
 ```
 
 <p align="center">
-  A pinned snapshot of the Hub — hashed, licensed, and still loadable as-is.<br>
-  The Hub is a living website. A darsay bundle is a museum piece that still runs.<br>
+  Pinned Hub artifacts — hashed, licensed, and kept in their published formats.<br>
+  Preserve the bytes. Prove supported selections still run offline.<br>
   <sub>Python 3.10+ · macOS and Linux · Apache 2.0</sub>
 </p>
 
@@ -138,13 +138,13 @@ darsay estimate Qwen/Qwen3.8-27B
 ```
 Qwen/Qwen3.8-27B @ main -> 1d4bf0f2ff60
   image-text-to-text | license apache-2.0
-  negatives:    the whole repo — 1 negative set (28 files, 51.7 GiB); nothing here is a print
+  archive:      the whole repo — 1 negative set (28 files, 51.7 GiB); nothing here is a print
   parameters:   27.78B BF16  [upstream safetensors metadata]
-  precision:    BF16 — 2.00 B/param: about one full-fidelity copy (16-bit)
+  precision:    BF16 — 2.00 B/param: about one 16-bit weight copy
   family:       Qwen · generation 3.8 · member 27B  [read from the name]
   architecture: qwen3_5  [config.json]
   lineage:      no parents declared upstream
-  payload:      32 files, 51.8 GiB
+  payload:      32 files, 51.8 GiB (archive)
   engines:      transformers
   completeness: complete
   download:     ░░░░░░░░░░░░░░░░░░░░░░░░    0.0%   0 B / 51.8 GiB
@@ -156,11 +156,18 @@ To archive: darsay archive Qwen/Qwen3.8-27B
 ```
 
 Exits non-zero when free space is insufficient, so it doubles as a guard
-in scripts. The `precision:` line is why the size is what it is —
-parameters times bytes per parameter — and `family:` places the work in
-its lineage ([Concepts](docs/CONCEPTS.md#precision)). `--variants` lists
-the quantized ecosystem.
-`--include '*Q4_K_M*'` prices one file inside a huge GGUF pack. When a
+in scripts. The payload names its scope: repository, selection, or
+classified archive. `precision:` explains one complete weight variant's
+bytes per parameter; `family:` places the work in its lineage
+([Concepts](docs/CONCEPTS.md#precision)). GGUF packs list each variant
+with the total of all its shards; `--variants` lists other repositories
+in the quantized ecosystem.
+`--include '*Q4_K_M*'` prices the matching variant inside a GGUF pack.
+For example, the 321B-parameter GLM-5.3-Flash GGUF repository contains
+2.315 TiB across twelve variants, while its UD-Q4_K_XL weights occupy
+186.0 GiB ([case study](docs/QUANTIZATION.md#a-gguf-pack-in-practice)).
+Archive totals can include several variants and unresolved weights;
+classification does not choose one precision for you. When a
 partial archive already exists, the download block prices the resume
 instead — verified, partial, and unverified bytes are banked, and only
 the remainder counts against disk:
@@ -209,7 +216,7 @@ No unpacking. No conversion. The archived files *are* the model.
 
 ```
 vault/qwen--qwen3-0.6b/<revision12>/
-├── model/              # immutable payload: pristine snapshot of the upstream repo
+├── model/              # immutable payload: selected upstream files, byte-for-byte
 ├── manifest.json       # machine-readable record — the source of truth
 ├── README.md           # human-readable summary, generated from the manifest
 ├── SHA256SUMS          # the payload's hash list: `sha256sum -c` verifies it with no darsay
@@ -287,7 +294,7 @@ darsay estimate Qwen/Qwen3.8-27B --variants
 darsay estimate unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
 darsay archive  unsloth/Qwen3.8-27B-GGUF --include '*Q4_K_M*'
 darsay classify OBLITERATUS/Qwen3.8-27B-OBLITERATED   # negative/print verdicts per weight set
-darsay archive  OBLITERATUS/Qwen3.8-27B-OBLITERATED --full   # whole repo, not just the negatives
+darsay archive  OBLITERATUS/Qwen3.8-27B-OBLITERATED --full   # every published file and layout
 darsay estimate datasets/saidutta69/fable-5-premium
 darsay archive  datasets/saidutta69/fable-5-premium
 darsay archive  Qwen/Qwen3.8-27B --revision v1.0      # pin a tag or commit instead of main
@@ -366,10 +373,10 @@ compression, recoverable with stock `tar`.
 </td>
 <td width="50%" valign="top">
 
-**Negatives and prints, never a third word.**
-Archive the negative. Keep the prints people
-actually ran as satellites. Derive the rest at run time.
-A size is parameters × bytes per parameter.
+**Choose the scope; preserve the evidence.**
+A publisher release, a variant pack, and one selected quant are different
+collections. Derived does not mean disposable. Every size names its
+scope; only same-bundle, hash-identical weight twins are omitted automatically.
 [Quantization](docs/QUANTIZATION.md)
 
 </td>

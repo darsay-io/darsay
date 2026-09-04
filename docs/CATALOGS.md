@@ -6,7 +6,7 @@
   <a href="../README.md">README</a>
 </p>
 
-# catalog.json — schema reference (v2.0.0)
+# catalog.json — schema reference (v3.0.0)
 
 > **In one sentence.** A catalog is a curated list of works. The vault is
 > that list, realized. Possession is a view, not a rewrite of this file.
@@ -54,7 +54,7 @@ writable.
 
 | Field | Meaning |
 |---|---|
-| `catalog_schema_version` | `"2.0.0"`. Major = breaking. |
+| `catalog_schema_version` | `"3.0.0"`. Major = breaking. |
 | `kind` | Always `"darsay.catalog"`. |
 | `id` | Slug. Matches the directory name when stored at `catalogs/<id>/`. Lowercase letter, then letters, digits, `.`, `_`, `-` (max 64). |
 | `title` | Human title. Defaults to `id`. |
@@ -69,13 +69,13 @@ writable.
 |---|---|
 | `source` | The work's address. A canonical source ref after parse (`huggingface:Qwen/Qwen3-0.6B`, `huggingface:datasets/owner/name`, `test:acme/toy`) — or, for a **closed work**, its home URL on a host with no provider (`https://www.qwencloud.com/models/qwen3.8-max-0902`): an API-only model, an announced release. A closed work has no `revision`, no `include`, and no `estimate`; its family, generation, and member are read from the URL's last segment exactly as from a repo name. |
 | `revision` | Intended pin, or `null` = any revision of this source satisfies. A 12-char (or longer) hex prefix is stored as typed. Non-hex refs match `revision_ref` exactly. |
-| `include` | `null` (full repo) or a list of globs in argv order, same meaning as `archive --include`. Identity is the *sorted set* of those globs. |
+| `include` | `null` (default acquisition) or a list of globs in argv order, same meaning as `archive --include`. Identity is the *sorted set* of those globs. |
 | `desire` | Integer `1–9`, or `null`. 9 = most desired. Curator data. |
 | `note` | Short curator note, or `null`. Not a Hub description. |
 | `added` | When the entry was inserted. |
 | `estimate` | Cached digest, or `null`. See below. |
 
-Uniqueness: `(canonical source, revision or "", sorted include tuple)`. Full-repo and `*Q4_K_M*` of the same repo are different works.
+Uniqueness: `(canonical source, revision or "", sorted include tuple)`. A default acquisition and `*Q4_K_M*` selection of the same repo are different entries.
 
 ## Estimate digest
 
@@ -89,22 +89,31 @@ Stale after 7 days (`*` on SIZE in `list`).
 | `artifact_type` | `est["artifact_type"]` |
 | `revision` | `est["source"]["revision"]` |
 | `revision_ref` | `est["source"]["revision_ref"]` |
-| `payload_bytes` | `est["payload"]["total_size_bytes"]` |
+| `payload_bytes` | `est["payload"]["total_size_bytes"]`: known bytes at `size_basis`; a lower bound when `unknown_size_count` is nonzero. |
 | `file_count` | `est["payload"]["file_count"]` |
 | `license` | `est["source"]["license"]` |
 | `gated` | `est["source"]["gated"]` |
-| `parameters` | `est["parameters"]["total"]` if dict, else `null` |
+| `parameters` | `est["parameters"]["total"]` if dict, else `null`. Total model parameters, including inactive experts; never the active count of a mixture of experts model. |
+| `parameters_source` | `"safetensors"`, `"gguf"`, or `null`. GGUF counts come from upstream `gguf.total` when safetensors counts are unavailable. |
 | `dominant_dtype` | `est["parameters"]["dominant_dtype"]` if dict, else `null` |
-| `unknown_size_count` | `est["payload"]["unknown_size_count"]` |
-| `hints` | Derived once, by `hints_for(est)` — see [Hints](#hints). Since 1.1.0. |
-| `policy` | `"negatives"` when the CLI classified the row and the stored price is its negative set — the default acquisition, whether or not any print was skipped ([Quantization §4](QUANTIZATION.md#4-mechanics)); `null` for `--full` and explicit-include prices, datasets, and rows priced by a board before the CLI's refresh. |
-| `precision` | The release precision label — `BF16`, `FP8`, `MXFP4`, `AWQ INT4`, `Q4_K_M` — from `config.json`'s `quantization_config`, the dominant dtype, or (GGUF-only repos) the file name ([Quantization §2](QUANTIZATION.md#2-precision-and-the-one-number-that-explains-a-size)); `null` when nothing establishes it. |
-| `bytes_per_param` | Measured: the priced weight bytes over `parameters`. About 2 is one full-fidelity copy, about 1 an 8-bit release, about 0.5 a 4-bit one, far above 2 several weight sets. `null` when either side is unknown. |
-| `architecture` | `config.json` `model_type` (`qwen3_5_moe_text`), or `null`. |
+| `unknown_size_count` | `est["payload"]["unknown_size_count"]`: selected files whose sizes are unknown. |
+| `hints` | Derived once, by `hints_for(est)` — see [Hints](#hints). |
+| `size_basis` | `"repository"` for the upstream inventory, `"selection"` for an explicit or pinned selection, `"archive"` for a classified retention decision. An archive can retain negative, unknown, support, and print files; this field is not a preservation verdict. |
+| `repository_bytes` | Exact byte total across all upstream files, or `null` if any size is unknown. Remains the whole repository even when `payload_bytes` describes a selection. |
+| `classification` | `null` when unavailable; otherwise `{verdicts, skipped_bytes, unclassified_count}`. `verdicts` maps each present `negative`, `print`, or `unknown` verdict to `{sets, files, bytes}`. `unclassified_count` counts unresolved **sets**, not files. Support bytes are included in the payload separately. Prints matching a remote base remain retained; only sets whose every file has a hash-identical retained same-bundle twin are automatically skipped. |
+| `gguf_variants` | Whole upstream inventory of GGUF model variants: `[{name, precision, file_count, size_bytes, complete, include}]`. Each entry groups all shards of one variant; `complete` requires every declared shard exactly once. `size_bytes` is the sum of its files, or `null` if a size is unknown. `include` contains exact selection globs. Projectors such as `mmproj` are companions, not model variants. An empty list means no GGUF model variants were found. |
+| `precision` | The release precision label — `BF16`, `FP8`, `MXFP4`, `AWQ INT4`, `Q4_K_M` — from `config.json`'s `quantization_config`, the dominant dtype, or (GGUF-only repos) the file name ([Quantization §2](QUANTIZATION.md#2-precision-and-size-scope)); `null` when nothing establishes it. Precision does not establish original-release status. |
+| `bytes_per_param` | Measured model weight bytes over `parameters`. About 2 is a 16-bit release, about 1 an 8-bit release, about 0.5 a 4-bit one. `null` when either side is unknown, and for GGUF packs, incomplete shard selections, or projector-only selections. |
+| `architecture` | `config.json` `model_type` (`qwen3_5_moe_text`), falling back to the Hub's GGUF architecture metadata; `null` when neither is available. |
 | `parents` | Parent edges as upstream declares them: `[{source, relation}]` where `relation` is `finetune` / `adapter` / `merge` / `quantized` / `trained_on` or `null` when unlabeled. From the card's `base_model` and `datasets` and the Hub's `base_model:*` tags. `null` when nothing is declared. |
 
-Never stored: `disk.*`, `bundle.dir`, engines, completeness, variants,
-vault status, bundle ids.
+The GGUF inventory remains complete even on a selected row, so a reader
+can compare choices without mistaking the selected bytes for the whole
+repository. A model variant is not a preservation verdict: both a
+negative and a print can occupy one variant row.
+
+Never stored: `disk.*`, `bundle.dir`, engines, overall payload
+completeness, descendant-repository estimates, vault status, bundle ids.
 
 ### Hints
 
@@ -117,18 +126,17 @@ Empty (`[]`) means *nothing notable*; a missing digest still means
 | Hint | When |
 |---|---|
 | `gated` | Upstream is gated (`source.gated`). Archiving needs an accepted license and `hf auth login`. |
-| `large` | The priced payload is ≥ 20 GiB (`LARGE_PAYLOAD_BYTES`) — more than one sitting, often more than one disk. With `--include`, the priced payload is the subset. An unknown size is never large. |
+| `large` | Known payload bytes are ≥ 20 GiB (`LARGE_PAYLOAD_BYTES`) — more than one sitting, often more than one disk. With `--include`, this is the subset. A lower bound can establish that a payload is large even when some file sizes are unknown. |
 | `quant` | A published quantized artifact ([Quantization](QUANTIZATION.md)): the weight bytes are mostly GGUF, or the dominant safetensors dtype is not F64 / F32 / F16 / BF16. |
-| `redundant` | The priced weight bytes are ≥ 1.75× one copy at the published per-dtype parameter counts — the repo likely ships several weight sets (`darsay classify` shows them). Live estimates only; never re-derived from a stored digest. Since 1.2.0. |
-| `subset` | The entry was priced with an explicit `--include`. A negatives-policy price sets the digest's `policy` key instead. |
+| `redundant` | The priced weight bytes are ≥ 1.75× one copy at the published per-dtype parameter counts — the repo likely ships several weight sets (`darsay classify` shows them). Live estimates only; never re-derived from a stored digest. |
+| `subset` | The entry was priced with an explicit `--include`. Classification is represented separately by `size_basis` and `classification`. |
 
-A digest written by a darsay.io board before the CLI has refreshed it
-carries the hints the board could derive. Readers derive `large`,
-`gated`, and `subset` from the digest and the entry's `include` on the
-fly; `quant` needs the live estimate's weight formats, so a GGUF row
-shows it only after `darsay estimate CATALOG` refreshes the digest (a
-quantized safetensors dtype is derived either way). Refresh is the only
-thing that writes `hints`; `catalog adopt` copies it verbatim.
+A digest written by a darsay.io board carries the hints its metadata
+estimate could establish. Readers can derive `large`, `gated`, and
+`subset` from the digest and the entry's `include`; a GGUF inventory also
+establishes the published format. Refresh writes the estimate's hints;
+`catalog adopt` copies them verbatim. A `quant` hint is a format or dtype
+observation, not a negative/print verdict.
 
 ### Lineage (not in the file)
 
@@ -147,7 +155,7 @@ come from upstream declarations, not from the name.
 `darsay list CATALOG` matches each entry against this vault’s
 `bundle_records` by canonical source address + optional revision + include
 set. An entry with `include: null` means *the default acquisition*: it is
-satisfied by a negatives-policy bundle (what `archive <source>` produces)
+satisfied by a classified archive bundle (what `archive <source>` produces)
 or by a full-repo bundle (a superset). An entry with explicit include
 globs matches only its globs.
 
@@ -193,11 +201,14 @@ filesystem path:
     darsay catalog drop <board-url> huggingface:owner/name --full
     darsay catalog adopt local-name <board-url>        # pull a local copy
 
-`estimate` against a board is the round trip that keeps it honest: the
-board's own quick estimates can only price the shipping box, while the
-CLI classifies (negatives-first prices, `hints`, the `policy` marker,
-precision and bytes per parameter) and pushes the refreshed catalog
-back. Closed rows are left as they are — there is nothing to price. Mutating verbs push after saving;
+`estimate` against a board refreshes the preservation evidence. The
+board's quick metadata estimates price the repository or an explicit
+selection and inventory its GGUF variants; the CLI classifies the default
+acquisition and pushes its archive size, verdict counts, hints, precision,
+and parameter provenance back. Every displayed price names its basis;
+neither a repository inventory nor an archive total is labeled as a
+quantity of negatives. Closed rows are left as they are — there is
+nothing to price. Mutating verbs push after saving;
 `--dry-run` never pushes. The board URL is the capability — treat it
 like a secret. The page address with `.json` (`/b/<board-id>.json`, the
 board as a document for programs) names the same board and is accepted

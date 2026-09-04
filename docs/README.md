@@ -22,7 +22,7 @@
 |---|---|
 | Tool | **0.14.14** |
 | Manifest schema | **2.1.0** |
-| Catalog schema | **2.0.0** |
+| Catalog schema | **3.0.0** |
 | MVB format | **1.3** |
 | License | Apache 2.0 |
 
@@ -36,8 +36,8 @@ Major schema / format bumps are breaking; additive fields are minor.
 at the bundle, run it.
 
 **You want the picture in your head.**
-[Concepts](CONCEPTS.md) — vault, bundle, pin, catalog, negatives and
-prints, precision, lineage, why the formats outlive the tool.
+[Concepts](CONCEPTS.md) — vault, bundle, pin, catalog, collection scope,
+preservation evidence, precision, lineage, why the formats outlive the tool.
 [North star](NORTH-STAR.md) — what the whole thing is for, and the five
 words every surface shares.
 
@@ -73,7 +73,7 @@ required to open a bundle. Everything else is how we got there.
 | [**FAQ**](FAQ.md) | Moving or copying a bundle to another disk (`mv` / `cp`, or rsync — always valid); `mv` vs `assemble --handoff`; what travels, what stays |
 | [**Datasets**](DATASETS.md) | The source is `datasets/owner/name`; payload under `data/` |
 | [**Sources**](SOURCES.md) | Provider-qualified refs; Hugging Face is a plugin |
-| [**Quantization**](QUANTIZATION.md) | Negatives and prints, precision and bytes per parameter, `darsay classify`, satellite prints, derived precision |
+| [**Quantization**](QUANTIZATION.md) | Collection scope, preservation evidence, precision and bytes per parameter, `darsay classify`, published variants |
 | [**Catalogs**](CATALOGS.md) | Shareable want-lists; closed works; the family view; darsay.io boards as remote catalogs; the vault is the same list, realized |
 | [**Doctor**](DOCTOR.md) | Offline vault diagnostics, reversible repair, JSON contract, evidence history |
 
@@ -94,7 +94,7 @@ are an optional third surface: a shareable want-list. They are not inside
 
 | Document | Open it when… |
 |---|---|
-| [**North star**](NORTH-STAR.md) | The mission and the model of the models — work, negative and print, precision, lineage — that every surface is measured against. |
+| [**North star**](NORTH-STAR.md) | The mission and the model of the models — collection scope, artifact identity and lineage, recovery evidence, retention — that every surface is measured against. |
 | [**Design**](DESIGN.md) | Why Python. Why transfer concurrency is threads, and where Xet fits. Why longevity is in the formats, not a frozen binary. |
 | [**Distribution**](DISTRIBUTION.md) | PyPI, pipx / uvx / wheel, personal Homebrew tap. |
 | [**Testing**](TESTING.md) | Unit / integration / opt-in Hub e2e. What the suite is there to keep. |

@@ -9,6 +9,31 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Changed
+
+- Automatic omission requires hash-identical content for every omitted file retained
+  in the same bundle. GGUFs beside candidate source weights and weights
+  matching a remote base remain retained; a vault address match is not
+  recovery evidence. Classified selections preserve every retained support
+  path, including files outside the sidecar list. Existing pins remain frozen;
+  use `archive --force --full` when a complete new repository pin is intended.
+- Collection guidance distinguishes scope, artifact identity and lineage,
+  recovery evidence, and the retention decision. Negative/print labels do not
+  imply originality, irrecoverability, or permission to omit. The GLM case
+  study compares the 2.315 TiB Unsloth pack, 305.8 GiB publisher FP8 release,
+  and 186.0 GiB selected Q4 variant.
+- Catalog schema 3 records whether a size measures the repository,
+  an explicit selection, or a classified archive, with separate repository
+  totals, classification summaries, and GGUF variants. Catalog readers accept
+  schema 3 only; recreate earlier catalogs from their source rows and refresh
+  their estimates. Existing model payloads need no re-download.
+- GGUF parameter counts use Hub metadata. Variant sizes sum every shard;
+  projectors are separate. Multi-variant packs and incomplete selections do
+  not produce a per-model bytes-per-parameter or memory estimate.
+- Classification keeps or skips a complete GGUF shard group together.
+  Hydration selects its first shard and refuses incomplete groups. Estimates
+  respect the selection frozen in an existing archive pin.
+
 ## [0.14.14] - 2026-09-03
 
 

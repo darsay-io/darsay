@@ -1,6 +1,6 @@
 """Precision: the release precision of a work's weights, and bytes per parameter.
 
-The one number that explains every archive size is bytes per parameter:
+Bytes per parameter explains the weight size of one model variant:
 a 2.4T-parameter BF16 release weighs 4.4 TiB because sixteen bits is two
 bytes; a 2.8T-parameter native MXFP4 release weighs 1.4 TiB because four
 bits plus a shared scale is about half a byte. This module names the
@@ -8,12 +8,12 @@ precision a repo was published at — ``BF16``, ``FP8``, ``MXFP4``,
 ``AWQ INT4``, ``Q4_K_M`` — from the facts darsay already holds
 (``config.json``'s ``quantization_config``, the dominant safetensors dtype,
 a GGUF's file name) and records which of them it read. It never opens a
-weight file, and a label it cannot establish is ``None``.
+weight file, and a label it cannot establish is ``None``. Repository and
+archive totals can include several variants and companion files.
 
-A native low-precision release is not a downgrade: when no higher-fidelity
-public copy exists, that release is the negative. ``quantized`` says only
-that the label sits below full fidelity; whether it is a negative or a
-print is the classifier's call (``classify.py``), never this module's.
+Precision describes storage, not original training precision, derivation,
+or recoverability. ``quantized`` is a format/config heuristic; preservation
+evidence and retention decisions belong to ``classify.py``.
 """
 
 from __future__ import annotations
@@ -239,19 +239,17 @@ def precision_facts(
         "bits": None,
         "quantized": None,
     }
-    paths = list(weight_paths or [])
+    from .weight_variants import is_projector
+
+    paths = [p for p in weight_paths or [] if not is_projector(p)]
     only_gguf = bool(paths) and all(p.lower().endswith(".gguf") for p in paths)
     gguf_shaped = isinstance(dominant_format, str) and dominant_format.lower() == "gguf"
     # A GGUF's name is its precision only when GGUF is all the repo ships:
-    # beside a safetensors negative, GGUFs are prints of it and the
-    # negative's precision is the one to name.
+    # beside safetensors, a config/header dtype names that weight set.
+    # Format alone never establishes a preservation verdict.
     if only_gguf or (gguf_shaped and not paths):
         levels = sorted(
-            {
-                lvl
-                for lvl in (gguf_level_of(p) for p in weight_paths or [])
-                if lvl is not None
-            }
+            {lvl for lvl in (gguf_level_of(p) for p in paths) if lvl is not None}
         )
         if len(levels) == 1:
             level = levels[0]
@@ -311,9 +309,11 @@ def describe_bytes_per_param(bpp: float | None) -> str | None:
     if bpp is None:
         return None
     if bpp >= 3.5:
-        return "well over one full-fidelity copy — the repo likely ships several weight sets"
+        return (
+            "more than two bytes per weight — wider encodings or additional stored data"
+        )
     if bpp >= 1.75:
-        return "about one full-fidelity copy (16-bit)"
+        return "about one 16-bit weight copy"
     if bpp >= 0.85:
         return "about one byte per weight — an 8-bit release"
     if bpp >= 0.4:

@@ -16,24 +16,27 @@ def _index(mapping: dict[str, str]) -> bytes:
     return json.dumps({"metadata": {}, "weight_map": mapping}).encode("utf-8")
 
 
-def test_classify_single_master_plus_gguf_skips_print(vault, test_provider, capsys):
+def test_classify_single_candidate_plus_gguf_retains_unknown(
+    vault, test_provider, capsys
+):
     files = model_files(extra={"Q4_K_M.gguf": make_gguf({"general.file_type": 15})})
     test_provider.add_repo("acme/toy", files)
     assert main(["--vault", str(vault), "classify", "test:acme/toy"]) == 0
     out = capsys.readouterr().out
     assert "test:acme/toy @ main" in out
-    assert "SKIPPED" in out and "[R9]" in out
-    assert "negatives: fetch" in out
-    assert "To pin exactly this selection:" in out
-    assert "--include model.safetensors" in out
+    assert "SKIPPED" not in out and "[R9]" in out
+    assert "regeneration are not established" in out
+    assert "The archive retains the whole repository" in out
+    assert "print = hash-identical published bytes" in out
 
     assert main(["--vault", str(vault), "classify", "test:acme/toy", "--json"]) == 0
     out = capsys.readouterr().out
     data = json.loads(out[out.index("{") :])
-    assert data["selection"]["include"] == ["model.safetensors"]
+    assert data["selection"] is None
     assert data["source"]["address"] == "test:acme/toy"
     assert data["read"]["caps"]["header_file_cap"] == 64
-    assert data["unclassified_count"] == 0
+    assert data["unclassified_count"] == 1
+    assert data["skip"]["files"] == 0
 
 
 def test_classify_case_study_shape_refuses_to_guess(vault, test_provider, capsys):
@@ -74,15 +77,19 @@ def test_classify_case_study_shape_refuses_to_guess(vault, test_provider, capsys
 
     assert main(["--vault", str(vault), "classify", "test:acme/oblit"]) == 0
     human = capsys.readouterr().out
-    assert "Nothing here is a print" in human
+    assert "The archive retains the whole repository" in human
     assert "need your decision" in human
 
 
-def test_classify_r2_skip_requires_base_bundle_in_vault(vault, test_provider, capsys):
+def test_classify_r2_retained_even_when_base_bundle_is_present(
+    vault, test_provider, capsys
+):
     shared = make_safetensors({"w": ("F32", [2, 2])})
     test_provider.add_repo("acme/base", model_files())
     base_blob = test_provider.repos[("acme/base", "main")].files["model.safetensors"]
-    files = model_files(extra={"copyof/base_model.safetensors": base_blob or shared})
+    files = model_files(
+        param_shape=[3, 3], extra={"copyof/base_model.safetensors": base_blob or shared}
+    )
     test_provider.add_repo(
         "acme/copy",
         files,
@@ -92,7 +99,7 @@ def test_classify_r2_skip_requires_base_bundle_in_vault(vault, test_provider, ca
             "gated": False,
         },
     )
-    # Base not archived: the byte-identical print is still fetched.
+    # An upstream identity claim does not replace retained local bytes.
     assert main(["--vault", str(vault), "classify", "test:acme/copy", "--json"]) == 0
     out = capsys.readouterr().out
     data = json.loads(out[out.index("{") :])
@@ -100,7 +107,7 @@ def test_classify_r2_skip_requires_base_bundle_in_vault(vault, test_provider, ca
         s for s in data["sets"] if "copyof/base_model.safetensors" in s["paths"]
     )
     assert (copy_set["rule"], copy_set["action"]) == ("R2", "fetch")
-    assert data["source"]["base_in_vault"] is False
+    assert "base_in_vault" not in data["source"]
 
     archive_quiet("test:acme/base", vault=vault)
     assert main(["--vault", str(vault), "classify", "test:acme/copy", "--json"]) == 0
@@ -109,8 +116,8 @@ def test_classify_r2_skip_requires_base_bundle_in_vault(vault, test_provider, ca
     copy_set = next(
         s for s in data["sets"] if "copyof/base_model.safetensors" in s["paths"]
     )
-    assert (copy_set["rule"], copy_set["action"]) == ("R2", "skip")
-    assert data["source"]["base_in_vault"] is True
+    assert (copy_set["rule"], copy_set["action"]) == ("R2", "fetch")
+    assert "base_in_vault" not in data["source"]
 
 
 def test_classify_dataset_refused(vault, test_provider):
@@ -151,5 +158,5 @@ def test_classify_provider_without_read_capability(
     monkeypatch.setattr(test_provider, "read_bytes", no_reads)
     assert main(["--vault", str(vault), "classify", "test:acme/toy"]) == 0
     out = capsys.readouterr().out
-    assert "Nothing here is a print" in out
+    assert "The archive retains the whole repository" in out
     assert "need your decision" in out

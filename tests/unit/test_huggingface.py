@@ -10,9 +10,33 @@ from darsay.providers.huggingface import (
     HuggingFaceProvider,
     _json_value,
     _license_from_tags,
+    _model_parameters,
     _variant_formats,
     parse_base_model_tags,
 )
+
+
+def test_gguf_parameters_are_read_with_provenance_without_a_dtype_guess():
+    info = _hub_info(filename="model-Q4.gguf")
+    info.gguf = {"total": 320_759_404_382, "architecture": "glm5next"}
+    provider = HuggingFaceProvider()
+    snap = provider._snapshot(
+        provider.parse("unsloth/GLM-5.3-Flash-GGUF"), "main", info
+    )
+    assert snap.parameters == {
+        "total": 320_759_404_382,
+        "by_dtype": None,
+        "dominant_dtype": None,
+        "source": "gguf",
+    }
+    assert snap.metadata["gguf"]["architecture"] == "glm5next"
+    info.safetensors = SimpleNamespace(total=40, parameters={"BF16": 40})
+    assert _model_parameters(info)["source"] == "safetensors"
+    assert _model_parameters(info)["total"] == 40
+    info.safetensors = None
+    for total in (True, -1, "320B"):
+        info.gguf = {"total": total}
+        assert _model_parameters(info) is None
 
 
 def _hub_not_found():

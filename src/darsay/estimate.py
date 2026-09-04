@@ -33,6 +33,7 @@ from .readme_gen import human_params, human_size
 from .schema import check_completeness, payload_root_for
 from .sources import SourceError, SourceRef, get_provider, parse_source
 from .transfer import disk_verdict
+from .weight_variants import gguf_variants, model_weight_bytes
 
 WEIGHT_SUFFIXES = (".safetensors", ".bin", ".gguf", ".pt", ".pth")
 DATA_SUFFIXES = (".parquet", ".jsonl", ".json", ".csv", ".arrow", ".txt", ".tsv")
@@ -258,8 +259,8 @@ def _classification_summary(result: dict | None) -> dict | None:
         bucket["bytes"] += weight_set["bytes"]
     return {
         "verdicts": by_verdict,
-        "skipped_bytes": (result.get("skip") or {}).get("bytes", 0),
-        "unclassified_count": result.get("unclassified_count", 0),
+        "skipped_bytes": sum(s["bytes"] for s in sets if s.get("action") == "skip"),
+        "unclassified_count": sum(s["verdict"] == "unknown" for s in sets),
     }
 
 
@@ -304,8 +305,9 @@ def estimate(
         {"path": f.path, "size": f.size, "sha256": f.sha256, "git_sha1": f.git_sha1}
         for f in snapshot.files
     ]
+    repository_files = files
     subset = None
-    # What the negatives line reports: the classification of a fresh model
+    # What the archive line reports: the classification of a fresh model
     # pin, ``"pinned"`` when a pin already froze the selection, ``"full"``
     # when --full or --include bypassed it, None for datasets.
     classification: dict | str | None = "full" if repo_type == "model" else None
@@ -318,23 +320,53 @@ def estimate(
         # its selection; the download block below reflects it as-is.
         probe_dir = bundle_dir_for(vault, ref, snapshot.revision)
         has_pin = (probe_dir / "manifest.json").is_file()
-        if not has_pin:
+        saved_subset = None
+        if has_pin:
+            from .archiver import load_manifest
+
+            saved_subset = load_manifest(probe_dir)["source"].get("subset")
+        else:
             from .transfer import find_resume
 
-            try:
-                has_pin = (
-                    find_resume(vault, ref, revision, payload_root_for(repo_type))
-                    is not None
-                )
-            except SystemExit:
-                has_pin = True  # ambiguous partials; archive will explain
+            resume = find_resume(vault, ref, revision, payload_root_for(repo_type))
+            has_pin = resume is not None
+            if resume and resume[1]:
+                ledger = resume[1]
+                saved_subset = ledger.get("subset")
+                if ledger["revision"] != snapshot.revision:
+                    try:
+                        snapshot = provider.pin(
+                            ref, ledger["revision"], require_access=False
+                        )
+                    except SourceError as exc:
+                        raise SystemExit(str(exc)) from None
+                    repository_files = files = [
+                        {
+                            "path": f.path,
+                            "size": f.size,
+                            "sha256": f.sha256,
+                            "git_sha1": f.git_sha1,
+                        }
+                        for f in snapshot.files
+                    ]
         classification = "pinned"
-        if not has_pin:
+        if saved_subset:
+            from .subset import select_subset
+
+            files, _ = select_subset(
+                repository_files,
+                saved_subset["include"],
+                sidecars=saved_subset["sidecars"],
+            )
+            subset = saved_subset
+            if saved_subset.get("classification"):
+                classification = _classification_summary(saved_subset["classification"])
+        elif not has_pin:
             from .classify import negatives_policy
             from .subset import select_subset
 
             policy_include, policy_record, result = negatives_policy(
-                provider, ref, snapshot, vault, progress, on_read=on_read
+                provider, ref, snapshot, progress, on_read=on_read
             )
             classification = _classification_summary(result)
             if policy_include:
@@ -347,6 +379,7 @@ def estimate(
     support = [f for f in files if not f["path"].lower().endswith(primary_suffixes)]
     total = sum(f["size"] or 0 for f in files)
     primary_bytes = sum(f["size"] or 0 for f in primary)
+    single_model_bytes = model_weight_bytes(primary)
     largest = max(files, key=lambda f: f["size"] or 0, default=None)
     dominant_format = _dominant_format(primary)
 
@@ -371,14 +404,15 @@ def estimate(
     )
     if precision is not None:
         precision["bytes_per_param"] = bytes_per_param(
-            primary_bytes, params.get("total") if params else None
+            single_model_bytes, params.get("total") if params else None
         )
     from .providers.huggingface import parents_from_metadata
 
     named = lineage_of_source(ref.canonical)
     lineage = {
         **named.as_dict(),
-        "architecture": (config or {}).get("model_type") if config else None,
+        "architecture": (config or {}).get("model_type")
+        or ((snapshot.metadata or {}).get("gguf") or {}).get("architecture"),
         "parents": parents_from_metadata(
             snapshot.metadata or {}, canonical_prefix=f"{ref.provider}:"
         ),
@@ -403,8 +437,8 @@ def estimate(
     verdict = disk_verdict(free, needed, floor)
 
     ram_gb = (
-        round(primary_bytes * RAM_FACTOR / 1024**3, 1)
-        if repo_type == "model" and primary_bytes
+        round(single_model_bytes * RAM_FACTOR / 1024**3, 1)
+        if repo_type == "model" and single_model_bytes
         else None
     )
     if transfer is None:
@@ -432,6 +466,17 @@ def estimate(
         },
         "subset": subset,
         "classification": classification,
+        "size_basis": "archive"
+        if isinstance(classification, dict) or (subset or {}).get("policy")
+        else "selection"
+        if subset
+        else "repository",
+        "repository_bytes": sum(f["size"] for f in repository_files)
+        if all(f["size"] is not None for f in repository_files)
+        else None,
+        "gguf_variants": gguf_variants(repository_files)
+        if repo_type == "model"
+        else [],
         "parameters": snapshot.parameters,
         "precision": precision,
         "lineage": lineage,
@@ -464,7 +509,8 @@ def estimate(
                 "scratch = largest file in flight during download; "
                 "RAM/VRAM not applicable to dataset bundles."
                 if repo_type == "dataset"
-                else "RAM/VRAM = weight bytes x1.2 (as in manifest runtime); "
+                else "RAM/VRAM = one complete model's weight bytes x1.2; "
+                "not estimated for GGUF packs or incomplete selections. "
                 "scratch = largest file in flight during download."
             ),
         },
@@ -596,7 +642,7 @@ def _negatives_summary(classification) -> str:
     if classification == "pinned":
         return "as pinned — the selection was frozen when the pin was made"
     if classification == "full":
-        return "not classified — the whole repo is priced (--full or --include)"
+        return "not classified — repository inventory (--full)"
     if not isinstance(classification, dict):
         return "the whole repo — classification unavailable, so everything is fetched"
     verdicts = classification.get("verdicts") or {}
@@ -613,18 +659,26 @@ def _negatives_summary(classification) -> str:
             f"{unknown['sets']} set{'s' if unknown['sets'] != 1 else ''} darsay will "
             f"not guess about ({human_size(unknown['bytes'])}), fetched"
         )
+    prints = verdicts.get("print")
+    retained_print_bytes = (prints or {}).get("bytes", 0) - classification.get(
+        "skipped_bytes", 0
+    )
+    if retained_print_bytes > 0:
+        parts.append(
+            f"{human_size(retained_print_bytes)} of prints retained; exact recovery from this bundle is not established"
+        )
     if not parts:
         return "the whole repo — no weight sets to classify"
     tail = (
         "; darsay classify shows the evidence"
-        if unknown
+        if unknown or prints
         else "; nothing here is a print"
     )
     return "the whole repo — " + " + ".join(parts) + tail
 
 
 def _precision_lines(est: dict) -> list[str]:
-    """``precision:    BF16 — 2.00 B/param: about one full-fidelity copy``."""
+    """``precision:    BF16 — 2.00 B/param: about one 16-bit weight copy``."""
     prec = est.get("precision") or {}
     label = prec.get("label")
     bpp = prec.get("bytes_per_param")
@@ -638,11 +692,6 @@ def _precision_lines(est: dict) -> list[str]:
         parts.append(f"{human_bytes_per_param(bpp)}: {describe_bytes_per_param(bpp)}")
     line = "  precision:    " + " — ".join(parts)
     lines = [line]
-    if prec.get("quantized"):
-        lines.append(
-            "                a native low-precision release is the negative — "
-            "no higher-fidelity public copy exists to prefer"
-        )
     return lines
 
 
@@ -664,7 +713,7 @@ def _lineage_lines(est: dict) -> list[str]:
     if bits:
         out.append(f"  family:       {' · '.join(bits)}  [read from the name]")
     if lin.get("architecture"):
-        out.append(f"  architecture: {lin['architecture']}  [config.json]")
+        out.append(f"  architecture: {lin['architecture']}  [upstream metadata]")
     parents = lin.get("parents") or []
     if parents:
         edges = ", ".join(
@@ -696,8 +745,8 @@ def print_estimate(est: dict, progress=print) -> None:
             skipped = sub["full_file_count"] - sub["kept_file_count"]
             skipped_bytes = sub["full_total_size_bytes"] - sub["kept_total_size_bytes"]
             p(
-                f"  negatives:    {_n_files(sub['kept_file_count'])}, "
-                f"{human_size(sub['kept_total_size_bytes'])} — prints skipped: "
+                f"  archive:      {_n_files(sub['kept_file_count'])}, "
+                f"{human_size(sub['kept_total_size_bytes'])} — recorded omissions: "
                 f"{_n_files(skipped)}, {human_size(skipped_bytes)} "
                 f"(full repo {human_size(sub['full_total_size_bytes'])}; --full prices everything)"
             )
@@ -708,7 +757,7 @@ def print_estimate(est: dict, progress=print) -> None:
                 f"(full repo: {sub['full_file_count']} files, {human_size(sub['full_total_size_bytes'])})"
             )
     elif not is_dataset:
-        p("  negatives:    " + _negatives_summary(est.get("classification")))
+        p("  archive:      " + _negatives_summary(est.get("classification")))
 
     if is_dataset:
         fmts = est["formats"] or {}
@@ -737,7 +786,8 @@ def print_estimate(est: dict, progress=print) -> None:
         else:
             dtypes = f" {params['dominant_dtype']}" if params["dominant_dtype"] else ""
         p(
-            f"  parameters:   {human_params(params['total'])}{dtypes}  [upstream safetensors metadata]"
+            f"  parameters:   {human_params(params['total'])}{dtypes}  "
+            f"[upstream {params.get('source') or 'model'} metadata]"
         )
     else:
         p("  parameters:   not published upstream")
@@ -746,12 +796,33 @@ def print_estimate(est: dict, progress=print) -> None:
             p(line)
         for line in _lineage_lines(est):
             p(line)
+        choices = est.get("gguf_variants") or []
+        if choices:
+            p(
+                f"  GGUF variants: {len(choices)} model weight variant(s); sizes include every shard"
+            )
+            for choice in choices:
+                label = choice["precision"] or choice["name"]
+                size = (
+                    human_size(choice["size_bytes"])
+                    if choice["size_bytes"] is not None
+                    else "unknown size"
+                )
+                state = "" if choice["complete"] else " — INCOMPLETE shard set"
+                p(
+                    f"                {label}: {size} in {_n_files(choice['file_count'])}{state}"
+                )
+            p(
+                "                Choose one with --include; projectors and other companion files are separate."
+            )
 
     primary_key, primary_label = (
         ("data", "data") if is_dataset else ("weights", "weights")
     )
     p(
         f"  payload:      {_n_files(pay['file_count'])}, {human_size(pay['total_size_bytes'])}"
+        + (" + unknown bytes" if pay["unknown_size_count"] else "")
+        + f" ({est.get('size_basis', 'repository')})"
     )
     p(
         f"                {primary_label} {human_size(pay[primary_key]['bytes'])} in {_n_files(pay[primary_key]['count'])}"
@@ -856,9 +927,7 @@ def print_estimate(est: dict, progress=print) -> None:
     cmd = f"darsay archive {shlex.quote(ref)}"
     if src["revision_ref"] != "main":
         cmd += f" --revision {shlex.quote(str(src['revision_ref']))}"
-    if est["subset"] and est["subset"].get("policy"):
-        p(f"\nTo archive (negatives are the default): {cmd}\n")
-    elif est["subset"]:
+    if est["subset"] and not est["subset"].get("policy"):
         for pat in est["subset"]["include"]:
             cmd += f" --include {shlex.quote(pat)}"
         p(f"\nTo archive this subset: {cmd}\n")

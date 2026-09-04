@@ -25,8 +25,8 @@ from .lineage import display_generation, group_by_family, lineage_of_source
 from .readme_gen import _curation_body, human_size
 from .sources import parse_source
 
-CATALOG_SCHEMA_VERSION = "2.0.0"
-CATALOG_SCHEMA_MAJOR = 2
+CATALOG_SCHEMA_VERSION = "3.0.0"
+CATALOG_SCHEMA_MAJOR = 3
 CATALOG_KIND = "darsay.catalog"
 STALE_AFTER_DAYS = 7
 CATALOGS_DIRNAME = "catalogs"
@@ -48,9 +48,11 @@ DIGEST_KEYS = frozenset(
         "dominant_dtype",
         "unknown_size_count",
         "hints",
-        "policy",
-        # Since 2.0.0: the release precision and what it spends per weight,
-        # the architecture, and parent edges as upstream declares them.
+        "size_basis",
+        "repository_bytes",
+        "classification",
+        "gguf_variants",
+        "parameters_source",
         "precision",
         "bytes_per_param",
         "architecture",
@@ -61,8 +63,8 @@ DIGEST_KEYS = frozenset(
 # and often more than one disk. darsay.io's board draws the same line.
 LARGE_PAYLOAD_BYTES = 20 * 1024**3
 # The closed vocabulary of ``estimate.hints``. Sorted on write; readers ignore
-# names they do not know. The digest's ``policy`` key is ``"negatives"`` when
-# the stored price is the default acquisition — the negative set.
+# names they do not know. ``size_basis`` distinguishes an inventory from
+# a selected payload or a classified archive (which can retain unknowns).
 HINTS = ("gated", "large", "quant", "redundant", "subset")
 _FULL_FIDELITY_DTYPES = frozenset({"F64", "F32", "F16", "BF16"})
 _QUANT_FORMATS = frozenset({"gguf"})
@@ -265,7 +267,7 @@ def hints_for(est: dict) -> list[str]:
       no hint. Live estimates only; never re-derived from a digest.
     - ``subset`` — the estimate was priced with an explicit ``--include``.
       A negatives-policy selection is the default acquisition, not a
-      curator subset: it sets the digest's ``policy`` key instead.
+      curator subset: its size basis is ``archive``.
     """
     payload = est.get("payload") if isinstance(est.get("payload"), dict) else {}
     source = est.get("source") if isinstance(est.get("source"), dict) else {}
@@ -284,29 +286,14 @@ def hints_for(est: dict) -> list[str]:
 
 
 def derive_hints(digest, entry: dict | None = None) -> list[str]:
-    """Hints for a stored digest. Stored ``hints`` win; older digests are derived.
-
-    A 1.0.0 digest has no ``hints``: ``large`` and ``gated`` come out exactly,
-    ``subset`` from the entry's include globs, and ``quant`` only from
-    ``dominant_dtype`` — the GGUF signal lives in the live estimate, so a
-    GGUF row shows ``quant`` after ``darsay estimate CATALOG`` refreshes it.
-    """
+    """The stored, closed-vocabulary hints from a catalog digest."""
     if not isinstance(digest, dict):
         return []
-    if isinstance(digest.get("hints"), list):
-        return _clean_hints(digest["hints"])
-    include = entry.get("include") if isinstance(entry, dict) else None
-    return _hints(
-        payload_bytes=digest.get("payload_bytes"),
-        gated=digest.get("gated"),
-        subset=bool(include),
-        dominant_dtype=digest.get("dominant_dtype"),
-        dominant_format=None,
-    )
+    return _clean_hints(digest.get("hints"))
 
 
 def entry_hints(entry: dict) -> list[str]:
-    """Stored hints when the digest carries them, else derived from what it has."""
+    """The hints established when this entry was priced."""
     if not isinstance(entry, dict):
         return []
     return derive_hints(entry.get("estimate"), entry)
@@ -332,13 +319,13 @@ def estimate_digest(est: dict) -> dict:
         else None,
         "unknown_size_count": est["payload"]["unknown_size_count"],
         "hints": hints_for(est),
-        # The negatives marker: the CLI classified this row and the stored
-        # price is its negative set — whether or not a print was skipped.
-        # Absent for --full / --include prices, datasets, and existing pins.
-        "policy": "negatives"
+        "size_basis": est["size_basis"],
+        "repository_bytes": est["repository_bytes"],
+        "classification": est["classification"]
         if isinstance(est.get("classification"), dict)
-        or (est.get("subset") or {}).get("policy")
         else None,
+        "gguf_variants": est["gguf_variants"],
+        "parameters_source": params.get("source"),
         "precision": precision.get("label"),
         "bytes_per_param": precision.get("bytes_per_param"),
         "architecture": lineage.get("architecture"),
@@ -523,7 +510,7 @@ def load_catalog(path: Path) -> dict:
     if major != CATALOG_SCHEMA_MAJOR:
         raise SystemExit(
             f"error: catalog schema {version} is not {CATALOG_SCHEMA_MAJOR}.x — this "
-            "darsay reads 2.x catalogs; re-add the entries to a new catalog"
+            f"darsay reads {CATALOG_SCHEMA_MAJOR}.x catalogs; re-add the entries to a new catalog"
         )
     if data.get("kind") != CATALOG_KIND:
         raise SystemExit(
@@ -603,8 +590,7 @@ def load_catalog(path: Path) -> dict:
 def save_catalog(path: Path, catalog: dict) -> None:
     """Write catalog.json. Does not touch curation.md."""
     payload = {
-        # The tool writes the schema it conforms to; 1.x is additive, so a
-        # 1.0.0 file re-saved here is a valid 1.1.0 file.
+        # Every writer emits the same catalog contract.
         "catalog_schema_version": CATALOG_SCHEMA_VERSION,
         "kind": CATALOG_KIND,
         "id": catalog["id"],
@@ -988,6 +974,11 @@ def _lineage_fields(entry: dict) -> dict:
         "lineage": lineage_of_source(source).as_dict(),
         "precision": est.get("precision"),
         "bytes_per_param": est.get("bytes_per_param"),
+        "size_basis": est.get("size_basis"),
+        "repository_bytes": est.get("repository_bytes"),
+        "gguf_variants": est.get("gguf_variants"),
+        "classification": est.get("classification"),
+        "unknown_size_count": est.get("unknown_size_count"),
         "home": source if is_home(source) else None,
     }
 
@@ -1343,6 +1334,12 @@ def format_size_cell(row: dict) -> str:
         size = human_size(payload)
         if row.get("estimate_stale"):
             size += "*"
+    if payload is not None:
+        if row.get("unknown_size_count"):
+            size = "≥" + size
+        basis = row.get("size_basis")
+        if basis:
+            size += f" ({basis})"
     return size
 
 
@@ -1542,8 +1539,11 @@ def render_catalog_readme(catalog_dir: Path, catalog: dict) -> str:
             size = "?"
         else:
             as_of = (est.get("as_of") or "")[:10]
-            size = f"{human_size(est['payload_bytes'])}" + (
-                f" (as of {as_of})" if as_of else ""
+            size = (
+                ("≥" if est.get("unknown_size_count") else "")
+                + f"{human_size(est['payload_bytes'])}"
+                + (f" ({est['size_basis']})" if est.get("size_basis") else "")
+                + (f" (as of {as_of})" if as_of else "")
             )
         license_s = est.get("license") or "?"
         hints = ", ".join(entry_hints(entry)) or "—"

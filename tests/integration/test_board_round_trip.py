@@ -26,7 +26,7 @@ class FakeBoardServer:
 
     def catalog(self) -> dict:
         return {
-            "catalog_schema_version": "2.0.0",
+            "catalog_schema_version": "3.0.0",
             "kind": "darsay.catalog",
             "id": self.catalog_id,
             "title": self.catalog_id,
@@ -117,7 +117,7 @@ def test_estimate_round_trip_pushes_classified_digests(
     assert f"Pushed to {BOARD_URL}" in out
     assert len(server.pushed) == 1
     entry = server.pushed[0]["entries"][0]
-    assert entry["estimate"]["policy"] == "negatives"
+    assert entry["estimate"]["size_basis"] == "archive"
     assert entry["estimate"]["payload_bytes"] > 0
     assert "hints" in entry["estimate"]
 

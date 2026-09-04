@@ -3,9 +3,10 @@
 The records under ``tests/fixtures/schema-1.8.0/`` were written by darsay
 0.14.10, the last 1.x writer (see ``make.py`` there). The bar this file
 holds the verb to: a migrated 1.8.0 record equals what today's
-``archive`` writes for the same source, section by section, with only
-archive-time facts (timestamps, the tool that downloaded, the descendants
-snapshot) differing — and those are carried as recorded, not refreshed.
+``archive`` writes for the same pinned file selection, section by section,
+apart from archive-time facts. Timestamps, the downloader, descendants,
+and historical acquisition decisions are carried as recorded. Migration
+never changes a frozen selection to match today's default policy.
 """
 
 from __future__ import annotations
@@ -88,8 +89,6 @@ ARCHIVE_TIME = (
     "source.download_timestamp",
     "source.transfer",
     "source.downloader",
-    "source.subset.classification.read",
-    "source.subset.classification.classifier",
     "validation.checksum_verification.at",
     "archive",
     "lineage.descendants",
@@ -116,9 +115,6 @@ def comparable(record: dict) -> dict:
         _drop(record, dotted)
     for row in record["inventory"]["files"]:
         row.pop("blake3", None)  # an optional extra; presence is environmental
-    subset = (record.get("source") or {}).get("subset") or {}
-    for row in (subset.get("classification") or {}).get("sets") or []:
-        row.pop("reason", None)  # prose the classifier may reword between versions
     return record
 
 
@@ -133,29 +129,67 @@ def assert_same_record(migrated: dict, fresh: dict) -> None:
 
 
 @pytest.mark.parametrize("ledger", [True, False], ids=["with-ledger", "no-ledger"])
-def test_migrated_model_record_equals_a_fresh_archive(tmp_path, test_provider, ledger):
+def test_migrated_model_record_equals_a_fresh_archive_of_same_selection(
+    tmp_path, test_provider, ledger
+):
     register_sources(test_provider)
-    fresh_vault = tmp_path / "fresh"
-    fresh_vault.mkdir()
-    fresh = load_manifest(
-        archive_quiet(f"test:{MAKE.MODEL_LOCATOR}", vault=fresh_vault)
-    )
-    assert fresh["schema_version"] == SCHEMA_VERSION
-
     old_vault = tmp_path / "inbox"
     old_vault.mkdir()
     bundle = place(old_vault, TOY, ledger=ledger)
     fixture = read_manifest(bundle)
+    frozen_subset = fixture["source"]["subset"]
+    payload_before = {
+        p.relative_to(bundle / "model").as_posix(): p.read_bytes()
+        for p in (bundle / "model").rglob("*")
+        if p.is_file()
+    }
+
+    fresh_vault = tmp_path / "fresh"
+    fresh_vault.mkdir()
+    fresh = load_manifest(
+        archive_quiet(
+            f"test:{MAKE.MODEL_LOCATOR}",
+            vault=fresh_vault,
+            include=frozen_subset["include"],
+        )
+    )
+    assert fresh["schema_version"] == SCHEMA_VERSION
+
+    provider_calls = (list(test_provider.reads), list(test_provider.downloads))
     plan = migrate_bundle(bundle, progress=silent)
     assert plan["ledger"] is ledger
     migrated = load_manifest(bundle)
+    assert (test_provider.reads, test_provider.downloads) == provider_calls
+    assert {
+        p.relative_to(bundle / "model").as_posix(): p.read_bytes()
+        for p in (bundle / "model").rglob("*")
+        if p.is_file()
+    } == payload_before
+    assert "Q4_K_M.gguf" not in payload_before
+
+    # This receipt is the 0.14.10 archive decision, including its old R9
+    # omission. Preserve it exactly apart from the schema vocabulary rename.
+    expected_subset = deepcopy(frozen_subset)
+    expected_subset["policy"] = "negatives"
+    for weight_set in expected_subset["classification"]["sets"]:
+        if weight_set["verdict"] == "master":
+            weight_set["verdict"] = "negative"
+    assert migrated["source"]["subset"] == expected_subset
+    assert "classification" not in fresh["source"]["subset"]
+    assert "policy" not in fresh["source"]["subset"]
+
+    # The fresh explicit archive has the same files, with no invented
+    # historical policy receipt. Its remaining record is directly comparable.
+    migrated_contents = deepcopy(migrated)
+    migrated_contents["source"]["subset"].pop("classification")
+    migrated_contents["source"]["subset"].pop("policy")
 
     edges = migrated["lineage"]["parents"]
     assert [(e["source"], e["relation"]) for e in edges] == [
         (e["source"], e["relation"]) for e in fresh["lineage"]["parents"]
     ]
     if ledger:
-        assert_same_record(migrated, fresh)
+        assert_same_record(migrated_contents, fresh)
     else:
         # Without the card, a parent both the card and a tag declared is
         # recorded as the tag's — the declaration the record itself holds —
@@ -166,7 +200,7 @@ def test_migrated_model_record_equals_a_fresh_archive(tmp_path, test_provider, l
             "tag",
             "card",
         ]
-        left, right = comparable(migrated), comparable(fresh)
+        left, right = comparable(migrated_contents), comparable(fresh)
         left["lineage"].pop("parents"), right["lineage"].pop("parents")
         assert list(left) == list(right)
         for section in right:
@@ -198,6 +232,30 @@ def test_migrated_model_record_equals_a_fresh_archive(tmp_path, test_provider, l
         "print",
         "support",
     ]
+
+
+def test_estimate_preserves_historical_omission_receipt(vault, test_provider):
+    from darsay.estimate import estimate, print_estimate
+
+    register_sources(test_provider)
+    bundle = place(vault, TOY)
+    migrate_bundle(bundle, progress=silent)
+    frozen_subset = load_manifest(bundle)["source"]["subset"]
+    priced = estimate(f"test:{MAKE.MODEL_LOCATOR}", vault=vault, progress=silent)
+    assert priced["subset"] == frozen_subset
+    omitted = next(
+        s for s in priced["subset"]["classification"]["sets"] if s["action"] == "skip"
+    )
+    assert omitted["rule"] == "R9"
+    assert (
+        priced["payload"]["total_size_bytes"] == frozen_subset["kept_total_size_bytes"]
+    )
+    lines = []
+    print_estimate(priced, progress=lines.append)
+    output = "\n".join(lines)
+    assert "recorded omissions: 1 file, 57 B" in output
+    assert "same-bundle duplicates" not in output
+    assert not (bundle / "model" / "Q4_K_M.gguf").exists()
 
 
 def test_migrated_plain_model_equals_a_fresh_archive(tmp_path, test_provider):

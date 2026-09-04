@@ -545,7 +545,7 @@ No Python CLI API changes in v1. Website HTTP API (same origin, no public CORS t
 | `POST` | `/api/boards/:id/entries` | `canonicalizeSource` then upsert by entry key (does not retarget identity). **Lookup** + mutate. |
 | `PATCH` | `/api/boards/:id/entries/:eid` | Same `canonicalizeSource` as POST. Update desire, note, status, holders; may change `revision` / `include` / `source`. **409** after canonicalization if the new identity collides. **Lookup** + mutate. |
 | `DELETE` | `/api/boards/:id/entries/:eid` | Drop row. **Lookup** + mutate. |
-| `POST` | `/api/boards/:id/catalog.json` | Catalog 1.0.0 bytes. Preferred for the UI (`fetch` + blob). `Content-Disposition: attachment; filename="<catalog_id>.json"`. Counts as a **lookup** (read), not a mutate. |
+| `POST` | `/api/boards/:id/catalog.json` | Catalog 3.0.0 bytes. Preferred for the UI (`fetch` + blob). `Content-Disposition: attachment; filename="<catalog_id>.json"`. Counts as a **lookup** (read), not a mutate. |
 | `GET` | `/api/boards/:id/catalog.json` | Same bytes as POST. Exists for `curl`. **This URL is the write capability.** Do not put it on a copy button. **Lookup** budget. |
 
 There is **no** `GET /api/boards` list. There is **no** search.
@@ -573,11 +573,11 @@ Timestamps match CLI `utc_now()`: `datetime.now(timezone.utc).isoformat(timespec
 
 ### Catalog export shape
 
-Must be loadable by `load_catalog()` / `save_catalog()` in `src/darsay/catalog.py` **without** a schema bump. Implementation should literally emit this object and no other top-level keys (unknown top-level keys are preserved on CLI round-trip; do not start a dialect):
+Must be loadable by `load_catalog()` / `save_catalog()` in `src/darsay/catalog.py`. The [catalog contract](../CATALOGS.md) defines the shared schema and scoped estimate digest; the site does not create a separate dialect:
 
 ```json
 {
-  "catalog_schema_version": "1.0.0",
+  "catalog_schema_version": "3.0.0",
   "kind": "darsay.catalog",
   "id": "summer",
   "title": "Summer 2026",
@@ -615,7 +615,7 @@ Golden test: assert top-level keys ⊆ `catalog.py` `_CATALOG_TOP_KEYS`; `status
 | entry `note` / `holders` | 500 chars | 400 |
 | `source` | 300 chars | 400 |
 | `revision` | 64 chars | 400 |
-| include globs | 80 chars each; max 8; duplicates allowed (CLI) | 400 |
+| include globs | 1 024 chars each; max 256; duplicates allowed (CLI); request body cap still applies | 400 |
 | Entries per board | **200** | D1 batch: `COUNT` then `INSERT`; concurrent POSTs cannot sneak past |
 | Board creates | **100 / UTC day** (global) | D1 transaction: **read cap, 429 if at limit, then increment** `creates_n` and INSERT. `{error:"create_cap"}` |
 | Entry mutations | **10 000 / UTC day** (global INSERT+UPDATE+DELETE of entries) | `mutates_n` in the same batch, check-then-increment |

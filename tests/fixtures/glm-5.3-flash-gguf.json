@@ -1,0 +1,356 @@
+{
+  "source": "unsloth/GLM-5.3-Flash-GGUF",
+  "revision": "2975ab414d30340466d8c51533c6e91f0cca64c1",
+  "parameters": 320759404382,
+  "architecture": "glm5next",
+  "files": [
+    {
+      "path": ".gitattributes",
+      "size": 9483
+    },
+    {
+      "path": "BF16/GLM-5.3-Flash-BF16-00001-of-00014.gguf",
+      "size": 9429632
+    },
+    {
+      "path": "BF16/GLM-5.3-Flash-BF16-00002-of-00014.gguf",
+      "size": 48155668736
+    },
+    {
+      "path": "BF16/GLM-5.3-Flash-BF16-00003-of-00014.gguf",
+      "size": 49289812544
+    },
+    {
+      "path": "BF16/GLM-5.3-Flash-BF16-00004-of-00014.gguf",
+      "size": 49315393792
+    },
+    {
+      "path": "BF16/GLM-5.3-Flash-BF16-00005-of-00014.gguf",
+      "size": 49998245760
+    },
+    {
+      "path": "BF16/GLM-5.3-Flash-BF16-00006-of-00014.gguf",
+      "size": 49492991520
+    },
+    {
+      "path": "BF16/GLM-5.3-Flash-BF16-00007-of-00014.gguf",
+      "size": 49289812544
+    },
+    {
+      "path": "BF16/GLM-5.3-Flash-BF16-00008-of-00014.gguf",
+      "size": 49596568192
+    },
+    {
+      "path": "BF16/GLM-5.3-Flash-BF16-00009-of-00014.gguf",
+      "size": 49315393792
+    },
+    {
+      "path": "BF16/GLM-5.3-Flash-BF16-00010-of-00014.gguf",
+      "size": 49289812544
+    },
+    {
+      "path": "BF16/GLM-5.3-Flash-BF16-00011-of-00014.gguf",
+      "size": 49622149440
+    },
+    {
+      "path": "BF16/GLM-5.3-Flash-BF16-00012-of-00014.gguf",
+      "size": 49289812544
+    },
+    {
+      "path": "BF16/GLM-5.3-Flash-BF16-00013-of-00014.gguf",
+      "size": 49355397280
+    },
+    {
+      "path": "BF16/GLM-5.3-Flash-BF16-00014-of-00014.gguf",
+      "size": 49620575872
+    },
+    {
+      "path": "Q8_0/GLM-5.3-Flash-Q8_0-00001-of-00008.gguf",
+      "size": 9429888
+    },
+    {
+      "path": "Q8_0/GLM-5.3-Flash-Q8_0-00002-of-00008.gguf",
+      "size": 49665857344
+    },
+    {
+      "path": "Q8_0/GLM-5.3-Flash-Q8_0-00003-of-00008.gguf",
+      "size": 49822821280
+    },
+    {
+      "path": "Q8_0/GLM-5.3-Flash-Q8_0-00004-of-00008.gguf",
+      "size": 49849652064
+    },
+    {
+      "path": "Q8_0/GLM-5.3-Flash-Q8_0-00005-of-00008.gguf",
+      "size": 49974608352
+    },
+    {
+      "path": "Q8_0/GLM-5.3-Flash-Q8_0-00006-of-00008.gguf",
+      "size": 49840638624
+    },
+    {
+      "path": "Q8_0/GLM-5.3-Flash-Q8_0-00007-of-00008.gguf",
+      "size": 49831834720
+    },
+    {
+      "path": "Q8_0/GLM-5.3-Flash-Q8_0-00008-of-00008.gguf",
+      "size": 41987123840
+    },
+    {
+      "path": "README.md",
+      "size": 8377
+    },
+    {
+      "path": "Shard_Rewrite/GLM-5.3-Flash-BF16-00001-of-00014.gguf_file",
+      "size": 9429728
+    },
+    {
+      "path": "Shard_Rewrite/GLM-5.3-Flash-Q8_0-00001-of-00008.gguf_file",
+      "size": 9429984
+    },
+    {
+      "path": "Shard_Rewrite/GLM-5.3-Flash-UD-IQ1_M-00001-of-00003.gguf_file",
+      "size": 9429984
+    },
+    {
+      "path": "Shard_Rewrite/GLM-5.3-Flash-UD-IQ1_S-00001-of-00003.gguf_file",
+      "size": 9429984
+    },
+    {
+      "path": "Shard_Rewrite/GLM-5.3-Flash-UD-IQ2_XXS-00001-of-00004.gguf_file",
+      "size": 9429984
+    },
+    {
+      "path": "Shard_Rewrite/GLM-5.3-Flash-UD-IQ3_XXS-00001-of-00004.gguf_file",
+      "size": 9429984
+    },
+    {
+      "path": "Shard_Rewrite/GLM-5.3-Flash-UD-IQ4_XS-00001-of-00005.gguf_file",
+      "size": 9429984
+    },
+    {
+      "path": "Shard_Rewrite/GLM-5.3-Flash-UD-Q2_K_XL-00001-of-00004.gguf_file",
+      "size": 9429984
+    },
+    {
+      "path": "Shard_Rewrite/GLM-5.3-Flash-UD-Q3_K_XL-00001-of-00004.gguf_file",
+      "size": 9429984
+    },
+    {
+      "path": "Shard_Rewrite/GLM-5.3-Flash-UD-Q4_K_XL-00001-of-00006.gguf_file",
+      "size": 9429984
+    },
+    {
+      "path": "Shard_Rewrite/GLM-5.3-Flash-UD-Q5_K_XL-00001-of-00006.gguf_file",
+      "size": 9429984
+    },
+    {
+      "path": "Shard_Rewrite/GLM-5.3-Flash-UD-Q6_K_XL-00001-of-00007.gguf_file",
+      "size": 9429984
+    },
+    {
+      "path": "Shard_Rewrite/mmproj-BF16.gguf_file",
+      "size": 1164010176
+    },
+    {
+      "path": "Shard_Rewrite/mmproj-F16.gguf_file",
+      "size": 1128047296
+    },
+    {
+      "path": "UD-IQ1_M/GLM-5.3-Flash-UD-IQ1_M-00001-of-00003.gguf",
+      "size": 9429859
+    },
+    {
+      "path": "UD-IQ1_M/GLM-5.3-Flash-UD-IQ1_M-00002-of-00003.gguf",
+      "size": 49996246592
+    },
+    {
+      "path": "UD-IQ1_M/GLM-5.3-Flash-UD-IQ1_M-00003-of-00003.gguf",
+      "size": 47573668096
+    },
+    {
+      "path": "UD-IQ1_S/GLM-5.3-Flash-UD-IQ1_S-00001-of-00003.gguf",
+      "size": 9429859
+    },
+    {
+      "path": "UD-IQ1_S/GLM-5.3-Flash-UD-IQ1_S-00002-of-00003.gguf",
+      "size": 49621122496
+    },
+    {
+      "path": "UD-IQ1_S/GLM-5.3-Flash-UD-IQ1_S-00003-of-00003.gguf",
+      "size": 43456692608
+    },
+    {
+      "path": "UD-IQ2_XXS/GLM-5.3-Flash-UD-IQ2_XXS-00001-of-00004.gguf",
+      "size": 9429888
+    },
+    {
+      "path": "UD-IQ2_XXS/GLM-5.3-Flash-UD-IQ2_XXS-00002-of-00004.gguf",
+      "size": 49896298080
+    },
+    {
+      "path": "UD-IQ2_XXS/GLM-5.3-Flash-UD-IQ2_XXS-00003-of-00004.gguf",
+      "size": 49248507840
+    },
+    {
+      "path": "UD-IQ2_XXS/GLM-5.3-Flash-UD-IQ2_XXS-00004-of-00004.gguf",
+      "size": 2690716000
+    },
+    {
+      "path": "UD-IQ3_XXS/GLM-5.3-Flash-UD-IQ3_XXS-00001-of-00004.gguf",
+      "size": 9429859
+    },
+    {
+      "path": "UD-IQ3_XXS/GLM-5.3-Flash-UD-IQ3_XXS-00002-of-00004.gguf",
+      "size": 49261511584
+    },
+    {
+      "path": "UD-IQ3_XXS/GLM-5.3-Flash-UD-IQ3_XXS-00003-of-00004.gguf",
+      "size": 49075832480
+    },
+    {
+      "path": "UD-IQ3_XXS/GLM-5.3-Flash-UD-IQ3_XXS-00004-of-00004.gguf",
+      "size": 22020797792
+    },
+    {
+      "path": "UD-IQ4_XS/GLM-5.3-Flash-UD-IQ4_XS-00001-of-00005.gguf",
+      "size": 9429859
+    },
+    {
+      "path": "UD-IQ4_XS/GLM-5.3-Flash-UD-IQ4_XS-00002-of-00005.gguf",
+      "size": 49989334176
+    },
+    {
+      "path": "UD-IQ4_XS/GLM-5.3-Flash-UD-IQ4_XS-00003-of-00005.gguf",
+      "size": 49607025280
+    },
+    {
+      "path": "UD-IQ4_XS/GLM-5.3-Flash-UD-IQ4_XS-00004-of-00005.gguf",
+      "size": 49486530144
+    },
+    {
+      "path": "UD-IQ4_XS/GLM-5.3-Flash-UD-IQ4_XS-00005-of-00005.gguf",
+      "size": 7729791616
+    },
+    {
+      "path": "UD-Q2_K_XL/GLM-5.3-Flash-UD-Q2_K_XL-00001-of-00004.gguf",
+      "size": 9429859
+    },
+    {
+      "path": "UD-Q2_K_XL/GLM-5.3-Flash-UD-Q2_K_XL-00002-of-00004.gguf",
+      "size": 49294975936
+    },
+    {
+      "path": "UD-Q2_K_XL/GLM-5.3-Flash-UD-Q2_K_XL-00003-of-00004.gguf",
+      "size": 49949266048
+    },
+    {
+      "path": "UD-Q2_K_XL/GLM-5.3-Flash-UD-Q2_K_XL-00004-of-00004.gguf",
+      "size": 9466399584
+    },
+    {
+      "path": "UD-Q3_K_XL/GLM-5.3-Flash-UD-Q3_K_XL-00001-of-00004.gguf",
+      "size": 9429859
+    },
+    {
+      "path": "UD-Q3_K_XL/GLM-5.3-Flash-UD-Q3_K_XL-00002-of-00004.gguf",
+      "size": 49609243584
+    },
+    {
+      "path": "UD-Q3_K_XL/GLM-5.3-Flash-UD-Q3_K_XL-00003-of-00004.gguf",
+      "size": 49623486016
+    },
+    {
+      "path": "UD-Q3_K_XL/GLM-5.3-Flash-UD-Q3_K_XL-00004-of-00004.gguf",
+      "size": 48293762496
+    },
+    {
+      "path": "UD-Q4_K_XL/GLM-5.3-Flash-UD-Q4_K_XL-00001-of-00006.gguf",
+      "size": 9429859
+    },
+    {
+      "path": "UD-Q4_K_XL/GLM-5.3-Flash-UD-Q4_K_XL-00002-of-00006.gguf",
+      "size": 49198039200
+    },
+    {
+      "path": "UD-Q4_K_XL/GLM-5.3-Flash-UD-Q4_K_XL-00003-of-00006.gguf",
+      "size": 49988626304
+    },
+    {
+      "path": "UD-Q4_K_XL/GLM-5.3-Flash-UD-Q4_K_XL-00004-of-00006.gguf",
+      "size": 48700701344
+    },
+    {
+      "path": "UD-Q4_K_XL/GLM-5.3-Flash-UD-Q4_K_XL-00005-of-00006.gguf",
+      "size": 49026026752
+    },
+    {
+      "path": "UD-Q4_K_XL/GLM-5.3-Flash-UD-Q4_K_XL-00006-of-00006.gguf",
+      "size": 2784497888
+    },
+    {
+      "path": "UD-Q5_K_XL/GLM-5.3-Flash-UD-Q5_K_XL-00001-of-00006.gguf",
+      "size": 9429888
+    },
+    {
+      "path": "UD-Q5_K_XL/GLM-5.3-Flash-UD-Q5_K_XL-00002-of-00006.gguf",
+      "size": 48806959328
+    },
+    {
+      "path": "UD-Q5_K_XL/GLM-5.3-Flash-UD-Q5_K_XL-00003-of-00006.gguf",
+      "size": 48557435712
+    },
+    {
+      "path": "UD-Q5_K_XL/GLM-5.3-Flash-UD-Q5_K_XL-00004-of-00006.gguf",
+      "size": 49317045120
+    },
+    {
+      "path": "UD-Q5_K_XL/GLM-5.3-Flash-UD-Q5_K_XL-00005-of-00006.gguf",
+      "size": 49317045120
+    },
+    {
+      "path": "UD-Q5_K_XL/GLM-5.3-Flash-UD-Q5_K_XL-00006-of-00006.gguf",
+      "size": 44298171744
+    },
+    {
+      "path": "UD-Q6_K_XL/GLM-5.3-Flash-UD-Q6_K_XL-00001-of-00007.gguf",
+      "size": 9429888
+    },
+    {
+      "path": "UD-Q6_K_XL/GLM-5.3-Flash-UD-Q6_K_XL-00002-of-00007.gguf",
+      "size": 49354106688
+    },
+    {
+      "path": "UD-Q6_K_XL/GLM-5.3-Flash-UD-Q6_K_XL-00003-of-00007.gguf",
+      "size": 48109732704
+    },
+    {
+      "path": "UD-Q6_K_XL/GLM-5.3-Flash-UD-Q6_K_XL-00004-of-00007.gguf",
+      "size": 49515348992
+    },
+    {
+      "path": "UD-Q6_K_XL/GLM-5.3-Flash-UD-Q6_K_XL-00005-of-00007.gguf",
+      "size": 48930700352
+    },
+    {
+      "path": "UD-Q6_K_XL/GLM-5.3-Flash-UD-Q6_K_XL-00006-of-00007.gguf",
+      "size": 49077752288
+    },
+    {
+      "path": "UD-Q6_K_XL/GLM-5.3-Flash-UD-Q6_K_XL-00007-of-00007.gguf",
+      "size": 46836040800
+    },
+    {
+      "path": "imatrix_unsloth.gguf_file",
+      "size": 512687616
+    },
+    {
+      "path": "mmproj-BF16.gguf",
+      "size": 1164010080
+    },
+    {
+      "path": "mmproj-F16.gguf",
+      "size": 1128047200
+    }
+  ]
+}

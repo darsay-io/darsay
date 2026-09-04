@@ -20,7 +20,7 @@ def test_two_vault_overlay_sharing(tmp_path, test_provider, capsys):
     fixture.write_text(
         json.dumps(
             {
-                "catalog_schema_version": "2.0.0",
+                "catalog_schema_version": "3.0.0",
                 "kind": "darsay.catalog",
                 "id": "summer",
                 "title": "Summer",
@@ -216,7 +216,7 @@ def test_archive_next_resumes_non_main_partial(vault, test_provider, capsys):
     fixture.write_text(
         json.dumps(
             {
-                "catalog_schema_version": "2.0.0",
+                "catalog_schema_version": "3.0.0",
                 "kind": "darsay.catalog",
                 "id": "summer",
                 "title": "summer",
@@ -315,7 +315,7 @@ def test_catalog_adopt_and_regen(vault, tmp_path, capsys):
     (other / "catalog.json").write_text(
         json.dumps(
             {
-                "catalog_schema_version": "2.0.0",
+                "catalog_schema_version": "3.0.0",
                 "kind": "darsay.catalog",
                 "id": "summer",
                 "title": "Summer",
@@ -481,7 +481,7 @@ def test_path_catalog_write_hint_and_bundle_miss(
     (friend / "catalog.json").write_text(
         json.dumps(
             {
-                "catalog_schema_version": "2.0.0",
+                "catalog_schema_version": "3.0.0",
                 "kind": "darsay.catalog",
                 "id": "summer",
                 "title": "Summer",
@@ -535,7 +535,7 @@ def test_estimate_catalog_writes_hints_and_list_shows_them(
     )
     capsys.readouterr()
     cat_path = vault / "catalogs" / "summer" / "catalog.json"
-    assert json.loads(cat_path.read_text())["catalog_schema_version"] == "2.0.0"
+    assert json.loads(cat_path.read_text())["catalog_schema_version"] == "3.0.0"
 
     assert main([*v, "list", "summer"]) == 0
     out = capsys.readouterr().out
@@ -578,13 +578,15 @@ def test_estimate_catalog_writes_hints_and_list_shows_them(
     ]
 
 
-def test_list_derives_hints_for_a_1_0_catalog(vault, test_provider, tmp_path, capsys):
+def test_list_displays_stored_hints_and_size_basis(
+    vault, test_provider, tmp_path, capsys
+):
     friend = tmp_path / "friend" / "catalog.json"
     friend.parent.mkdir()
     friend.write_text(
         json.dumps(
             {
-                "catalog_schema_version": "2.0.0",
+                "catalog_schema_version": "3.0.0",
                 "kind": "darsay.catalog",
                 "id": "theirs",
                 "title": "Theirs",
@@ -606,6 +608,8 @@ def test_list_derives_hints_for_a_1_0_catalog(vault, test_provider, tmp_path, ca
                             "revision": "a" * 40,
                             "revision_ref": "main",
                             "payload_bytes": 40 * 1024**3,
+                            "size_basis": "selection",
+                            "hints": ["gated", "large", "subset"],
                             "file_count": 3,
                             "license": "apache-2.0",
                             "gated": True,
@@ -622,5 +626,6 @@ def test_list_derives_hints_for_a_1_0_catalog(vault, test_provider, tmp_path, ca
     out = capsys.readouterr().out
     assert "HINTS" in out
     assert "gated, large, subset" in out
+    assert "(selection)" in out
     # Read-only: listing never rewrote the file or its version.
-    assert json.loads(friend.read_text())["catalog_schema_version"] == "2.0.0"
+    assert json.loads(friend.read_text())["catalog_schema_version"] == "3.0.0"

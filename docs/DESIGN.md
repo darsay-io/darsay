@@ -163,7 +163,8 @@ is deliberately carried by the artifacts, not the software:
 - the export is a plain uncompressed tar with a documented layout and a
   manual-recovery procedure that needs no darsay
   ([MVB-FORMAT.md](MVB-FORMAT.md));
-- the payload is a pristine upstream snapshot any HF-compatible loader uses
+- the payload preserves selected upstream files byte-for-byte; compatible
+  loaders use it when their required files and paths are present
   directly.
 
 The tool is replaceable; the bundles are not — so the engineering

@@ -258,6 +258,10 @@ def test_estimate_digest_allowlist():
     est = {
         "as_of": "2026-08-20T11:00:00+00:00",
         "artifact_type": "model",
+        "size_basis": "repository",
+        "repository_bytes": 100,
+        "classification": None,
+        "gguf_variants": [],
         "source": {
             "revision": "aaa",
             "revision_ref": "main",
@@ -283,6 +287,10 @@ def _live(**over):
     est = {
         "as_of": "2026-08-20T11:00:00+00:00",
         "artifact_type": "model",
+        "size_basis": "repository",
+        "repository_bytes": 100,
+        "classification": None,
+        "gguf_variants": [],
         "source": {
             "revision": "aaa",
             "revision_ref": "main",
@@ -335,7 +343,7 @@ def test_hints_for_closed_set():
     assert estimate_digest(everything)["hints"] == ["gated", "large", "quant", "subset"]
 
 
-def test_redundant_hint_and_policy_digest():
+def test_redundant_hint_and_archive_scope():
     # BF16 x 16 params = 32 expected bytes; 1.75x is the line.
     heavy = _live(**{"payload.weights": {"count": 2, "bytes": 56}})
     assert hints_for(heavy) == ["redundant"]
@@ -354,11 +362,14 @@ def test_redundant_hint_and_policy_digest():
     )
     assert hints_for(none) == []
     # A negatives-policy selection is the default acquisition, not a curator
-    # subset: no subset hint, and the digest records the policy.
-    policy = _live(subset={"include": ["model.safetensors"], "policy": "negatives"})
+    # subset: no subset hint, and the digest records the archive scope.
+    policy = _live(
+        subset={"include": ["model.safetensors"], "policy": "negatives"},
+        size_basis="archive",
+    )
     assert hints_for(policy) == []
-    assert estimate_digest(policy)["policy"] == "negatives"
-    assert estimate_digest(_live())["policy"] is None
+    assert estimate_digest(policy)["size_basis"] == "archive"
+    assert estimate_digest(_live())["size_basis"] == "repository"
 
 
 def test_hints_for_never_guesses():
@@ -375,19 +386,10 @@ def test_hints_for_never_guesses():
     assert hints_for({}) == []
 
 
-def test_derive_hints_from_a_1_0_digest_and_stored_hints_win():
-    old = {
-        "payload_bytes": LARGE_PAYLOAD_BYTES,
-        "gated": True,
-        "dominant_dtype": "BF16",
-    }
-    assert derive_hints(old) == ["gated", "large"]
-    assert derive_hints(old, {"include": ["*Q4_K_M*"]}) == ["gated", "large", "subset"]
-    assert derive_hints({"dominant_dtype": "U8"}) == ["quant"]
-    # Without the live estimate, a GGUF pack cannot be told from its digest.
-    assert derive_hints({"payload_bytes": 10, "dominant_dtype": None}) == []
-    stored = {**old, "hints": ["subset", "zzz-future", "gated", "gated"]}
+def test_stored_hints_are_sanitized_without_inventing_missing_facts():
+    stored = {"hints": ["subset", "zzz-future", "gated", "gated"]}
     assert derive_hints(stored) == ["gated", "subset"]
+    assert derive_hints({"payload_bytes": LARGE_PAYLOAD_BYTES, "gated": True}) == []
     assert derive_hints(None) == []
     assert derive_hints("x") == []
     assert entry_hints(_entry("huggingface:acme/toy", estimate=stored)) == [
@@ -395,7 +397,6 @@ def test_derive_hints_from_a_1_0_digest_and_stored_hints_win():
         "subset",
     ]
     assert entry_hints(_entry("huggingface:acme/toy")) == []
-    assert entry_hints(_entry("huggingface:acme/toy", include=["*.gguf"])) == []
 
 
 def test_project_stored_estimate_cleans_hints():
@@ -414,43 +415,13 @@ def test_project_stored_estimate_cleans_hints():
 
 def test_save_writes_the_current_schema_version(tmp_path):
     path = tmp_path / "catalog.json"
-    raw = _catalog([_entry("huggingface:acme/toy")], catalog_schema_version="2.0.0")
+    raw = _catalog([_entry("huggingface:acme/toy")], catalog_schema_version="3.0.0")
     path.write_text(json.dumps(raw), encoding="utf-8")
     loaded = load_catalog(path)
-    assert loaded["catalog_schema_version"] == "2.0.0"
+    assert loaded["catalog_schema_version"] == "3.0.0"
     save_catalog(path, loaded)
     again = json.loads(path.read_text(encoding="utf-8"))
-    assert again["catalog_schema_version"] == CATALOG_SCHEMA_VERSION == "2.0.0"
-
-
-def test_a_1_1_file_loads_in_a_1_0_reader(tmp_path, monkeypatch):
-    import darsay.catalog as catalog_mod
-
-    path = tmp_path / "catalog.json"
-    digest = {
-        "as_of": "2026-08-20T11:00:00+00:00",
-        "artifact_type": "model",
-        "revision": "aaa",
-        "revision_ref": "main",
-        "payload_bytes": LARGE_PAYLOAD_BYTES,
-        "file_count": 2,
-        "license": "apache-2.0",
-        "gated": True,
-        "parameters": 16,
-        "dominant_dtype": "BF16",
-        "unknown_size_count": 0,
-        "hints": ["gated", "large"],
-    }
-    raw = _catalog([_entry("huggingface:acme/toy", estimate=digest)])
-    path.write_text(json.dumps(raw), encoding="utf-8")
-    assert load_catalog(path)["entries"][0]["estimate"]["hints"] == ["gated", "large"]
-    # A 1.0.0 darsay knows no ``hints`` key: it drops the field and derives.
-    monkeypatch.setattr(catalog_mod, "DIGEST_KEYS", DIGEST_KEYS - {"hints"})
-    loaded = load_catalog(path)
-    est = loaded["entries"][0]["estimate"]
-    assert "hints" not in est
-    assert est["payload_bytes"] == LARGE_PAYLOAD_BYTES
-    assert entry_hints(loaded["entries"][0]) == ["gated", "large"]
+    assert again["catalog_schema_version"] == CATALOG_SCHEMA_VERSION == "3.0.0"
 
 
 def test_adopt_preserves_hints():
@@ -501,7 +472,11 @@ def test_print_catalog_table_hints_column(capsys):
                 **base,
                 "source": "huggingface:acme/old",
                 "include": ["*Q4_K_M*"],
-                "estimate": {"payload_bytes": 1, "dominant_dtype": "U8"},
+                "estimate": {
+                    "payload_bytes": 1,
+                    "dominant_dtype": "U8",
+                    "hints": ["quant", "subset"],
+                },
             },
         ]
     )
@@ -555,6 +530,10 @@ def test_save_projects_estimate_disk_paths(tmp_path):
     live = {
         "as_of": "2026-08-20T11:00:00+00:00",
         "artifact_type": "model",
+        "size_basis": "repository",
+        "repository_bytes": 100,
+        "classification": None,
+        "gguf_variants": [],
         "source": {
             "revision": "aaa",
             "revision_ref": "main",
@@ -589,13 +568,13 @@ def test_load_rejects_known_provider_typo(tmp_path):
 def test_load_rejects_unknown_major(tmp_path):
     path = tmp_path / "catalog.json"
     raw = _catalog([])
-    raw["catalog_schema_version"] = "3.0.0"
+    raw["catalog_schema_version"] = "4.0.0"
     path.write_text(json.dumps(raw), encoding="utf-8")
-    with pytest.raises(SystemExit, match="is not 2.x"):
+    with pytest.raises(SystemExit, match="is not 3.x"):
         load_catalog(path)
     raw["catalog_schema_version"] = "1.2.0"
     path.write_text(json.dumps(raw), encoding="utf-8")
-    with pytest.raises(SystemExit, match="is not 2.x"):
+    with pytest.raises(SystemExit, match="is not 3.x"):
         load_catalog(path)
 
 
@@ -736,6 +715,8 @@ def test_write_catalog_readme_includes_include_cached_size_and_overlay_hints(tmp
                 note="the quant",
                 estimate={
                     "payload_bytes": 1024,
+                    "size_basis": "selection",
+                    "hints": ["subset"],
                     "as_of": "2026-08-01T00:00:00+00:00",
                     "artifact_type": "model",
                     "license": "apache-2.0",
