@@ -354,6 +354,8 @@ def extract_code_metadata(
     payload_root: Path,
     metadata: dict | None = None,
     file_records: list[dict] | None = None,
+    *,
+    self_ref: str | None = None,
 ) -> dict:
     """The record for a source tree: what upstream said about the repository
     (``metadata["repository"]``, as the provider recorded it at pin time)
@@ -374,6 +376,7 @@ def extract_code_metadata(
         languages = None
     return {
         "description": repo.get("description"),
+        "references": scan_payload_references(payload_root, self_ref=self_ref),
         "homepage": repo.get("homepage"),
         "topics": list(repo.get("topics") or []) or None,
         "languages": languages,
@@ -383,6 +386,30 @@ def extract_code_metadata(
         "symlinks": repo.get("symlinks"),
         "runtime_declarations": runtime_declarations(paths),
     }
+
+
+def scan_payload_references(payload_root: Path, *, self_ref: str | None = None) -> dict:
+    """``code_metadata.references`` from the tree on disk — offline, bounded
+    by ``references.LOCAL_SCAN``, binaries counted and not read."""
+    from .hashing import iter_payload_files
+    from .references import LOCAL_SCAN, scan_references, select_scan_files
+
+    listed = iter_payload_files(payload_root)
+    sizes = {}
+    for rel, path in listed:
+        try:
+            sizes[rel] = path.stat().st_size
+        except OSError:
+            sizes[rel] = None
+    chosen, skipped = select_scan_files(list(sizes.items()), LOCAL_SCAN)
+    by_rel = dict(listed)
+    files = []
+    for rel in chosen:
+        try:
+            files.append((rel, by_rel[rel].read_bytes()))
+        except OSError:
+            skipped["unreadable"] = skipped.get("unreadable", 0) + 1
+    return scan_references(files, skipped=skipped, self_ref=self_ref)
 
 
 def estimate_runtime(payload_root: Path, model_metadata: dict) -> dict:

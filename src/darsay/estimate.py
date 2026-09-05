@@ -433,6 +433,9 @@ def estimate(
             "default_branch": repository.get("default_branch"),
             "submodules": repository.get("submodules"),
             "runtime_declarations": runtime_declarations([f["path"] for f in files]),
+            "references": _remote_references(
+                provider, ref, snapshot.revision, files, vault, progress, on_read
+            ),
         }
 
     bundle_dir = bundle_dir_for(vault, ref, snapshot.revision)
@@ -574,6 +577,128 @@ def estimate_repo(
         variants=variants,
         progress=progress,
     )
+
+
+def _remote_references(
+    provider,
+    ref: SourceRef,
+    revision: str,
+    files: list[dict],
+    vault: Path,
+    progress,
+    on_read,
+) -> dict:
+    """What the tree references, from bounded range reads before archiving.
+
+    The same scan ``archive`` runs on the payload, over the files
+    ``REMOTE_SCAN`` allows; the record says when it stopped short. The
+    primary model is then priced upstream and looked for in this vault.
+    """
+    from .archiver import reference_lookup
+    from .references import (
+        REMOTE_SCAN,
+        resolve_references,
+        scan_references,
+        select_scan_files,
+    )
+
+    chosen, skipped = select_scan_files(
+        [(f["path"], f["size"]) for f in files], REMOTE_SCAN
+    )
+    read: list[tuple[str, bytes]] = []
+    for path in chosen:
+        size = next((f["size"] for f in files if f["path"] == path), None) or 0
+        try:
+            data = provider.read_bytes(ref, revision, path, 0, int(size))
+        except SourceError:
+            skipped["unreadable"] = skipped.get("unreadable", 0) + 1
+            continue
+        if on_read is not None:
+            on_read(path, len(data))
+        read.append((path, data))
+    if chosen:
+        progress(f"Reading {len(read)} files for what the tree references ...")
+    references = scan_references(read, skipped=skipped, self_ref=ref.canonical)
+    resolve_references(references, reference_lookup())
+    primary = (references.get("primary_model") or {}).get("ref")
+    upstream = None
+    if primary:
+        try:
+            target = parse_source(primary)
+            in_vault = any((vault / target.bundle_name).glob("*/manifest.json"))
+            snap = get_provider(target.provider).pin(target, None, require_access=False)
+            sizes = [f.size for f in snap.files]
+            upstream = {
+                "ref": primary,
+                "in_vault": in_vault,
+                "file_count": len(sizes),
+                "size_bytes": sum(s for s in sizes if s is not None),
+                "unknown_size_count": sum(1 for s in sizes if s is None),
+            }
+        except (SystemExit, SourceError):
+            upstream = {"ref": primary, "in_vault": None, "size_bytes": None}
+    references["primary_upstream"] = upstream
+    return references
+
+
+def _reference_lines(code: dict) -> list[str]:
+    """``references:   model huggingface:… [shell default in start.sh; resolves; not in this vault]``."""
+    refs = (code or {}).get("references") or {}
+    items = refs.get("items") or []
+    if not items:
+        return [
+            "  references:   nothing named in the tree (no model, image, or repository)"
+        ]
+    label = "  references:   "
+    indent = " " * len(label)
+    upstream = refs.get("primary_upstream") or {}
+    primary = (refs.get("primary_model") or {}).get("ref")
+    out = []
+    for shown, item in enumerate(items):
+        if shown >= 6:
+            out.append(indent + f"… and {len(items) - shown} more (see --json)")
+            break
+        where = item["found_in"][0].split(":")[0] if item["found_in"] else ""
+        extra = item.get("occurrences", 0) - 1
+        if extra > 0:
+            how_extra = f" (+{extra} more place{'s' if extra != 1 else ''})"
+        else:
+            how_extra = ""
+        how = {
+            "env_template": "env template",
+            "compose": "image:",
+            "dockerfile": "FROM",
+            "spaces_card": "Spaces card",
+            "shell_default": "shell default",
+            "literal": "literal",
+            "url": "URL",
+        }.get(item.get("declared_by") or "", item.get("declared_by") or "?")
+        notes = [(f"{where}: {how}" if where else how) + how_extra]
+        if item.get("resolved") is True:
+            notes.append("resolves")
+        elif item.get("resolved") is False:
+            notes.append("does not resolve upstream")
+        elif item["kind"] == "image":
+            notes.append("a tag, not a digest")
+        elif item["tier"] == "mentioned":
+            notes.append("mentioned only")
+        if item["ref"] == primary and upstream:
+            if upstream.get("in_vault"):
+                notes.append("in this vault")
+            elif upstream.get("size_bytes") is not None:
+                notes.append(
+                    f"{human_size(upstream['size_bytes'])} upstream, not in this vault"
+                )
+        prefix = label if shown == 0 else indent
+        out.append(f"{prefix}{item['kind']:<7} {item['ref']}  [{'; '.join(notes)}]")
+    reason = (refs.get("primary_model") or {}).get("reason")
+    if primary is None and reason and len(items) > 0:
+        out.append(indent + f"primary model: none — {reason}")
+    if (refs.get("scan") or {}).get("partial"):
+        out.append(
+            indent + "(scan stopped at its read budget; archive scans the whole tree)"
+        )
+    return out
 
 
 def _n_files(n: int) -> str:
@@ -739,7 +864,10 @@ def _lineage_lines(est: dict) -> list[str]:
     parents = lin.get("parents") or []
     if parents:
         edges = ", ".join(
-            f"{e.get('relation') or 'parent'} of {e.get('source')}" for e in parents
+            f"{e.get('relation') or 'parent'} {e.get('source')}"
+            if e.get("relation") == "references"
+            else f"{e.get('relation') or 'parent'} of {e.get('source')}"
+            for e in parents
         )
         out.append(f"  lineage:      {edges}  [declared upstream]")
     elif bits:
@@ -814,6 +942,8 @@ def print_estimate(est: dict, progress=print) -> None:
                 f"  submodules:   {len(code['submodules'])} named by the tree — "
                 "not fetched (each is its own repository)"
             )
+        for line in _reference_lines(code):
+            p(line)
     if is_dataset or is_code:
         fmts = est["formats"] or {}
         if fmts:

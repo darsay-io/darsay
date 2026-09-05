@@ -308,6 +308,15 @@ class TestProvider(SourceProvider):
         except OSError:
             return 0
 
+    def exists(self, source: SourceRef) -> bool | None:
+        for (locator, _ref), repo in self.repos.items():
+            if locator != source.locator or repo.missing:
+                continue
+            if repo.artifact_type and repo.artifact_type != source.artifact_type:
+                continue
+            return True
+        return False
+
     def declared_parents(self, source: SourceRef, metadata: dict) -> list[dict] | None:
         from darsay.providers.huggingface import parents_from_metadata
 

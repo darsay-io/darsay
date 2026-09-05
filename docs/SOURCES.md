@@ -98,6 +98,7 @@ Each backend implements:
 | `transfer_session` | Optional wrap around a transfer run (resume semantics, caches); receives the operator's `max_rate` so the transport can pace smoothly |
 | `variants` | `estimate --variants` (or `None`) |
 | `declared_parents` | The parents a pin's metadata already declares — what `estimate` shows without another query |
+| `exists` | One cheap lookup: does this locator exist upstream — true, false, or "cannot say"; how a code bundle's references are resolved, never a listing |
 | `lineage` | Parents as upstream declares them, and a best-effort snapshot of descendants at register time |
 | `access_record` | Gate / authorization notes for the manifest |
 

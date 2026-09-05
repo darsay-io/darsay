@@ -40,6 +40,26 @@ Tool version (`darsay.__version__`) is independent of
   prices a repository and prints those facts before anything is fetched;
   `hydrate` / `run` refuse a code bundle by name; `smoke` records nothing
   for it. Manifest schema 2.2.0, additive. [Code bundles](docs/CODE.md).
+- **A code bundle records what its tree references.** The checkpoint a
+  serving recipe names, the image it runs in, the datasets training code
+  reads, the repository a README credits — recorded in
+  `code_metadata.references` as strings found in files, with provenance
+  in three tiers: `declared` (a dotenv template, a compose `image:`, a
+  Dockerfile `FROM`, a Spaces card), `evidence` (a quoted literal in
+  code, or the default of a shell `${VAR:-…}` read as text, never
+  evaluated), `mentioned` (prose, comments, docstrings, URLs). Declared
+  and evidence references are resolved upstream, at most 20, the cap
+  recorded; mentions are not, and images have no provider yet. One rule
+  makes an edge: exactly one model named in code that resolves upstream
+  is the primary model, in `lineage.parents` as `relation: references`
+  with the provenance that named it; two candidates are recorded and the
+  curator chooses. `estimate` reads the tree with bounded range reads
+  before anything is fetched, prices the primary model upstream, and says
+  whether this vault holds it; `info` and the bundle README show the
+  same. A model reference carries no revision — the recipe pins none —
+  which is why the model's bundle in the vault is the pinned instance.
+  What a program will actually load at run time is undecidable, and
+  darsay stops at text on purpose. [Code bundles § 7](docs/CODE.md#7-what-the-tree-references).
 
 ### Changed
 
@@ -52,6 +72,9 @@ Tool version (`darsay.__version__`) is independent of
 - AGPL-3.0 joined the license table, so an AGPL repository's rights flags
   are recorded instead of marked for manual review.
 - `info` omits the smoke line for a bundle that has no smoke tests.
+- A bundle README's lineage lines say where an edge was declared in
+  words — "declared by the upstream card", "an upstream tag", "a shell
+  default in the tree" — instead of the raw provenance key.
 
 ## [0.14.16] - 2026-09-05
 

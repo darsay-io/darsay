@@ -610,6 +610,16 @@ class HuggingFaceProvider(SourceProvider):
             "repos": rows,
         }
 
+    def exists(self, source: SourceRef) -> bool | None:
+        from huggingface_hub import HfApi
+
+        try:
+            return bool(
+                HfApi().repo_exists(source.locator, repo_type=source.artifact_type)
+            )
+        except Exception:
+            return None
+
     def declared_parents(self, source: SourceRef, metadata: dict) -> list[dict] | None:
         return parents_from_metadata(metadata, canonical_prefix=f"{self.name}:")
 

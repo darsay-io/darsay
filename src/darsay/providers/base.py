@@ -229,6 +229,12 @@ class SourceProvider(ABC):
         """``estimate --variants`` payload, or None when the provider has no such listing."""
         return None
 
+    def exists(self, source: SourceRef) -> bool | None:
+        """Whether ``source`` exists upstream — one cheap lookup, no file
+        listing. ``None`` when the provider cannot say (offline, no such
+        call); never a guess. The default cannot say."""
+        return None
+
     def declared_parents(self, source: SourceRef, metadata: dict) -> list[dict] | None:
         """Parent edges upstream declares in a pin's ``metadata`` — the
         ``lineage.parents`` an estimate can show without another query.

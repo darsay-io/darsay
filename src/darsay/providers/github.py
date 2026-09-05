@@ -702,6 +702,15 @@ class GitHubProvider(SourceProvider):
 
     # ------------------------------------------------------------- the record
 
+    def exists(self, source: SourceRef) -> bool | None:
+        try:
+            self._api(f"/repos/{source.locator}", what=source.canonical)
+        except SourceNotFoundError:
+            return False
+        except SourceError:
+            return None
+        return True
+
     def declared_parents(self, source: SourceRef, metadata: dict) -> list[dict] | None:
         repo = metadata.get("repository") or {}
         parent = repo.get("parent")

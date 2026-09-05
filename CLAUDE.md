@@ -74,7 +74,14 @@ not proofs of originality or permission to omit artifacts.
   `verify.py`, `standalone_verify.py` (stdlib-only; frozen into `.mvb.tar`
   as `darsay-verify.py` — changing it is an MVB minor bump), `smoke.py`,
   `export.py` (.mvb.tar), `readme_gen.py`,
-  `metadata.py`, `licensing.py`, `hashing.py`, `safetensors_meta.py`,
+  `metadata.py` (per-type extractors; `extract_code_metadata` carries the
+  `runtime_declarations` vocabulary and runs the reference scan),
+  `references.py` (what a tree names that lives elsewhere: an offline,
+  deterministic scan in three provenance tiers — declared / evidence /
+  mentioned — plus the one network step, `resolve_references`, capped and
+  recorded, and the one rule that makes a `references` lineage edge;
+  comments and docstrings are prose; never evaluates code),
+  `licensing.py`, `hashing.py`, `safetensors_meta.py`,
   `schema.py` (artifact-type registry), `hydrate.py` (ENGINES registry, env
   management, `hydrate`/`run`), `runners/` (standalone per-engine scripts run
   inside hydrated envs — stdlib + engine only, no darsay imports),

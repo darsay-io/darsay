@@ -153,7 +153,71 @@ of `model_metadata` / `runtime` ([field by field](MANIFEST.md#code_metadata--cod
   `source.access.gated` reads `"private"` for a private repository; the
   token that read it is not part of the record.
 
-## 7. Per-command behavior
+## 7. What the tree references
+
+A serving recipe names the checkpoint it serves and the image it runs
+in; training code names its datasets; a README credits the repository an
+idea came from. What a program will actually load at run time is
+undecidable in general — the model id can be computed, passed as an
+argument, or fetched from somewhere else — and darsay does not guess at
+it. What it can prove is that *these strings are in these files*, so that
+is what `code_metadata.references` records, with provenance in three
+tiers, strongest first:
+
+| Tier | Where it was found | Examples |
+|---|---|---|
+| `declared` | A standard file whose job is to say it | a dotenv template's `IMAGE=…`, a compose file's `image:`, a Dockerfile's `FROM`, a Spaces card's `models:` list |
+| `evidence` | A literal in code — a quoted string, or the default of a shell `${VAR:-…}` expansion read as text, never evaluated | `MODEL_ID="${TP1_MODEL_ID:-Mia-AiLab/Qwen3.8-Flash-Next-NVFP4}"` |
+| `mentioned` | Prose: READMEs, issue templates, comments and docstrings, a URL in any of them | a credit, a benchmark tool, an example in a usage comment |
+
+Each reference is a `model`, `dataset`, `image`, or `code` (another
+repository) with its canonical address — `huggingface:owner/name`,
+`oci:image:tag`, `github:owner/repo` — where it was found, how many
+times, and what upstream said when asked. **Resolution** is the one
+network step: declared and evidence references are looked up on their
+provider (at most 20, the cap recorded); mentions are not, because a
+mention is not a claim; images have no provider yet.
+
+One rule turns evidence into a lineage edge. Exactly one *model*
+reference at the evidence tier or better that resolves upstream is the
+tree's **primary model**, recorded in `lineage.parents` as
+`relation: references` with the provenance that named it. Two resolving
+candidates are recorded as candidates and the curator chooses; none is
+none. The relation is `references`, not `serves`: a name is evidence, a
+purpose is a verdict.
+
+The case study, scanned live:
+
+```
+  references:   image   oci:vllm/vllm-openai:qwen38-flash-next  [.env.sample: env template (+4 more places); a tag, not a digest]
+                model   huggingface:Mia-AiLab/Qwen3.8-Flash-Next-NVFP4  [download.sh: shell default (+5 more places); resolves; 98.7 GiB upstream, not in this vault]
+                model   huggingface:RadixArk/Qwen3.8-Flash-Next-NVFP4  [files/patch_modelopt_mxfp8.py: literal; mentioned only]
+                code    github:MiaAI-Lab/sparkDash  [README.md: URL (+2 more places); mentioned only]
+                code    github:lancelind/qwen3.8-Flash-DGX  [README.md: URL; mentioned only]
+```
+
+The author declared exactly one thing in a standard file — the image.
+The model is a shell default in two launchers, a Python literal, and
+prose. A second checkpoint with the same name under another publisher
+appears once, in a docstring, and stays a mention. That is the honest
+shape of a recipe, and it is why the tiers exist.
+
+Two facts the scan makes explicit are the reason to archive the pair
+together. **The recipe pins no revision of the model** — its download
+script takes whatever `main` is today — so every model reference carries
+`revision: null`, and the bundle of that model in a vault is the pinned
+instance the recipe was archived beside. **The image is a tag, not a
+digest**; `digest` stays null until an image provider records what the
+tag pointed at on the day.
+
+A resolving reference is a source ref, so it becomes first-class by
+the machinery that already exists: `estimate` prices it upstream and
+says whether this vault holds it; `darsay catalog add CATALOG
+huggingface:Mia-AiLab/Qwen3.8-Flash-Next-NVFP4` makes it a want beside
+the recipe, `list` shows have or want for both, and `archive --next`
+fetches it. No new verbs.
+
+## 8. Per-command behavior
 
 `estimate` prices a repository like anything else — exact sizes from the
 tree, completeness, the disk verdict — and, where a model shows
@@ -164,26 +228,32 @@ declares:
   about:        Qwen3.8-Flash-Next on ONE DGX Spark (TP=1)  [upstream]
   languages:    Python 66%, Shell 34%  [upstream]
   declares:     env_template (1), shell (3)  [read from the inventory]
+  references:   image   oci:vllm/vllm-openai:qwen38-flash-next  [.env.sample: env template (+4 more places); a tag, not a digest]
+                model   huggingface:Mia-AiLab/Qwen3.8-Flash-Next-NVFP4  [download.sh: shell default (+5 more places); resolves; 98.7 GiB upstream, not in this vault]
   formats:      py 102.6 KiB in 7, md 71.9 KiB in 6, sh 52.5 KiB in 4, …
   family:       Qwen · generation 3.8 · member Flash-Next-Single-DGX-Spark  [read from the name]
   payload:      23 files, 270.0 KiB (repository)
   engines:      none (code bundle — hydrate/run not applicable)
 ```
 
-The family line is the same name grammar every bundle gets, labeled the
-same way; it is what lets a recipe named after its model sit beside that
-model on a board.
+The reference scan at `estimate` time is bounded range reads —
+declarations and the README first, then root-level code, then the rest,
+within a read budget the record confesses when it binds; `archive` scans
+the whole tree from disk. The family line is the same name grammar every
+bundle gets, labeled the same way; it is what lets a recipe named after
+its model sit beside that model on a board.
 
 `archive` pins the commit, fetches every blob, cross-checks git SHA-1 and
-LFS SHA-256, and writes the same reports. `verify`, `export`, `import`,
-`mv`, `cp`, `doctor`, and `SHA256SUMS` dispatch on the payload root and
-need nothing new. `hydrate` and `run` refuse a code bundle by name and say
-what to do instead; `smoke` records nothing rather than pretending a
-tokenizer test applies. `info` shows the description, languages, and
-declarations; `list` shows the type. A catalog row can hold a repository
-like any other source ref.
+LFS SHA-256, resolves what the tree references, and writes the same
+reports. `verify`, `export`, `import`, `mv`, `cp`, `doctor`, and
+`SHA256SUMS` dispatch on the payload root and need nothing new. `hydrate`
+and `run` refuse a code bundle by name and say what to do instead;
+`smoke` records nothing rather than pretending a tokenizer test applies.
+`info` shows the description, languages, declarations, and the primary
+model; `list` shows the type. A catalog row can hold a repository like
+any other source ref.
 
-## 8. What is recorded, and what is not
+## 9. What is recorded, and what is not
 
 - **Submodules are named, not fetched.** Each is its own repository at
   the recorded commit; archive it as its own bundle.
@@ -199,8 +269,13 @@ like any other source ref.
   keeps them in LFS is archived in full today, by way of the media host.
 - **GitHub only, for now.** A second git host is another provider, and a
   repository on it is a code bundle by the same sentence.
+- **A reference is a string, never a claim about run time.** Comments and
+  docstrings are prose wherever they sit; a tree's link to itself is not
+  a reference; a name the Hub does not know that the tree also links as a
+  GitHub repository is that repository. The general problem stays
+  unsolved on purpose.
 
-## 9. Where this is going
+## 10. Where this is going
 
 The code type is the first stone of a layer that presents archived
 bundles to a runtime on a named machine — a workbench — on existing
@@ -208,8 +283,19 @@ standards rather than new ones: the Hugging Face cache layout to present
 a model, a compose file to declare a harness, an OCI digest to pin the
 image, an OpenAI-compatible endpoint as proof of life. The binding "this
 tree serves that checkpoint in that image" is a composition, not a fact
-about any one artifact's bytes, so it lives outside the manifests. The
-direction, the standards, and the phases are in
+about any one artifact's bytes, so it lives outside the manifests — the
+`references` edge says the tree *names* the model; the workbench says it
+*ran* it.
+
+A recipe like the case study is five kinds of glue in one launcher, and
+most of it generalizes: fetching, presenting the model, choosing an
+image, budgeting memory, probing an endpoint. One layer does not — the
+patches that close the gap between what the engine supported on the day
+and what this model on this hardware needed — and there will always be
+one, because new models ship ahead of engines, new hardware ahead of
+kernels. The workbench runs the stock case itself and runs a recipe's
+harness for the rest; the archive is where the snowflake earns its keep.
+The layer table, the harness contract, and the phases are in
 [the workbench proposal](proposals/workbench.md).
 
 ## Case study: MiaAI-Lab/Qwen3.8-Flash-Next-Single-DGX-Spark
@@ -217,13 +303,16 @@ direction, the standards, and the phases are in
 Pinned 2026-09-05 at `09d4424be2b7`: 23 files, 270 KiB, AGPL-3.0. Python
 66%, Shell 34%. Declares an env template and three root launchers. No
 fork parent; 14 forks at archive time. `verify` passes, `sha256sum -c
-SHA256SUMS` passes, two exports are byte-identical. Beside it in a vault
-sits `huggingface:Mia-AiLab/Qwen3.8-Flash-Next-NVFP4` — the 98.7 GiB
-checkpoint the recipe's `download.sh` fetches, itself declared a
-quantization of `Qwen/Qwen3.8-Flash-Next`. Two of the three things a
-future reader needs to stand this model up on one DGX Spark; the third,
-the container image, is an OCI digest in `curation.md` until the workbench
-gives it a home.
+SHA256SUMS` passes, two exports are byte-identical. The scan reads 22
+text files and finds one declared image, one model named in code that
+resolves — the primary, recorded as a `references` edge — and four
+mentions. Beside it in a vault sits
+`huggingface:Mia-AiLab/Qwen3.8-Flash-Next-NVFP4` — the 98.7 GiB
+checkpoint the recipe's `download.sh` fetches at whatever `main` is that
+day, itself declared a quantization of `Qwen/Qwen3.8-Flash-Next`. Two of
+the three things a future reader needs to stand this model up on one DGX
+Spark; the third, the container image, is a tag in the record and an OCI
+digest in `curation.md` until the workbench gives it a home.
 
 ---
 

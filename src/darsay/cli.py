@@ -1733,6 +1733,18 @@ def cmd_info(args) -> int:
             print(
                 f"  declares:   {', '.join(sorted(found))}  [read from the inventory]"
             )
+        refs = cm.get("references") or {}
+        primary = refs.get("primary_model") or {}
+        if primary.get("ref"):
+            print(
+                f"  references: {primary['ref']}  "
+                "[the one model named in code; resolves upstream]"
+            )
+        elif refs.get("items"):
+            print(
+                f"  references: {len(refs['items'])} named, no primary model — "
+                f"{primary.get('reason')}"
+            )
     else:
         meta = m["model_metadata"]
         print(

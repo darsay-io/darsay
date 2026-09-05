@@ -38,3 +38,15 @@ def archive_quiet(source, *, vault, **kwargs):
     kwargs.setdefault("progress", silent)
     kwargs.setdefault("jobs", 1)
     return archive(source, vault=vault, **kwargs)
+
+
+@pytest.fixture(autouse=True)
+def _no_upstream_lookups(monkeypatch):
+    """The reference scan asks providers whether a name exists upstream.
+    Integration tests never touch the network: real providers answer
+    "cannot say" here, and a test that wants an answer patches its own."""
+    from darsay.providers.github import GitHubProvider
+    from darsay.providers.huggingface import HuggingFaceProvider
+
+    monkeypatch.setattr(HuggingFaceProvider, "exists", lambda self, source: None)
+    monkeypatch.setattr(GitHubProvider, "exists", lambda self, source: None)

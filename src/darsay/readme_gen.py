@@ -251,6 +251,26 @@ def _precision_cell(meta: dict) -> str:
     return f"{label} · {bpp:.2f} bytes/param"
 
 
+_DECLARED_BY = {
+    "card": "the upstream card",
+    "tag": "an upstream tag",
+    "api": "the host's API",
+    "env_template": "the tree's env template",
+    "compose": "the tree's compose file",
+    "dockerfile": "the tree's Dockerfile",
+    "spaces_card": "the tree's Spaces card",
+    "shell_default": "a shell default in the tree",
+    "literal": "a literal in the tree's code",
+    "url": "a URL in the tree",
+}
+
+
+def _declared_by_phrase(declared_by: str | None) -> str:
+    if not declared_by:
+        return "upstream metadata"
+    return _DECLARED_BY.get(declared_by, f"upstream {declared_by}")
+
+
 def _lineage_lines(ident: dict, lin: dict) -> list[str]:
     """The lineage section of a bundle README: name, parents, descendants."""
     lines = []
@@ -263,7 +283,7 @@ def _lineage_lines(ident: dict, lin: dict) -> list[str]:
             relation = edge.get("relation") or "relation not declared upstream"
             lines.append(
                 f"- {relation}: `{edge.get('source')}` "
-                f"(declared by upstream {edge.get('declared_by') or 'metadata'})"
+                f"(declared by {_declared_by_phrase(edge.get('declared_by'))})"
             )
     else:
         lines.append("- Parents: none declared upstream")
@@ -597,6 +617,65 @@ def _languages_cell(languages: dict | None) -> str:
     return ", ".join(f"{name} {100 * (n or 0) / total:.0f}%" for name, n in top)
 
 
+def _references_lines(refs: dict) -> list[str]:
+    """The References subsection of a code README: what the tree names that
+    lives elsewhere, with provenance, and the one rule that made an edge."""
+    items = refs.get("items") or []
+    lines = ["", "### References", ""]
+    if not items:
+        lines.append(
+            "Nothing in the tree names a model, dataset, image, or repository "
+            "that lives elsewhere."
+        )
+        return lines
+    lines += [
+        "What the tree names that lives elsewhere — recorded as strings found",
+        "in files, never as a claim about what the code loads at run time:",
+        "",
+        "| Kind | Reference | Provenance | Found in | Upstream |",
+        "|---|---|---|---|---|",
+    ]
+    for item in items:
+        where = ", ".join(f"`{p}`" for p in item["found_in"][:3])
+        more = item.get("occurrences", 0) - min(3, len(item["found_in"]))
+        if more > 0:
+            where += f" … +{more}"
+        resolved = item.get("resolved")
+        if item["kind"] == "image":
+            upstream = "a tag, not a digest"
+        elif resolved is True:
+            upstream = "resolves"
+        elif resolved is False:
+            upstream = "**does not resolve**"
+        else:
+            upstream = "not checked"
+        lines.append(
+            f"| {item['kind']} | `{item['ref']}` | {item['tier']}, "
+            f"{_declared_by_phrase(item.get('declared_by'))} | {where} | {upstream} |"
+        )
+    primary = refs.get("primary_model") or {}
+    lines.append("")
+    if primary.get("ref"):
+        lines.append(
+            f"Primary model: `{primary['ref']}` — {primary.get('rule')}. Recorded "
+            "as a `references` edge in Lineage. The tree names no revision of "
+            "it, so the bundle of that model in a vault is the pinned instance "
+            "this tree was archived beside."
+        )
+    else:
+        lines.append(
+            f"Primary model: none — {primary.get('reason') or 'nothing named'}."
+        )
+    scan = refs.get("scan") or {}
+    if scan.get("partial"):
+        lines.append("")
+        lines.append(
+            f"The scan read {scan.get('files_scanned')} files and stopped at its "
+            "budget; `manifest.json` records what was skipped."
+        )
+    return lines
+
+
 def _render_code_readme(bundle_dir: Path, m: dict) -> str:
     ident = m["identity"]
     src = m["source"]
@@ -673,6 +752,7 @@ def _render_code_readme(bundle_dir: Path, m: dict) -> str:
             "target (git's own representation): "
             + ", ".join("`" + p + "`" for p in cm["symlinks"][:8])
         )
+    lines += _references_lines(cm.get("references") or {})
 
     lines += [
         "",

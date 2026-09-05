@@ -401,9 +401,20 @@ darsay archive github:MiaAI-Lab/Qwen3.8-Flash-Next-Single-DGX-Spark --revision 0
 ```
 
 `estimate` says what the tree declares about being run — `container`,
-`compose`, `python`, `shell`, an env template — before anything is
-fetched. `hydrate` / `run` do not apply; copy `code/` out and follow its
-README. A private repository needs `GITHUB_TOKEN` in the environment.
+`compose`, `python`, `shell`, an env template — and what it references:
+the checkpoint a recipe names, the image it runs in, priced upstream and
+checked against this vault, before anything is fetched. Keep the pair
+together with the verbs you already have:
+
+```bash
+darsay catalog new spark
+darsay catalog add spark github:MiaAI-Lab/Qwen3.8-Flash-Next-Single-DGX-Spark
+darsay catalog add spark huggingface:Mia-AiLab/Qwen3.8-Flash-Next-NVFP4
+darsay archive --next spark
+```
+
+`hydrate` / `run` do not apply; copy `code/` out and follow its README.
+A private repository needs `GITHUB_TOKEN` in the environment.
 Design: [Code bundles](../docs/CODE.md).
 
 ---

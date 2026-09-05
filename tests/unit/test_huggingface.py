@@ -443,3 +443,28 @@ def test_resumable_download_skips_the_hub_disk_warning(tmp_path, monkeypatch):
         )
     assert destination.read_bytes() == b"xxxxx"
     assert not incomplete.exists()
+
+
+def test_exists_asks_the_hub_once_and_never_guesses(monkeypatch):
+    import huggingface_hub
+
+    provider = HuggingFaceProvider()
+    calls = []
+
+    class FakeApi:
+        def __init__(self, answer):
+            self.answer = answer
+
+        def repo_exists(self, repo_id, repo_type=None, token=None):
+            calls.append((repo_id, repo_type))
+            if isinstance(self.answer, Exception):
+                raise self.answer
+            return self.answer
+
+    for answer, expected in ((True, True), (False, False), (OSError("offline"), None)):
+        monkeypatch.setattr(
+            huggingface_hub, "HfApi", lambda answer=answer: FakeApi(answer)
+        )
+        assert provider.exists(provider.parse("acme/toy")) is expected
+        assert provider.exists(provider.parse("datasets/acme/corpus")) is expected
+    assert calls[:2] == [("acme/toy", "model"), ("acme/corpus", "dataset")]

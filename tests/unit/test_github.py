@@ -664,3 +664,12 @@ def test_lfs_helpers():
     assert not matches_lfs_pattern("other/w.pt", "models/*.pt")
     assert matches_lfs_pattern("w.pt", "/w.pt")
     assert not matches_lfs_pattern("sub/w.pt", "/w.pt")
+
+
+def test_exists_is_one_repo_lookup(provider, source, fake):
+    assert provider.exists(source) is True
+    assert [u for u, _, _ in fake.calls] == [f"{API_ROOT}/repos/MiaAI-Lab/Recipe"]
+    fake.fail["/repos/MiaAI-Lab/Recipe"] = [_http_error("x", 404)]
+    assert provider.exists(source) is False
+    fake.fail["/repos/MiaAI-Lab/Recipe"] = [_http_error("x", 500)]
+    assert provider.exists(source) is None

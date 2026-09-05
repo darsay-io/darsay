@@ -236,3 +236,162 @@ def test_archive_twice_points_at_info_not_run(vault, test_provider):
         archive_quiet("test:code/acme/recipe", vault=vault)
     assert " info " in str(exc.value)
     assert " run " not in str(exc.value)
+
+
+def _hub_answers(monkeypatch, known: dict[str, bool]):
+    """Make the Hugging Face provider say whether a repo exists, offline,
+    and price the one primary model from a canned snapshot."""
+    from darsay.providers.base import FileSpec, Snapshot
+    from darsay.providers.huggingface import HuggingFaceProvider
+
+    monkeypatch.setattr(
+        HuggingFaceProvider, "exists", lambda self, source: known.get(source.locator)
+    )
+
+    def pin(self, source, revision, *, require_access=False):
+        return Snapshot(
+            source=source,
+            revision="b" * 40,
+            revision_ref="main",
+            files=[
+                FileSpec(path="model.safetensors", size=98_000_000_000),
+                FileSpec(path="config.json", size=1_000),
+            ],
+            metadata={},
+        )
+
+    monkeypatch.setattr(HuggingFaceProvider, "pin", pin)
+
+
+def test_archive_records_what_the_tree_references_and_the_one_edge(
+    vault, test_provider, monkeypatch
+):
+    _hub_answers(monkeypatch, {"acme/toy-v2": True})
+    _add_recipe(test_provider)
+    bundle = archive_quiet("test:code/acme/recipe", vault=vault)
+    m = load_manifest(bundle)
+    refs = m["code_metadata"]["references"]
+    by_ref = {i["ref"]: i for i in refs["items"]}
+    model = by_ref["huggingface:acme/toy-v2"]
+    assert model["tier"] == "evidence"
+    assert model["declared_by"] == "shell_default"
+    assert model["found_in"] == ["start.sh:2", "README.md:3"]
+    assert model["resolved"] is True
+    assert model["revision"] is None
+    image = by_ref["oci:vllm/vllm-openai:toy"]
+    assert image["tier"] == "declared"
+    assert image["declared_by"] == "env_template"
+    assert image["resolved"] is None and image["digest"] is None
+    credit = by_ref["github:acme/first-recipe"]
+    assert credit["tier"] == "mentioned" and credit["resolved"] is None
+    assert refs["primary_model"]["ref"] == "huggingface:acme/toy-v2"
+    assert refs["query_limit"] == 20 and refs["resolved_at"]
+    assert refs["scan"]["partial"] is False
+    # The one rule made the one edge, beside whatever the provider declared.
+    assert m["lineage"]["parents"] == [
+        {
+            "source": "huggingface:acme/toy-v2",
+            "relation": "references",
+            "declared_by": "shell_default",
+        }
+    ]
+    readme = (bundle / "README.md").read_text()
+    assert "### References" in readme
+    assert (
+        "| model | `huggingface:acme/toy-v2` | evidence, a shell default in the tree |"
+        in readme
+    )
+    assert "Primary model: `huggingface:acme/toy-v2`" in readme
+    assert (
+        "- references: `huggingface:acme/toy-v2` (declared by a shell default in the tree)"
+        in readme
+    )
+
+
+def test_archive_offline_keeps_references_without_an_edge(vault, test_provider):
+    _add_recipe(test_provider)
+    bundle = archive_quiet("test:code/acme/recipe", vault=vault)
+    m = load_manifest(bundle)
+    refs = m["code_metadata"]["references"]
+    assert refs["primary_model"]["ref"] is None
+    assert "not resolved upstream" in refs["primary_model"]["reason"]
+    assert m["lineage"]["parents"] is None
+    assert (
+        "Primary model: none — not resolved upstream"
+        in (bundle / "README.md").read_text()
+    )
+
+
+def test_estimate_reads_references_before_fetching(vault, test_provider, monkeypatch):
+    _hub_answers(monkeypatch, {"acme/toy-v2": True})
+    _add_recipe(test_provider)
+    reads = []
+    est = estimate(
+        "test:code/acme/recipe",
+        vault=vault,
+        progress=silent,
+        on_read=lambda path, n: reads.append(path),
+    )
+    refs = est["code"]["references"]
+    assert refs["primary_model"]["ref"] == "huggingface:acme/toy-v2"
+    assert refs["primary_upstream"] == {
+        "ref": "huggingface:acme/toy-v2",
+        "in_vault": False,
+        "file_count": 2,
+        "size_bytes": 98_000_001_000,
+        "unknown_size_count": 0,
+    }
+    # After the pin, declarations and the README were read first; every
+    # text file was read.
+    assert reads[:5] == [
+        "pin",
+        ".env.sample",
+        "Dockerfile",
+        "README.md",
+        "compose.yaml",
+    ]
+    assert refs["scan"]["files_scanned"] == 9
+    assert est["lineage"]["parents"] is None  # estimate reports, archive records
+    lines = []
+    print_estimate(est, progress=lines.append)
+    text = "\n".join(lines)
+    assert (
+        "references:   image   oci:python:3.12-slim  [Dockerfile: FROM; a tag, not a digest]"
+        in text
+    )
+    assert (
+        "model   huggingface:acme/toy-v2  [start.sh: shell default (+1 more place); resolves; 91.3 GiB upstream, not in this vault]"
+        in text
+    )
+    assert "code    github:acme/first-recipe  [README.md: URL; mentioned only]" in text
+    assert (
+        "image   oci:vllm/vllm-openai:toy  [.env.sample: env template (+2 more places); a tag, not a digest]"
+        in text
+    )
+
+
+def test_estimate_says_when_the_model_is_already_in_this_vault(
+    vault, test_provider, monkeypatch
+):
+    _hub_answers(monkeypatch, {"acme/toy-v2": True})
+    (vault / "acme--toy-v2" / "bbbbbbbbbbbb").mkdir(parents=True)
+    (vault / "acme--toy-v2" / "bbbbbbbbbbbb" / "manifest.json").write_text("{}")
+    _add_recipe(test_provider)
+    est = estimate("test:code/acme/recipe", vault=vault, progress=silent)
+    assert est["code"]["references"]["primary_upstream"]["in_vault"] is True
+    lines = []
+    print_estimate(est, progress=lines.append)
+    assert any("resolves; in this vault]" in line for line in lines)
+
+
+def test_info_names_the_primary_model(vault, test_provider, monkeypatch, capsys):
+    _hub_answers(monkeypatch, {"acme/toy-v2": True})
+    _add_recipe(test_provider)
+    bundle = archive_quiet("test:code/acme/recipe", vault=vault)
+    bundle_id = f"{bundle.parent.name}@{bundle.name}"
+    assert main(["--vault", str(vault), "info", bundle_id]) == 0
+    out = capsys.readouterr().out
+    assert (
+        "references: huggingface:acme/toy-v2  [the one model named in code; resolves upstream]"
+        in out
+    )

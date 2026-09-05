@@ -677,7 +677,9 @@ def _register_bundle(
     if repo_type == "dataset":
         dataset_metadata = extract_dataset_metadata(payload_dir, card, file_records)
     elif repo_type == "code":
-        code_metadata = extract_code_metadata(payload_dir, metadata, file_records)
+        code_metadata = extract_code_metadata(
+            payload_dir, metadata, file_records, self_ref=source.canonical
+        )
     else:
         model_metadata = extract_model_metadata(payload_dir, card)
         runtime = estimate_runtime(payload_dir, model_metadata)
@@ -694,6 +696,14 @@ def _register_bundle(
 
     progress("Querying lineage: parents declared upstream, descendants listed ...")
     lineage = provider.lineage(source, metadata)
+    if code_metadata is not None:
+        from .references import primary_edge, resolve_references
+
+        progress("Resolving what the tree references upstream ...")
+        resolve_references(code_metadata["references"], reference_lookup())
+        edge = primary_edge(code_metadata["references"])
+        if edge is not None:
+            lineage["parents"] = [*(lineage.get("parents") or []), edge]
 
     now = utc_now()
     bundle_id = f"{source.bundle_name}@{commit[:12]}"
@@ -841,6 +851,29 @@ def _register_bundle(
             f"WARNING: {len(upstream_mismatches)} files did not match upstream checksums!"
         )
     return bundle_dir
+
+
+def reference_lookup():
+    """``exists(ref) -> bool | None`` over the provider registry, memoized.
+
+    A ref whose scheme has no provider (an ``oci:`` image) is ``None``:
+    darsay cannot say, so it does not."""
+    from .sources import SourceError, get_provider, parse_source
+
+    cache: dict[str, bool | None] = {}
+
+    def exists(ref: str) -> bool | None:
+        if ref in cache:
+            return cache[ref]
+        try:
+            source = parse_source(ref)
+            result = get_provider(source.provider).exists(source)
+        except (SystemExit, SourceError):
+            result = None
+        cache[ref] = result
+        return result
+
+    return exists
 
 
 def _write_curation_template(bundle_dir: Path, manifest: dict) -> None:
