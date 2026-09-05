@@ -71,14 +71,24 @@ REFRESH_READ_BUDGET_BYTES = 512 * 1024**2
 
 
 def _vault_path(args, *, announce: bool = False) -> Path:
-    from .vault import announce_vault, default_vault, using_implicit_vault
+    from .vault import (
+        announce_vault,
+        default_vault,
+        discover_vault,
+        using_implicit_vault,
+    )
 
+    implicit = using_implicit_vault(args.vault)
+    discovered = None
     if args.vault:
         path = Path(args.vault).expanduser()
     else:
-        path = default_vault()
+        # No --vault, no $DARSAY_HOME: use the vault the working directory is
+        # in, if any, before falling back to ~/darsay.
+        discovered = discover_vault(Path.cwd()) if implicit else None
+        path = discovered or default_vault()
     if announce:
-        announce_vault(path, implicit=using_implicit_vault(args.vault))
+        announce_vault(path, implicit=implicit, discovered=discovered is not None)
     return path
 
 

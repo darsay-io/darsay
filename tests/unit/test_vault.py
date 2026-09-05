@@ -8,6 +8,7 @@ import pytest
 from darsay.vault import (
     bundle_id_for,
     default_vault,
+    discover_vault,
     find_loose_bundles,
     iter_bundle_dirs,
     prune_empty_parent,
@@ -375,3 +376,36 @@ def test_filesystem_type_parses_darwin_and_linux_mount_output():
     types = dict(_linux_mount_types(linux))
     assert types["/"] == "ext4"
     assert types["/media/usb"] == "vfat"
+
+
+def test_discover_vault_finds_the_enclosing_vault_and_validates_kind(
+    tmp_path, monkeypatch
+):
+    from darsay.schema import MANIFEST_KIND
+
+    # keep $HOME out of the walk and off the tmp tree
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+
+    drive = tmp_path / "drive"
+    bundle = drive / "acme--toy" / "aaaaaaaaaaaa"
+    bundle.mkdir(parents=True)
+    (bundle / "manifest.json").write_text(
+        json.dumps({"bundle_id": "acme--toy@aaaaaaaaaaaa", "kind": MANIFEST_KIND}),
+        encoding="utf-8",
+    )
+    (bundle / "model").mkdir()
+
+    # from deep inside the vault, discovery walks up to it
+    assert discover_vault(bundle / "model") == drive.resolve()
+
+    # a directory whose only <x>/<y>/manifest.json is not a darsay manifest
+    # (a browser extension, say) is not a vault
+    foreign = tmp_path / "notavault"
+    ext = foreign / "extension" / "v1"
+    ext.mkdir(parents=True)
+    (ext / "manifest.json").write_text(
+        json.dumps({"name": "Some Extension", "manifest_version": 3}),
+        encoding="utf-8",
+    )
+    assert discover_vault(ext) != foreign.resolve()

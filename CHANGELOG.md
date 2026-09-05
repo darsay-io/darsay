@@ -109,6 +109,11 @@ Tool version (`darsay.__version__`) is independent of
   where a volume should be mounted (the folder an eject leaves behind),
   which would silently fill the boot disk. The default `~/darsay` missing
   on first run is still a normal empty vault, not an error.
+- With neither `--vault` nor `$DARSAY_HOME` set, darsay now finds the vault
+  the working directory is in — a git-style walk up to the nearest ancestor
+  that holds darsay bundles — before falling back to `~/darsay`, so
+  `cd /Volumes/drive && darsay list` reads the drive. The home directory and
+  above are never treated as a vault, and the chosen vault is announced.
 - Every pasted next-step command that names a bundle by id now carries
   `--vault` when the vault is not the default one, so `migrate`'s verify
   line, `info`'s hydrate hint, `archive`'s completion and already-exists

@@ -267,6 +267,15 @@ files and the fix — reformat the stick as exFAT, which keeps the
 cross-platform convenience without the limit. exFAT and every modern
 filesystem (APFS, ext4, NTFS, Btrfs, ZFS) are fine.
 
+### Do I have to type `--vault` for a drive every time?
+
+No. With neither `--vault` nor `$DARSAY_HOME` set, darsay uses the vault
+the working directory is in — it walks up to the nearest ancestor holding
+bundles, the way git finds its repository — before falling back to
+`~/darsay`. So `cd /Volumes/drive && darsay list` reads the drive, and the
+chosen vault is announced on stderr. The home directory and above are never
+treated as a vault. `--vault` and `$DARSAY_HOME` still win when set.
+
 ### Can I move, copy, or verify a whole drive at once?
 
 Yes. `mv`, `cp`, and `verify` take more than one bundle, and `--all`

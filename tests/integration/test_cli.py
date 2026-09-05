@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -1059,6 +1060,28 @@ def test_cli_archive_dry_run_records_only_the_pin_and_force_keeps_the_manifest(
         "  " + _real(*v, "archive", "test:acme/toy", "--force")
     )
     assert _tree(bundle) == before
+
+
+def test_list_discovers_the_vault_from_the_working_directory(
+    tmp_path, test_provider, monkeypatch, capsys
+):
+    monkeypatch.delenv("DARSAY_HOME", raising=False)
+    # keep the walk from ever reaching a real vault above the tmp tree
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+
+    drive = tmp_path / "drive"
+    drive.mkdir()
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=drive)
+
+    # bare `list` (no --vault, no $DARSAY_HOME) from inside the vault finds it
+    monkeypatch.chdir(bundle / "model")
+    assert main(["list"]) == 0
+    captured = capsys.readouterr()
+    assert "test--acme--toy" in captured.out
+    assert f"Vault: {drive}" in captured.err
+    assert "found from the working directory" in captured.err
 
 
 def test_list_overlays_another_vault_as_a_drive(tmp_path, test_provider, capsys):

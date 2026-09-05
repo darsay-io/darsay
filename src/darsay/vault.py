@@ -30,9 +30,15 @@ def using_implicit_vault(vault_flag: str | None) -> bool:
     return not vault_flag and not os.environ.get("DARSAY_HOME")
 
 
-def announce_vault(vault: Path, *, implicit: bool) -> None:
+def announce_vault(vault: Path, *, implicit: bool, discovered: bool = False) -> None:
     """Tell the user where the vault is when they did not pick one."""
-    if implicit:
+    if discovered:
+        print(
+            f"Vault: {vault}  (found from the working directory; "
+            "$DARSAY_HOME or --vault overrides)",
+            file=sys.stderr,
+        )
+    elif implicit:
         print(
             f"Vault: {vault}  (default; set $DARSAY_HOME or --vault to override)",
             file=sys.stderr,
@@ -348,6 +354,65 @@ def find_loose_bundles(vault: Path) -> list[Path]:
         if isinstance(data, dict) and data.get("bundle_id"):
             loose.append(d)
     return sorted(loose)
+
+
+def _is_vault_dir(d: Path) -> bool:
+    """Whether ``d`` holds a darsay bundle at ``<name>/<revision>/``.
+
+    Validated, not merely a ``manifest.json`` at that depth — the name is
+    common (browser extensions, other tools), so a real darsay manifest
+    (``kind``) or a transfer ledger must be present. A handful are examined
+    before giving up, enough to see past a stray file.
+    """
+    from .schema import MANIFEST_KIND
+
+    seen = 0
+    for manifest_path in d.glob("*/*/manifest.json"):
+        if manifest_path.parent.parent.name in RESERVED_DIRS:
+            continue
+        seen += 1
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict) and data.get("kind") == MANIFEST_KIND:
+            return True
+        if seen >= 12:
+            break
+    for ledger_path in d.glob("*/*/transfer.json"):
+        if ledger_path.parent.parent.name in RESERVED_DIRS:
+            continue
+        try:
+            data = json.loads(ledger_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict) and "transfer_version" in data:
+            return True
+    return False
+
+
+def discover_vault(start: Path) -> Path | None:
+    """The nearest ancestor of ``start`` that is a darsay vault, or ``None``.
+
+    Git-style upward search, consulted only when neither ``--vault`` nor
+    ``$DARSAY_HOME`` is set, so ``cd /Volumes/drive && darsay list`` reads
+    the drive instead of ``~/darsay``. The home directory and everything
+    above it are never treated as a vault — that is where stray
+    ``manifest.json`` files cluster, and a vault is never literally ``$HOME``.
+    """
+    try:
+        current = Path(start).resolve()
+        home = Path.home().resolve()
+    except OSError:
+        return None
+    off_limits = {home, *home.parents}
+    for _ in range(64):
+        if current not in off_limits and _is_vault_dir(current):
+            return current
+        if current.parent == current:
+            break
+        current = current.parent
+    return None
 
 
 def _source_address_from_manifest(manifest: dict) -> str | None:
