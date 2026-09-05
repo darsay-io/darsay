@@ -212,6 +212,41 @@ def _check_pin_scope(
     )
 
 
+def _pinned_scope(ledger: dict) -> dict:
+    """What an existing pin holds: its selectors and the bytes verified on disk."""
+    from .catalog import include_key
+
+    subset = ledger.get("subset") or {}
+    include = None if subset.get("policy") else subset.get("include")
+    if include_key(include) == ():
+        include = None
+    sizes = {item["path"]: item.get("size") or 0 for item in ledger["expected"]}
+    verified = [
+        path
+        for path, state in ledger["files"].items()
+        if state.get("status") == "verified"
+    ]
+    return {
+        "include": include,
+        "verified": len(verified),
+        "verified_bytes": sum(sizes.get(path, 0) for path in verified),
+    }
+
+
+def _outside_pin(payload_dir: Path, ledger: dict) -> list[tuple[str, int]]:
+    """Payload files on disk that a new pin does not expect; reconcile removes them."""
+    from .hashing import iter_payload_files
+
+    if not payload_dir.is_dir():
+        return []
+    expected = {item["path"] for item in ledger["expected"]}
+    return sorted(
+        (relative, path.stat().st_size)
+        for relative, path in iter_payload_files(payload_dir)
+        if relative not in expected
+    )
+
+
 def archive(
     source: str | SourceRef,
     revision: str | None = None,
@@ -248,10 +283,14 @@ def archive(
     archive cleanly before any byte moves. ``None`` proceeds, as an
     unattended run must.
 
-    ``choose(snapshot) -> include | None`` optionally chooses scope for a
-    fresh model before any archive directory or transfer ledger is created.
-    Explicit includes, full publications, shards, and existing pins bypass
-    it. The library has no interactive default; the CLI supplies its picker.
+    ``choose(snapshot, pinned) -> include | None`` optionally chooses scope
+    for a fresh model before any archive directory or transfer ledger is
+    created. Explicit includes, full publications, shards, and existing pins
+    bypass it; a forced re-pin passes the pin it would replace as ``pinned``
+    (its selectors and verified bytes) so the picker can open on it. The
+    library has no interactive default; the CLI supplies its picker.
+    Before a forced re-pin every payload file outside the new scope is
+    listed with its size, ``confirm`` is asked, and a dry run removes nothing.
     ``resume_scope=True`` lets an unqualified direct-source command resume
     the recorded subset without repeating its includes. Board/catalog jobs
     keep this false: their row's scope is a requirement, not a new choice.
@@ -296,7 +335,8 @@ def archive(
     cap = rate_cap(vault, max_rate)
     patience = offline_patience(vault, max_offline)
     root = payload_root_for(ref.artifact_type)
-    resume = None if force else find_resume(vault, ref, revision, root)
+    prior = find_resume(vault, ref, revision, root)
+    resume = None if force else prior
     pinned = resume[1] if resume else None
     orphan_dir = resume[0] if resume and pinned is None else None
 
@@ -344,7 +384,10 @@ def archive(
         and shard is None
         and not (bundle_dir / "manifest.json").exists()
     ):
-        selected = choose(snapshot)
+        replacing = prior[1] if force and prior is not None else None
+        selected = choose(
+            snapshot, _pinned_scope(replacing) if replacing is not None else None
+        )
         if selected is not None:
             if not selected:
                 raise SystemExit("No collection selected; no archive has started.")
@@ -397,6 +440,25 @@ def archive(
                     ledger = _fresh_ledger()
             elif force:
                 ledger = _fresh_ledger()
+                outside = _outside_pin(payload_dir, ledger)
+                if outside:
+                    # Say what the re-pin discards before anything is discarded.
+                    count = f"{len(outside)} file{'s' if len(outside) != 1 else ''}"
+                    on_disk = human_size(sum(size for _, size in outside))
+                    progress(
+                        f"Re-pin removes {count} outside the new scope ({on_disk} on disk)"
+                        + (" — dry run, nothing removed:" if dry_run else ":")
+                    )
+                    for relative, size in outside:
+                        progress(f"  {relative}  {human_size(size)}")
+                    if (
+                        not dry_run
+                        and confirm is not None
+                        and not confirm("Remove them and re-pin? [y/N] ", default=False)
+                    ):
+                        raise SystemExit(
+                            "Re-pin declined; the existing pin and its files are untouched."
+                        )
                 if not dry_run:  # a dry run re-plans from a fresh pin on paper only
                     save_ledger(bundle_dir, ledger)
             else:

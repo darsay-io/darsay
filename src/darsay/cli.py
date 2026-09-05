@@ -551,13 +551,14 @@ def _estimate_catalog(args, vault, cat_path) -> int:
     return 1 if failed else 0
 
 
-def _tty_confirm(question: str) -> bool:
-    """Ask on the terminal; Enter and ``y`` mean yes, ``n`` or EOF mean no.
+def _tty_confirm(question: str, *, default: bool = True) -> bool:
+    """Ask on the terminal; ``y`` means yes, ``n`` or EOF mean no.
 
-    The archive's SIGINT handler swallows a first Ctrl-C (it requests a
-    clean stop mid-transfer), which at a prompt would just leave the user
-    waiting; the default handler is restored for the question so Ctrl-C
-    aborts it.
+    Enter means ``default``: yes for a question that only pauses work, no
+    for one that removes bytes. The archive's SIGINT handler swallows a
+    first Ctrl-C (it requests a clean stop mid-transfer), which at a prompt
+    would just leave the user waiting; the default handler is restored for
+    the question so Ctrl-C aborts it.
     """
     import signal
 
@@ -568,7 +569,8 @@ def _tty_confirm(question: str) -> bool:
         return False
     finally:
         signal.signal(signal.SIGINT, previous)
-    return answer.strip().lower() in {"", "y", "yes"}
+    answer = answer.strip().lower()
+    return default if answer == "" else answer in {"y", "yes"}
 
 
 def _on_a_terminal() -> bool:

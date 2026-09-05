@@ -423,13 +423,32 @@ def _room(screen, state: CollectionState) -> list[str]:
             return state.include
 
 
-def choose_collection(snapshot) -> list[str] | None:
-    """Fresh multi-variant models only. Curses restores terminal modes on every exit."""
+def opening_state(inventory: dict, pinned: dict | None) -> CollectionState:
+    """The room's first draft: empty, or the pin a forced re-pin would replace."""
+    state = CollectionState(inventory)
+    if pinned is None:
+        return state
+    state.include = list(pinned["include"] or ["/*"])
+    state.cursor = next((i for i, v in enumerate(state.groups) if state.selected(v)), 0)
+    state.message = (
+        f"Pinned on disk: {pinned['verified']} verified files, "
+        f"{human_size(pinned['verified_bytes'])}. Enter keeps this scope; "
+        "a different choice removes what falls outside it."
+    )
+    return state
+
+
+def choose_collection(snapshot, pinned: dict | None = None) -> list[str] | None:
+    """Fresh multi-variant models only. Curses restores terminal modes on every exit.
+
+    ``pinned`` is the scope a forced re-pin would replace; the room opens with
+    it selected and says what a different choice removes.
+    """
     inventory = publication(snapshot)
     if len(inventory["variants"]) < 2:
         return None
     try:
-        return curses.wrapper(_room, CollectionState(inventory))
+        return curses.wrapper(_room, opening_state(inventory, pinned))
     except curses.error as exc:
         raise SystemExit(
             "Could not open the collection picker. No archive has started. "

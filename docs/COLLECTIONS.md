@@ -126,9 +126,11 @@ that you intend to archive together, or use separate vaults for independent
 collections of the same publication. An explicit request that differs from
 an existing pin is refused, not silently replaced with that pin's files.
 `--force` deliberately re-pins, including a partial collection; it is not
-ordinary resume. Files outside the new pinned transfer set are removed during
-transfer reconciliation. Use another vault if you want to keep both independent
-collections.
+ordinary resume. Before it re-pins, it lists every payload file on disk that
+the new scope leaves out, with its size, and an interactive run asks before
+removing them; a dry run lists them and removes nothing. The room opens with
+the existing pin selected and says what a different choice discards. Use
+another vault if you want to keep both independent collections.
 
 ## Companions and context
 

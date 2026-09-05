@@ -6,7 +6,13 @@ from pathlib import Path
 import pytest
 
 from darsay.collection import bit_family, family, selection_totals, starting_selection
-from darsay.collection_tui import CollectionState, clipped, safe_text, wrapped
+from darsay.collection_tui import (
+    CollectionState,
+    clipped,
+    opening_state,
+    safe_text,
+    wrapped,
+)
 from darsay.weight_variants import gguf_variants
 
 
@@ -105,6 +111,21 @@ def test_incomplete_and_unknown_families_are_not_preset_guesses(inventory):
     assert "Incomplete" in state.message
     state.key("3")
     assert state.include == ["/*"]
+
+
+def test_a_forced_repin_opens_on_the_existing_pin(inventory):
+    q4 = next(v for v in inventory["variants"] if v["precision"] == "UD-Q4_K_XL")
+    assert opening_state(inventory, None).include == []
+    state = opening_state(
+        inventory, {"include": q4["include"], "verified": 7, "verified_bytes": 2**31}
+    )
+    assert state.selected(q4)
+    assert state.groups[state.cursor] is q4
+    assert "Pinned on disk: 7 verified files, 2.0 GiB" in state.message
+    whole = opening_state(
+        inventory, {"include": None, "verified": 87, "verified_bytes": 0}
+    )
+    assert whole.include == ["/*"]
 
 
 def test_terminal_text_has_no_control_sequences_and_clips_wide_names():

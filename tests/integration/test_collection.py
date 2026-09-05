@@ -27,7 +27,7 @@ def test_cancel_precedes_archive_directory_and_payload_writes(vault, test_provid
     pack(test_provider)
     before = list(vault.rglob("*"))
 
-    def cancel(snapshot):
+    def cancel(snapshot, _pinned):
         inventory = publication(snapshot)
         assert len(inventory["variants"]) == 2
         assert len(inventory["companions"]) == 1
@@ -43,7 +43,7 @@ def test_cancel_precedes_archive_directory_and_payload_writes(vault, test_provid
 def test_chosen_collection_pins_one_include_union(vault, test_provider):
     pack(test_provider)
 
-    def choose(snapshot):
+    def choose(snapshot, _pinned):
         inventory = publication(snapshot)
         assert snapshot.revision == "a" * 40
         return [p for v in inventory["variants"] for p in v["include"]]
@@ -62,7 +62,7 @@ def test_the_whole_publication_is_the_repository_itself(vault, test_provider):
 
     pack(test_provider)
     assert include_key(["/*"]) == include_key(None)
-    bundle = archive_quiet("test:acme/pack", vault=vault, choose=lambda _: ["/*"])
+    bundle = archive_quiet("test:acme/pack", vault=vault, choose=lambda *_: ["/*"])
     subset = load_manifest(bundle)["source"]["subset"]
     # No subset, or the default policy's own record — never a ``/*`` selector.
     assert subset is None or (subset.get("policy") and subset["include"] != ["/*"])
@@ -78,7 +78,7 @@ def test_the_whole_publication_is_the_repository_itself(vault, test_provider):
     archive_quiet(
         "test:acme/pack",
         vault=other,
-        choose=lambda _: pytest.fail("a resumed pin must not prompt"),
+        choose=lambda *_: pytest.fail("a resumed pin must not prompt"),
         resume_scope=True,
         dry_run=True,
     )
@@ -90,7 +90,7 @@ def test_the_whole_publication_is_the_repository_itself(vault, test_provider):
 def test_explicit_scope_bypasses_chooser(vault, test_provider, options):
     pack(test_provider)
 
-    def unexpected(_snapshot):
+    def unexpected(*_):
         pytest.fail("explicit scope must not prompt")
 
     archive_quiet(
@@ -103,11 +103,11 @@ def test_resume_does_not_prompt_or_change_selected_scope(vault, test_provider):
     archive_quiet(
         "test:acme/pack",
         vault=vault,
-        choose=lambda _: ["/model-Q4_K_M.gguf"],
+        choose=lambda *_: ["/model-Q4_K_M.gguf"],
         dry_run=True,
     )
 
-    def unexpected(_snapshot):
+    def unexpected(*_):
         pytest.fail("resume must not prompt")
 
     bundle = archive_quiet(
@@ -141,7 +141,7 @@ def test_cli_only_opens_picker_for_an_interactive_fresh_scope(
     monkeypatch.setattr(
         collection_tui,
         "choose_collection",
-        lambda s: called.append(s.revision) or ["/*"],
+        lambda s, _p: called.append(s.revision) or ["/*"],
     )
     assert (
         main(["--vault", str(vault), "archive", "test:acme/pack", "--dry-run", *flags])
@@ -162,7 +162,7 @@ def test_both_catalog_spellings_bypass_picker_and_require_row_scope(
     monkeypatch.setattr(
         collection_tui,
         "choose_collection",
-        lambda _: pytest.fail("catalog jobs must not prompt"),
+        lambda *_: pytest.fail("catalog jobs must not prompt"),
     )
     assert main(["--vault", str(vault), "catalog", "new", "room"]) == 0
     assert (
@@ -198,7 +198,7 @@ def test_a_pin_created_while_choosing_cannot_replace_reviewed_scope(
 ):
     pack(test_provider)
 
-    def choose(_snapshot):
+    def choose(*_):
         # Another worker pins this source while the collector is in the TUI.
         archive_quiet("test:acme/pack", vault=vault, full=True, dry_run=True)
         return ["/model-Q4_K_M.gguf"]
@@ -206,6 +206,108 @@ def test_a_pin_created_while_choosing_cannot_replace_reviewed_scope(
     with pytest.raises(SystemExit, match="requested collection differs"):
         archive_quiet("test:acme/pack", vault=vault, choose=choose)
     assert test_provider.downloads == []
+
+
+def _partial_holding_one_variant(vault, test_provider):
+    """Pin two variants and stop once the first has landed: verified bytes on disk."""
+    from darsay.transfer import PartialTransfer
+
+    test_provider.add_repo(
+        "acme/pack",
+        model_files(
+            extra={
+                "model-Q4_K_M.gguf": make_gguf({"general.file_type": 15})
+                + b"x" * 30000,
+                "model-Q8_0.gguf": make_gguf({"general.file_type": 7}) + b"y" * 30000,
+                "mmproj-F16.gguf": make_gguf({"general.file_type": 1}),
+            }
+        ),
+    )
+    with pytest.raises(PartialTransfer):
+        archive_quiet(
+            "test:acme/pack",
+            vault=vault,
+            include=["/model-Q4_K_M.gguf", "/model-Q8_0.gguf"],
+            max_bytes=30500,
+        )
+    bundle = next(vault.glob("*/*/transfer.json")).parent
+    landed = [p.name for p in (bundle / "model").iterdir() if p.suffix == ".gguf"]
+    assert len(landed) == 1
+    other = (
+        "/model-Q8_0.gguf" if landed == ["model-Q4_K_M.gguf"] else "/model-Q4_K_M.gguf"
+    )
+    return bundle, landed[0], other
+
+
+def test_force_names_what_it_removes_and_asks_first(vault, test_provider):
+    bundle, landed, other = _partial_holding_one_variant(vault, test_provider)
+    notes = []
+
+    with pytest.raises(SystemExit, match="declined"):
+        archive_quiet(
+            "test:acme/pack",
+            vault=vault,
+            force=True,
+            include=[other],
+            progress=notes.append,
+            confirm=lambda _q, **_: False,
+        )
+    assert (bundle / "model" / landed).is_file()
+    assert any("outside the new scope" in n for n in notes)
+    assert any(landed in n for n in notes)
+    # Declining leaves the old pin in place: both selectors, ready to resume.
+    ledger = json.loads((bundle / "transfer.json").read_text())
+    assert ledger["subset"]["include"] == ["/model-Q4_K_M.gguf", "/model-Q8_0.gguf"]
+
+    notes.clear()
+    archive_quiet(
+        "test:acme/pack",
+        vault=vault,
+        force=True,
+        dry_run=True,
+        include=[other],
+        progress=notes.append,
+        confirm=lambda *_, **__: pytest.fail(
+            "a dry run removes nothing, so asks nothing"
+        ),
+    )
+    assert any("nothing removed" in n for n in notes)
+    assert (bundle / "model" / landed).is_file()
+
+    notes.clear()
+    archive_quiet(
+        "test:acme/pack",
+        vault=vault,
+        force=True,
+        include=[other],
+        progress=notes.append,
+        confirm=lambda _q, **_: True,
+    )
+    assert not (bundle / "model" / landed).exists()
+    listed = next(i for i, n in enumerate(notes) if "outside the new scope" in n)
+    assert listed < notes.index("Transfer plan:")
+
+
+def test_force_opens_the_picker_on_the_pin_it_replaces(vault, test_provider):
+    bundle, landed, other = _partial_holding_one_variant(vault, test_provider)
+    offered = []
+
+    def choose(_snapshot, pinned):
+        offered.append(pinned)
+        return [other]
+
+    archive_quiet(
+        "test:acme/pack",
+        vault=vault,
+        force=True,
+        choose=choose,
+        confirm=lambda _q, **_: True,
+    )
+    assert len(offered) == 1
+    assert offered[0]["include"] == ["/model-Q4_K_M.gguf", "/model-Q8_0.gguf"]
+    assert offered[0]["verified"] == 7  # six sidecars and the variant that landed
+    assert offered[0]["verified_bytes"] > 30000
+    assert not (bundle / "model" / landed).exists()
 
 
 def test_explicit_force_can_repin_a_partial_collection(vault, test_provider):

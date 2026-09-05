@@ -25,6 +25,10 @@ Tool version (`darsay.__version__`) is independent of
   it shares the identity, size basis, and resume behaviour of an unqualified
   archive and the pin records no subset for it. `--full` remains the
   retention switch that keeps hash-identical duplicates too.
+- `--force` names what it would remove before it re-pins: every payload file
+  outside the new scope, with its size. An interactive run asks first, a dry
+  run lists them and removes nothing, and the collection room opens with the
+  existing pin selected and says what a different choice discards.
 - Direct-source archive reruns resume the pinned collection without repeating
   its include patterns. Board/catalog jobs still require their row's identity.
   Explicit includes, `--full`, shards, non-interactive runs, and `--yes` bypass
