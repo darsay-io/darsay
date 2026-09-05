@@ -67,6 +67,14 @@ Tool version (`darsay.__version__`) is independent of
   Hydration selects its first shard and refuses incomplete groups. Estimates
   respect the selection frozen in an existing archive pin.
 
+### Fixed
+
+- `darsay migrate` on a bundle addressed by a path outside the vault — an
+  arrival migrated where rsync left it, as the refusal's own hint spells
+  it — ends with `darsay verify <that path>`. The id it printed before is
+  a search of the vault, so the pasted command answered `no bundle
+  matching`. `info` names such a bundle the same way in its hydrate hint.
+
 ## [0.14.14] - 2026-09-03
 
 

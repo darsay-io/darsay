@@ -237,6 +237,23 @@ def iter_bundle_dirs(vault: Path) -> list[Path]:
     return sorted(found)
 
 
+def registered_in(vault: Path, bundle_dir: Path) -> bool:
+    """Whether ``bundle_dir`` is one of the vault's own ``<name>/<rev>`` rows.
+
+    An id (``name@rev12``) is a search of the vault, so it names a bundle
+    only from there; a bundle addressed by a path somewhere else — an
+    arrival still where rsync left it — is named by that path.
+    """
+    try:
+        resolved = Path(bundle_dir).resolve()
+        return (
+            resolved.parent.parent == Path(vault).resolve()
+            and resolved.parent.name not in RESERVED_DIRS
+        )
+    except OSError:
+        return False
+
+
 def _source_address_from_manifest(manifest: dict) -> str | None:
     """Canonical source address from the manifest."""
     return (manifest.get("source") or {}).get("address")

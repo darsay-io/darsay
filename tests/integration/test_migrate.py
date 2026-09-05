@@ -613,3 +613,53 @@ def test_migrate_all_sends_only_the_arrivals_to_verify(vault, capsys):
         "  1 record say the payload passed verification at its path; "
         "`darsay verify` re-hashes at any time"
     ) in out
+
+
+def test_migrate_of_a_bundle_outside_the_vault_hands_back_its_path(
+    vault, tmp_path, monkeypatch, capsys
+):
+    """An arrival migrated by path where rsync left it, not under the vault:
+    an id is a search of the vault and names nothing there, so the next
+    command carries the path the operator typed."""
+    arrivals = tmp_path / "arrivals"
+    bundle = place(arrivals, TOY)
+    monkeypatch.chdir(arrivals)
+    spec = f"{TOY}/{REV}"
+
+    with pytest.raises(SystemExit) as refused:
+        main(["--vault", str(vault), "info", spec])
+    assert f"hint: darsay migrate {spec}" in str(refused.value)
+
+    assert main(["--vault", str(vault), "migrate", spec]) == 0
+    out = capsys.readouterr().out
+    assert f"  path:       {spec}\n" in out
+    assert f"next:  darsay verify {spec}   (re-hash the payload where it landed)" in out
+    assert f"{TOY}@{REV}`" not in out and f"verify {TOY}@{REV}" not in out
+
+    with pytest.raises(SystemExit, match="no bundle matching"):
+        main(["--vault", str(vault), "verify", f"{TOY}@{REV}"])
+    assert main(["--vault", str(vault), "verify", spec]) == 0
+    assert "Verification: PASS" in capsys.readouterr().out
+    assert load_manifest(bundle)["schema_version"] == SCHEMA_VERSION
+
+    assert main(["--vault", str(vault), "info", spec]) == 0
+    assert f"not hydrated (darsay hydrate {spec})" in capsys.readouterr().out
+
+
+def test_migrate_of_several_arrivals_outside_the_vault_lists_their_paths(
+    vault, tmp_path, monkeypatch, capsys
+):
+    arrivals = tmp_path / "arrivals"
+    place(arrivals, TOY)
+    place(arrivals, ROWS)
+    monkeypatch.chdir(arrivals)
+
+    assert (
+        main(["--vault", str(vault), "migrate", f"{TOY}/{REV}", f"{ROWS}/{REV}"]) == 0
+    )
+    out = capsys.readouterr().out
+    assert "  next: re-hash each payload where it landed:\n" in out
+    assert f"  darsay verify {TOY}/{REV}\n" in out
+    assert f"  darsay verify {ROWS}/{REV}\n" in out
+    assert "@" not in out.split("re-hash each payload where it landed:")[1]
+    assert main(["--vault", str(vault), "verify", f"{ROWS}/{REV}"]) == 0

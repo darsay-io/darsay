@@ -10,6 +10,7 @@ from darsay.vault import (
     default_vault,
     iter_bundle_dirs,
     prune_empty_parent,
+    registered_in,
     resolve_bundle,
     using_implicit_vault,
 )
@@ -238,3 +239,28 @@ def test_prune_empty_parent_drops_only_an_empty_name(tmp_path):
 
     # A parent that is already gone is not an error.
     prune_empty_parent(tmp_path / "never--was" / "abc123")
+
+
+def test_registered_in_is_the_vaults_own_two_level_row(tmp_path, monkeypatch):
+    vault = tmp_path / "vault"
+    _write_bundle(vault, "acme--toy", "aaaaaaaaaaaa")
+    bundle = vault / "acme--toy" / "aaaaaaaaaaaa"
+    assert registered_in(vault, bundle)
+    # The path as an operator types it from inside the vault, and the
+    # vault reached through a symlink, are the same row.
+    monkeypatch.chdir(vault)
+    assert registered_in(vault, Path("acme--toy/aaaaaaaaaaaa"))
+    link = tmp_path / "link"
+    link.symlink_to(vault)
+    assert registered_in(link, bundle)
+
+    # Not a row: the name directory, a reserved tree, or an arrival
+    # sitting in the same shape somewhere else.
+    assert not registered_in(vault, vault / "acme--toy")
+    reserved = vault / "catalogs" / "acme--toy"
+    reserved.mkdir(parents=True)
+    assert not registered_in(vault, reserved)
+    _write_bundle(tmp_path / "arrivals", "acme--toy", "aaaaaaaaaaaa")
+    assert not registered_in(
+        vault, tmp_path / "arrivals" / "acme--toy" / "aaaaaaaaaaaa"
+    )

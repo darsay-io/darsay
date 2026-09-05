@@ -93,6 +93,19 @@ def _bundle_dir(
     )
 
 
+def _handle(args, bundle_dir: Path, bundle_id: str) -> str:
+    """How a pasted command names ``bundle_dir``: its id in the vault, else its path.
+
+    An id is a search of the vault; a bundle addressed by a path somewhere
+    else gets that path back, quoted for the shell.
+    """
+    from .vault import registered_in
+
+    if registered_in(_vault_path(args), bundle_dir):
+        return bundle_id
+    return shlex.quote(str(bundle_dir))
+
+
 def _positive_float(value: str) -> float:
     try:
         parsed = float(value)
@@ -1549,7 +1562,10 @@ def cmd_info(args) -> int:
                 f"  hydration:  {hyd['engine']} in env {hyd['env']['key']} — {run_note}"
             )
         else:
-            print(f"  hydration:  not hydrated (darsay hydrate {m['bundle_id']})")
+            print(
+                "  hydration:  not hydrated "
+                f"(darsay hydrate {_handle(args, bundle, m['bundle_id'])})"
+            )
     return 0
 
 
@@ -1658,25 +1674,28 @@ def cmd_migrate(args) -> int:
     pending = [plan for plan in todo if not plan.get("verified_here")]
     stands = [plan for plan in todo if plan.get("verified_here")]
     print()
+    # The id names a bundle the vault lists; one migrated by a path
+    # elsewhere is named by that path, or the pasted command finds nothing.
+    handle = lambda plan: _handle(args, Path(plan["path"]), plan["bundle_id"])  # noqa: E731
     if len(todo) == 1:
         plan = todo[0]
         if pending:
             print(
-                f"  next:  darsay verify {plan['bundle_id']}   "
+                f"  next:  darsay verify {handle(plan)}   "
                 "(re-hash the payload where it landed)"
             )
         else:
             print(
                 f"  done:  the record says the payload passed verification at this "
                 f"path on {plan['verified_here']}; `darsay verify "
-                f"{plan['bundle_id']}` re-hashes it at any time"
+                f"{handle(plan)}` re-hashes it at any time"
             )
         return 0
     print(f"Migrated {len(todo)} records to schema {todo[0]['to_schema']}.")
     if pending:
         print("  next: re-hash each payload where it landed:")
         for plan in pending:
-            print(f"  darsay verify {plan['bundle_id']}")
+            print(f"  darsay verify {handle(plan)}")
     if stands:
         print(
             f"  {len(stands)} record{'s' if len(stands) != 1 else ''} say the "
