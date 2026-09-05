@@ -31,6 +31,9 @@ def inventory():
         ("IQ4_XS", 4, "middle"),
         ("Q8_0", 8, "wide"),
         ("Q2_K", 2, "compact"),
+        ("MXFP4", 4, "middle"),
+        ("MXFP4_MOE", 4, "middle"),
+        ("TQ1_0", None, "unknown"),
         ("BF16", None, "float"),
         ("new-format", None, "unknown"),
     ],
@@ -38,6 +41,14 @@ def inventory():
 def test_encoding_families(precision, bits, group):
     assert bit_family(precision) == bits
     assert family(precision) == group
+
+
+def test_the_pair_names_its_rule():
+    from darsay.collection import GUIDE
+
+    # "compact" is the 1- to 3-bit family; the pair is 4-bit plus 8-bit.
+    assert "4-bit" in GUIDE["intents"]["compare"]["description"]
+    assert "compact" not in GUIDE["intents"]["compare"]["description"]
 
 
 def test_starting_points_and_actual_scope(inventory):

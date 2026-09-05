@@ -1,7 +1,7 @@
 {
   "intents": {
     "single": {"title": "One considered copy", "description": "Start with one 4-bit encoding, then make it yours.", "note": "A storage-oriented starting point, not a benchmark or a hardware-fit guarantee."},
-    "compare": {"title": "A comparison pair", "description": "Keep a compact encoding and an 8-bit counterpart.", "note": "Compare these published encodings on your own tasks. More bytes alone do not prove better answers."},
+    "compare": {"title": "A comparison pair", "description": "Keep a 4-bit encoding and its 8-bit counterpart.", "note": "Compare these published encodings on your own tasks. More bytes alone do not prove better answers."},
     "whole": {"title": "The whole publication", "description": "The repository as published: every variant, every companion.", "note": "Scope is the whole repository at the inspected revision, with no selectors. What the archive retains inside it is a separate, recorded decision."}
   },
   "families": {

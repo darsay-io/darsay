@@ -22,9 +22,17 @@ GUIDE = json.loads(
 
 
 def bit_family(precision: str | None) -> int | None:
+    """The bit width a GGUF encoding label names, or None when it names none.
+
+    Mirrors ``precision.gguf_bits`` for the families the picker groups:
+    ``Q`` and ``IQ`` levels by their digit, MXFP4 as four bits. Ternary and
+    unfamiliar labels stay unknown rather than guessed.
+    """
     label = (precision or "").upper()
     if label in {"BF16", "F16", "F32", "F64"}:
         return None
+    if label.startswith("MXFP4"):
+        return 4
     match = re.search(r"(?:^|[-_])I?Q([1-8])(?:_|$)", label)
     return int(match[1]) if match else None
 
