@@ -128,6 +128,75 @@ def test_a_forced_repin_opens_on_the_existing_pin(inventory):
     assert whole.include == ["/*"]
 
 
+class FakeScreen:
+    """A curses window that records what each refresh drew, row by row."""
+
+    def __init__(self, height, width, keys):
+        self.height, self.width, self.keys = height, width, list(keys)
+        self.rows: dict[int, list] = {}
+        self.frames: list[dict[int, list]] = []
+
+    def getmaxyx(self):
+        return self.height, self.width
+
+    def keypad(self, _flag):
+        pass
+
+    def erase(self):
+        self.rows = {}
+
+    def addstr(self, y, x, text, attr=0):
+        self.rows.setdefault(y, []).append((x, text, attr))
+
+    def refresh(self):
+        self.frames.append({y: sorted(parts) for y, parts in self.rows.items()})
+
+    def getkey(self):
+        return self.keys.pop(0)
+
+
+def _text(frame):
+    return {y: "".join(text for _, text, _ in parts) for y, parts in frame.items()}
+
+
+def test_the_room_fits_an_ordinary_terminal(inventory):
+    import curses
+
+    from darsay.collection_tui import _room
+
+    screen = FakeScreen(24, 80, ["1", "KEY_NPAGE", "\n", "\n"])
+    q4 = next(v for v in inventory["variants"] if v["precision"] == "UD-IQ4_XS")
+    assert _room(screen, CollectionState(inventory)) == q4["include"]
+    opened, chosen, paged, review = (_text(f) for f in screen.frames[:4])
+    # Eight of the twelve groups at a time, and a count of what lies beyond.
+    assert sum("[" in opened.get(y, "") for y in range(8, 16)) == 8
+    assert "4 more below" in opened[16]
+    assert "4 above" in paged[16] and "more below" not in paged[16]
+    # A long status message wraps onto its second row instead of clipping.
+    assert "Smallest complete" in chosen[18] and "guarantee" in chosen[19]
+    assert "01 choose" in opened[1] and "PINNED REVISION" in " ".join(review.values())
+    # The step being taken is the lit one.
+    lit = {text: attr for _, text, attr in screen.frames[3][1]}
+    assert lit["02 review"] == curses.A_BOLD and lit["01 choose"] == curses.A_NORMAL
+
+
+def test_the_room_at_its_minimum_and_beside_its_guide(inventory):
+    from darsay.collection_tui import _room
+
+    small = FakeScreen(20, 60, ["q"])
+    with pytest.raises(KeyboardInterrupt):
+        _room(small, CollectionState(inventory))
+    frame = _text(small.frames[0])
+    assert sum("[" in frame.get(y, "") for y in range(8, 12)) == 4
+    assert "Q cancel" in frame[18]
+
+    wide = FakeScreen(30, 110, ["q"])
+    with pytest.raises(KeyboardInterrupt):
+        _room(wide, CollectionState(inventory))
+    frame = _text(wide.frames[0])
+    assert any("? opens the full guide" in line for line in frame.values())
+
+
 def test_terminal_text_has_no_control_sequences_and_clips_wide_names():
     assert "\x1b" not in safe_text("bad\x1b[2Jname\n")
     assert "\u202e" not in safe_text("bad\u202ename")

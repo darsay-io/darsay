@@ -25,6 +25,10 @@ Tool version (`darsay.__version__`) is independent of
   it shares the identity, size basis, and resume behaviour of an unqualified
   archive and the pin records no subset for it. `--full` remains the
   retention switch that keeps hash-identical duplicates too.
+- The terminal collection room fits an ordinary 80×24 terminal: eight groups
+  at a time with a count of what lies above or below, messages wrapped instead
+  of clipped, a compact key bar on narrow terminals, a side guide that says
+  when `?` holds more, and a step indicator that lights the current step.
 - `--force` names what it would remove before it re-pins: every payload file
   outside the new scope, with its size. An interactive run asks first, a dry
   run lists them and removes nothing, and the collection room opens with the

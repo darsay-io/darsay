@@ -52,9 +52,11 @@ an archive directory or transfer ledger. It reads metadata, not model bytes.
 | `q` or Ctrl-C | Cancel without starting an archive |
 
 The bottom readout updates the selected disk bytes, file count, and share
-of the publication. At 108 columns the guide sits beside the inventory;
-narrower terminals keep it under `?`. The minimum is 60 columns by 20 rows.
-Resizing preserves the draft. Cancelling restores the terminal.
+of the publication. An ordinary 80×24 terminal shows eight groups at a time
+and says how many more lie above or below; messages wrap rather than clip.
+At 108 columns the guide sits beside the inventory and says when `?` holds
+more; narrower terminals keep it under `?`. The minimum is 60 columns by 20
+rows. Resizing preserves the draft. Cancelling restores the terminal.
 
 Confirmation continues to the ordinary archive plan and disk preflight.
 With `--dry-run`, it writes the chosen pin and plan but transfers no payload.

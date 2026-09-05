@@ -143,10 +143,6 @@ class CollectionState:
             GUIDE["recovery"]["description"],
             "",
             GUIDE["recovery"]["note"],
-            "",
-            GUIDE["sizing"],
-            "",
-            "Unselected artifacts are outside your collection, not proven disposable.",
         ]
 
     def review_lines(self) -> list[str]:
@@ -219,6 +215,25 @@ def wrapped(lines: list[str], width: int) -> list[str]:
     return out
 
 
+def cells(text: str) -> int:
+    """Terminal columns a string occupies: wide East Asian glyphs take two."""
+    return sum(
+        0
+        if unicodedata.combining(c)
+        else 2
+        if unicodedata.east_asian_width(c) in {"W", "F"}
+        else 1
+        for c in text
+    )
+
+
+# Row budget for the choose page. Rows 1-4 are the masthead, 5-7 the question
+# and starting points, the list runs from LIST_TOP, and the last seven rows
+# hold the rule, a two-row message, the total, the meter, and the keys.
+LIST_TOP = 8
+BOTTOM_ROWS = 8
+
+
 def _room(screen, state: CollectionState) -> list[str]:
     with contextlib.suppress(curses.error):
         curses.curs_set(0)
@@ -229,9 +244,9 @@ def _room(screen, state: CollectionState) -> list[str]:
         "focus": curses.A_REVERSE,
         "plain": curses.A_NORMAL,
     }
-    if curses.has_colors() and "NO_COLOR" not in os.environ:
-        curses.start_color()
-        with contextlib.suppress(curses.error):
+    with contextlib.suppress(curses.error):
+        if curses.has_colors() and "NO_COLOR" not in os.environ:
+            curses.start_color()
             curses.use_default_colors()
             rich = curses.COLORS >= 256
             for pair, fg, bg in [
@@ -264,6 +279,152 @@ def _room(screen, state: CollectionState) -> list[str]:
                 colors[style],
             )
 
+    def masthead(height, width):
+        put(1, 2, "darsay / THE COLLECTION ROOM", "gold")
+        # The step being taken is lit; the other waits in the margin.
+        x = max(33, width - 26)
+        for i, (label, current) in enumerate(
+            [
+                ("01 choose", state.page != "review"),
+                ("02 review", state.page == "review"),
+            ]
+        ):
+            put(1, x, label, "gold" if current else "muted")
+            x += len(label)
+            if i == 0:
+                put(1, x, "  /  ", "muted")
+                x += 5
+        put(2, 2, state.inventory["source"], "gold")
+        put(
+            3,
+            2,
+            "Revision " + state.inventory["revision"] + " / metadata only",
+            "muted",
+        )
+        put(4, 2, "─" * (width - 4), "muted")
+
+    def reading_page(height, width):
+        lines = wrapped(
+            state.field_notes() if state.page == "guide" else state.review_lines(),
+            width - 6,
+        )
+        count = height - 10
+        state.offset = min(state.offset, max(0, len(lines) - count))
+        for i, line in enumerate(lines[state.offset : state.offset + count]):
+            put(6 + i, 3, line, "gold" if line.isupper() else "plain")
+        put(
+            height - 3,
+            2,
+            f"Lines {state.offset + 1}-{min(len(lines), state.offset + count)} of {len(lines)} / up-down to scroll",
+            "muted",
+        )
+        put(
+            height - 2,
+            2,
+            "Enter: confirm scope & continue   Esc: refine   Q: cancel"
+            if state.page == "review"
+            else "Up/down: read   Esc: back   Q: cancel",
+            "gold",
+        )
+
+    def choose_page(height, width):
+        spacious = width >= 108
+        divider = width - 40 if spacious else width - 2
+        list_width = divider - 3
+        put(5, 2, "What would you like to keep?", "gold")
+        put(
+            6,
+            2,
+            "1  One considered copy   2  A comparison pair   3  The whole publication"
+            if list_width >= 72
+            else "1  One copy   2  A pair   3  The whole publication",
+            "gold",
+            list_width,
+        )
+        put(
+            7,
+            2,
+            "smallest 4-bit  /  4-bit + 8-bit  /  the repository as published",
+            "muted",
+            list_width,
+        )
+        rows = max(1, height - LIST_TOP - BOTTOM_ROWS)
+        state.offset = max(0, min(state.offset, state.cursor))
+        if state.cursor >= state.offset + rows:
+            state.offset = state.cursor - rows + 1
+        room = max(5, list_width - 27)
+        for i, v in enumerate(state.groups[state.offset : state.offset + rows]):
+            index = state.offset + i
+            selected = state.selected(v)
+            marker = "[!]" if not v["complete"] else "[x]" if selected else "[ ]"
+            companion = v in state.inventory["companions"]
+            # The full path stays on screen; identity is never collapsed.
+            label = ("companion / " if companion else "") + (
+                v["precision"] or v["name"]
+            )
+            label += " / " + v["name"]
+            left = clipped(label, room)
+            left += " " * max(0, room - cells(left))
+            right = f"{human_size(v['size_bytes']):>10} {v['file_count']:>3}f"
+            put(
+                LIST_TOP + i,
+                2,
+                f"{'›' if index == state.cursor else ' '} {marker} {left} {right}",
+                "focus" if index == state.cursor else "gold" if selected else "plain",
+                list_width,
+            )
+        below = len(state.groups) - (state.offset + rows)
+        status = f"{state.cursor + 1}/{len(state.groups)}  ·  Space keeps a complete group  ·  ? field guide"
+        if state.offset:
+            status += f"  ·  {state.offset} above"
+        if below > 0:
+            status += f"  ·  {below} more below"
+        put(LIST_TOP + rows, 2, status, "muted", list_width)
+        if spacious:
+            for y in range(5, height - BOTTOM_ROWS + 1):
+                put(y, divider, "│", "muted")
+            notes = wrapped(state.field_notes(), 33)
+            available = height - BOTTOM_ROWS - 5
+            shown = notes[:available]
+            if len(notes) > available and shown:
+                shown[-1] = "… ? opens the full guide"
+            for i, line in enumerate(shown):
+                put(5 + i, divider + 3, line, "gold" if line.isupper() else "muted", 33)
+        total = selection_totals(state.inventory["files"], state.include)
+        whole = selection_totals(state.inventory["files"], ["/*"])
+        amount = (">= " if total["unknown"] else "") + human_size(total["bytes"])
+        put(height - 7, 2, "─" * (width - 4), "muted")
+        for i, line in enumerate(wrapped([state.message], width - 4)[:2]):
+            put(height - 6 + i, 2, line, "muted")
+        put(
+            height - 4,
+            2,
+            f"YOUR COLLECTION  {amount} / {total['files']} files"
+            + (f" / {total['unknown']} sizes unknown" if total["unknown"] else ""),
+            "gold",
+        )
+        span = max(5, min(28, width - 36))
+        fraction = min(1, total["bytes"] / whole["bytes"]) if whole["bytes"] else 0
+        filled = int(span * fraction)
+        put(
+            height - 3,
+            2,
+            "━" * filled
+            + "·" * (span - filled)
+            + "  of "
+            + human_size(whole["bytes"])
+            + (" known bytes" if whole["unknown"] else " publication"),
+            "muted",
+        )
+        put(
+            height - 2,
+            2,
+            "↑↓ move  Space select  1/2/3 start  Enter review  ? learn  Q cancel"
+            if width >= 72
+            else "↑↓ move · Space · 1/2/3 · Enter · ? · Q cancel",
+            "gold",
+        )
+
     while True:
         height, width = screen.getmaxyx()
         screen.erase()
@@ -276,145 +437,11 @@ def _room(screen, state: CollectionState) -> list[str]:
             if key in {"q", "Q", "\x1b", "\x03"}:
                 raise KeyboardInterrupt
             continue
-        put(1, 2, "darsay / THE COLLECTION ROOM", "gold")
-        put(1, max(33, width - 29), "01 choose  /  02 review", "muted")
-        put(3, 2, state.inventory["source"], "gold")
-        put(
-            4,
-            2,
-            "Revision " + state.inventory["revision"] + " / metadata only",
-            "muted",
-        )
-        put(5, 2, "─" * (width - 4), "muted")
-        if state.page != "choose":
-            lines = wrapped(
-                state.field_notes() if state.page == "guide" else state.review_lines(),
-                width - 6,
-            )
-            count = height - 12
-            state.offset = min(state.offset, max(0, len(lines) - count))
-            for i, line in enumerate(lines[state.offset : state.offset + count]):
-                put(7 + i, 3, line, "gold" if line.isupper() else "plain")
-            put(
-                height - 4,
-                2,
-                f"Lines {state.offset + 1}-{min(len(lines), state.offset + count)} of {len(lines)} / up-down to scroll",
-                "muted",
-            )
-            put(
-                height - 2,
-                2,
-                "Enter: confirm scope & continue   Esc: refine   Q: cancel"
-                if state.page == "review"
-                else "Up/down: read   Esc: back   Q: cancel",
-                "gold",
-            )
+        masthead(height, width)
+        if state.page == "choose":
+            choose_page(height, width)
         else:
-            spacious = width >= 108
-            divider = width - 40 if spacious else width - 2
-            list_width = divider - 3
-            put(7, 2, "What would you like to keep?", "gold")
-            put(
-                9,
-                2,
-                "1  One considered copy     2  A comparison pair",
-                "gold",
-                list_width,
-            )
-            put(10, 2, "3  The whole publication", "gold", list_width)
-            put(
-                11,
-                2,
-                "4-bit starting point / 4 + 8-bit / every published file",
-                "muted",
-                list_width,
-            )
-            rows = max(1, height - 21)
-            state.offset = max(0, min(state.offset, state.cursor))
-            if state.cursor >= state.offset + rows:
-                state.offset = state.cursor - rows + 1
-            for i, v in enumerate(state.groups[state.offset : state.offset + rows]):
-                index = state.offset + i
-                selected = state.selected(v)
-                marker = "[!]" if not v["complete"] else "[x]" if selected else "[ ]"
-                companion = v in state.inventory["companions"]
-                label = ("companion / " if companion else "") + (
-                    v["precision"] or v["name"]
-                )
-                # Include the full path in the field guide; never collapse identity on screen.
-                label += " / " + v["name"]
-                room = max(5, list_width - 27)
-                left = clipped(label, room)
-                left += " " * max(
-                    0,
-                    room
-                    - sum(
-                        2 if unicodedata.east_asian_width(c) in {"W", "F"} else 1
-                        for c in left
-                    ),
-                )
-                right = f"{human_size(v['size_bytes']):>10} {v['file_count']:>3}f"
-                put(
-                    13 + i,
-                    2,
-                    f"{'›' if index == state.cursor else ' '} {marker} {left} {right}",
-                    "focus"
-                    if index == state.cursor
-                    else "gold"
-                    if selected
-                    else "plain",
-                    list_width,
-                )
-            put(
-                13 + rows,
-                2,
-                f"{state.cursor + 1}/{len(state.groups)}  /  Space keeps a complete group. ? opens its field guide.",
-                "muted",
-                list_width,
-            )
-            if spacious:
-                for y in range(7, height - 6):
-                    put(y, divider, "│", "muted")
-                notes = wrapped(state.field_notes(), 33)
-                for i, line in enumerate(notes[: height - 15]):
-                    put(
-                        7 + i,
-                        divider + 3,
-                        line,
-                        "gold" if line.isupper() else "muted",
-                        33,
-                    )
-            total = selection_totals(state.inventory["files"], state.include)
-            whole = selection_totals(state.inventory["files"], ["/*"])
-            amount = (">= " if total["unknown"] else "") + human_size(total["bytes"])
-            put(height - 6, 2, "─" * (width - 4), "muted")
-            put(height - 5, 2, state.message, "muted")
-            put(
-                height - 4,
-                2,
-                f"YOUR COLLECTION  {amount} / {total['files']} files"
-                + (f" / {total['unknown']} sizes unknown" if total["unknown"] else ""),
-                "gold",
-            )
-            span = max(5, min(28, width - 36))
-            fraction = min(1, total["bytes"] / whole["bytes"]) if whole["bytes"] else 0
-            filled = int(span * fraction)
-            put(
-                height - 3,
-                2,
-                "━" * filled
-                + "·" * (span - filled)
-                + "  of "
-                + human_size(whole["bytes"])
-                + (" known bytes" if whole["unknown"] else " publication"),
-                "muted",
-            )
-            put(
-                height - 2,
-                2,
-                "↑↓ move  Space select  1/2/3 start  Enter review  ? learn  Q cancel",
-                "gold",
-            )
+            reading_page(height, width)
         screen.refresh()
         result = state.key(screen.getkey())
         if result == "cancel":
