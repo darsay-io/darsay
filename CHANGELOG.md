@@ -69,6 +69,12 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Fixed
 
+- A bundle archived on this machine and never moved is no longer asked to
+  re-verify because the hostname flapped: `migrate`, `verify`, and
+  `doctor` compare a stable machine name (the hostname's first label, so a
+  macOS `.local` / DHCP suffix does not matter), settable with
+  `$DARSAY_MACHINE_ID`. Older records that stored a full hostname still
+  match the same machine.
 - `mv` / `cp` refuse before copying when a payload file is larger than the
   destination filesystem can hold — a model shard onto a FAT32 stick, which
   otherwise fails mid-copy with a cryptic errno. The refusal names the

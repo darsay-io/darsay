@@ -37,11 +37,11 @@ moves forward, readers do not move back. Each move is recorded under
 from __future__ import annotations
 
 import shlex
-import socket
 from copy import deepcopy
 from pathlib import Path
 
 from . import SCHEMA_VERSION, __version__
+from .identity import machine_name, same_machine
 from .schema import (
     ARTIFACT_TYPES,
     BUNDLE_METADATA_FILES,
@@ -225,7 +225,7 @@ def _verified_here(bundle_dir: Path, record: dict, payload: dict) -> str | None:
     if payload["missing"] or payload["size_mismatch"] or payload["extra"]:
         return None
     location = archive.get("location")
-    if not location or archive.get("host") != socket.gethostname():
+    if not location or not same_machine(archive.get("host"), machine_name()):
         return None
     try:
         if Path(location).resolve() != bundle_dir.resolve():

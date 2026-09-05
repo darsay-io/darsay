@@ -335,9 +335,9 @@ def import_bundle(
 
         now = utc_now()
         manifest["archive"]["location"] = str(dest.resolve())
-        import socket
+        from .identity import machine_name
 
-        manifest["archive"]["host"] = socket.gethostname()
+        manifest["archive"]["host"] = machine_name()
         manifest["archive"]["last_integrity_check"] = now
         manifest["archive"]["last_accessed"] = now
         manifest["archive"]["imported"] = {

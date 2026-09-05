@@ -20,7 +20,6 @@ import os
 import re
 import shlex
 import shutil
-import socket
 import stat
 import tempfile
 import time
@@ -29,6 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
+from .identity import machine_name, same_machine
 
 SCHEMA_VERSION = 1
 DOCTOR_DIR = ".doctor"
@@ -1071,7 +1071,7 @@ def _transfer_lock_state(vault: Path, bundle: Path) -> str:
                 )
             except (KeyError, TypeError, ValueError):
                 copied = False
-        same_host = owner.get("host") == socket.gethostname()
+        same_host = same_machine(owner.get("host"), machine_name())
         return (
             "stale"
             if not owner or copied or (same_host and not _pid_alive(pid))
@@ -1101,7 +1101,7 @@ def _dead_doctor_lock_snapshot(bundle_fd: int, snapshot: dict) -> bool:
         return False
     return (
         owner.get("purpose") == "darsay doctor repair"
-        and owner.get("host") == socket.gethostname()
+        and same_machine(owner.get("host"), machine_name())
         and same_bundle
         and not _pid_alive(pid)
     )
@@ -1130,7 +1130,7 @@ def _bundle_mutation_lock(
         bundle_info = os.fstat(bundle_fd)
         owner = {
             "pid": os.getpid(),
-            "host": socket.gethostname(),
+            "host": machine_name(),
             "started": _utc_now(),
             "purpose": "darsay doctor repair",
             "doctor_run_id": owner_run_id,
@@ -1805,7 +1805,7 @@ def _scan(
                 with contextlib.suppress(OSError):
                     lock_bytes = lock.read_bytes()
                 owner = {}
-            same_host = owner.get("host") == socket.gethostname()
+            same_host = same_machine(owner.get("host"), machine_name())
             try:
                 pid = int(owner.get("pid") or 0)
             except (TypeError, ValueError):
@@ -2035,7 +2035,7 @@ def _apply_finding(vault: Path, run: Path, finding: dict) -> dict:
                 owner = {}
         except (OSError, UnicodeError, json.JSONDecodeError):
             owner = {}
-        same_host = owner.get("host") == socket.gethostname()
+        same_host = same_machine(owner.get("host"), machine_name())
         try:
             pid = int(owner.get("pid") or 0)
         except (TypeError, ValueError):

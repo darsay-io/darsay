@@ -22,12 +22,13 @@ import json
 import os
 import platform
 import shutil
-import socket
 import subprocess
 import sys
 import tempfile
 from fnmatch import fnmatch
 from pathlib import Path
+
+from .identity import machine_name
 
 HYDRATION_FILE = "hydration.json"
 HYDRATION_SCHEMA = 1
@@ -973,7 +974,7 @@ def _record_tested_hardware(
     """One entry per (host, device, engine), refreshed on each successful run."""
     entry = {
         "at": now,
-        "host": socket.gethostname(),
+        "host": machine_name(),
         "os": platform.platform(),
         "chip": _chip(),
         "device": run_record["device"],

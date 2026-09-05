@@ -14,7 +14,6 @@ import json
 import os
 import shutil
 import signal
-import socket
 import subprocess
 import sys
 import threading
@@ -33,6 +32,7 @@ from pathlib import Path, PurePosixPath
 
 from . import __version__
 from .hashing import hash_file, iter_payload_files
+from .identity import machine_name
 
 TRANSFER_VERSION = 1
 TRANSFER_FILE = "transfer.json"
@@ -556,7 +556,7 @@ def transfer_lock(bundle_dir: Path, progress=print):
     path = bundle_dir / LOCK_FILE
     ours = {
         "pid": os.getpid(),
-        "host": socket.gethostname(),
+        "host": machine_name(),
         "started": _utc_now(),
         "bundle": _bundle_identity(bundle_dir),
     }
@@ -723,7 +723,7 @@ def begin_session(
         "files_completed": 0,
         "retries": 0,
         "reconnects": 0,
-        "host": socket.gethostname(),
+        "host": machine_name(),
     }
     if shard is not None:
         session["shard"] = f"{shard[0]}/{shard[1]}"
@@ -2464,7 +2464,7 @@ def _release_sources(
     progress("Releasing source payload files dest already holds as verified...")
     dest_real = destination.resolve()
     dest_vault = destination.parent.parent.name
-    host = socket.gethostname()
+    host = machine_name()
     for source_dir, source_ledger in sources:
         if source_dir.resolve() == dest_real:
             # A source that *is* the destination (a re-run) has nothing to

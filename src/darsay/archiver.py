@@ -27,12 +27,12 @@ import os
 import platform
 import shlex
 import shutil
-import socket
 from datetime import datetime, timezone
 from pathlib import Path
 
 from . import SCHEMA_VERSION, __version__
 from .hashing import bundle_hash
+from .identity import machine_name
 from .licensing import build_licensing_record
 from .lineage import lineage_of_source
 from .metadata import estimate_runtime, extract_dataset_metadata, extract_model_metadata
@@ -782,7 +782,7 @@ def _register_bundle(
             "date_archived": now,
             "archived_by": None,
             "location": str(bundle_dir.resolve()),
-            "host": socket.gethostname(),
+            "host": machine_name(),
             "storage_tier": "local-disk",
             "backup_status": "none",
             "replicas": [],

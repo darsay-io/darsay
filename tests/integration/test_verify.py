@@ -4,6 +4,7 @@ import json
 
 from darsay.archiver import load_manifest
 from darsay.hashing import hash_file
+from darsay.identity import machine_name
 from darsay.verify import verify_bundle
 from tests.conftest import silent
 from tests.integration.conftest import archive_quiet
@@ -80,7 +81,6 @@ def test_verify_does_not_heal_upstream_mismatch(vault, test_provider):
 def test_verify_records_where_it_ran(tmp_path, vault, test_provider, capsys):
     """An rsync'd copy verified where it landed carries a true location."""
     import shutil
-    import socket
 
     from darsay.cli import main
 
@@ -92,7 +92,7 @@ def test_verify_records_where_it_ran(tmp_path, vault, test_provider, capsys):
     # In place: nothing to say, nothing changes.
     report = verify_bundle(bundle, progress=silent)
     assert "relocated_from" not in report
-    assert report["location"] == old and report["host"] == socket.gethostname()
+    assert report["location"] == old and report["host"] == machine_name()
 
     other = tmp_path / "nas"
     copy = other / bundle.parent.name / bundle.name
@@ -101,8 +101,8 @@ def test_verify_records_where_it_ran(tmp_path, vault, test_provider, capsys):
     out = capsys.readouterr().out
     assert "Verification: PASS" in out
     assert (
-        f"Location: {copy.resolve()} on {socket.gethostname()}  "
-        f"(the record said {old} on {socket.gethostname()})"
+        f"Location: {copy.resolve()} on {machine_name()}  "
+        f"(the record said {old} on {machine_name()})"
     ) in out
 
     manifest = load_manifest(copy)

@@ -30,8 +30,9 @@ import errno
 import os
 import shlex
 import shutil
-import socket
 from pathlib import Path
+
+from .identity import machine_name
 
 # Bundle-root files that describe *this* vault or *this* process, not the
 # bundle. They stay behind; everything else (payload, manifest, curation,
@@ -703,7 +704,7 @@ def _stamp_new_home(
             move["replaced"] = list(landed["replaced"])
     archive.setdefault("moves", []).append(move)
     archive["location"] = str(home.resolve())
-    archive["host"] = socket.gethostname()
+    archive["host"] = machine_name()
     archive["last_accessed"] = now
     write_manifest(bundle_dir, manifest)
     write_bundle_readme(bundle_dir, manifest)
@@ -729,11 +730,11 @@ def _stamp_replica(bundle_dir: Path, *, home: Path, other: Path, now: str) -> No
         for entry in (archive.get("replicas") or [])
         if entry.get("location") not in (home_loc, other_loc)
     ]
-    replicas.append({"at": now, "location": other_loc, "host": socket.gethostname()})
+    replicas.append({"at": now, "location": other_loc, "host": machine_name()})
     archive["replicas"] = replicas
     archive["backup_status"] = "replicated"
     archive["location"] = home_loc
-    archive["host"] = socket.gethostname()
+    archive["host"] = machine_name()
     archive["last_accessed"] = now
     write_manifest(bundle_dir, manifest)
     write_bundle_readme(bundle_dir, manifest)

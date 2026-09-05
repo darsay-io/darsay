@@ -592,6 +592,34 @@ def test_migrate_says_when_the_records_own_verification_still_stands(vault, caps
     ) in out
 
 
+def test_migrate_treats_a_flapped_hostname_as_the_same_machine(
+    vault, capsys, monkeypatch
+):
+    """The record was verified here, but the hostname gained a .local suffix
+    since. migrate must still say `done`, not send the operator to re-hash a
+    payload nothing moved."""
+    import darsay.identity as identity
+
+    bundle = place(vault, TOY)
+    record = json.loads((bundle / "manifest.json").read_text(encoding="utf-8"))
+    record["archive"]["location"] = str(bundle.resolve())
+    record["archive"]["host"] = "workshop"  # the short name the record holds
+    (bundle / "manifest.json").write_text(
+        json.dumps(record, indent=2) + "\n", encoding="utf-8"
+    )
+    date = record["validation"]["checksum_verification"]["at"][:10]
+
+    # Now this machine reports the same name with a domain suffix.
+    monkeypatch.setattr(identity.socket, "gethostname", lambda: "workshop.local")
+    assert main(["--vault", str(vault), "migrate", str(bundle)]) == 0
+    out = capsys.readouterr().out
+    assert "next:" not in out
+    assert (
+        f"done:  the record says the payload passed verification at this path on {date}"
+        in out
+    )
+
+
 def test_migrate_all_sends_only_the_arrivals_to_verify(vault, capsys):
     import socket
 

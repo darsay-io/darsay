@@ -9,10 +9,10 @@ verification.json (history), and VERIFICATION.md (human report).
 from __future__ import annotations
 
 import json
-import socket
 from pathlib import Path
 
 from .hashing import bundle_hash, write_sha256sums
+from .identity import machine_name, same_machine
 from .schema import check_completeness, payload_root
 
 MAX_HISTORY = 50
@@ -137,10 +137,10 @@ def record_verification(
         manifest["security"]["integrity_status"] = "verified-against-upstream"
 
     here = str((at or bundle_dir).resolve())
-    host = socket.gethostname()
+    host = machine_name()
     archive = manifest["archive"]
     relocated_from = None
-    if archive.get("location") != here or archive.get("host") != host:
+    if archive.get("location") != here or not same_machine(archive.get("host"), host):
         relocated_from = {
             "location": archive.get("location"),
             "host": archive.get("host"),
