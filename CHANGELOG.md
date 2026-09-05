@@ -9,6 +9,78 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Added
+
+- **Whole-drive verbs — `verify`, `mv`, and `cp` take more than one bundle.**
+  `--all` acts on every registered bundle in the vault, the way a whole drive
+  is actually moved or attested. `verify --all` re-hashes each and exits
+  non-zero naming any that failed; `cp --all VAULT` / `mv --all VAULT` copy or
+  move the lot, each verified at the destination before the source is kept or
+  removed. Naming bundles and passing `--all` together is refused, so the two
+  ways never half-combine.
+- **`darsay list <other-vault>` — what a drive holds that this vault does
+  not.** It overlays another vault — a mounted drive — against this one,
+  read-only: each bundle on the drive shows as `new` (not here), `have`
+  (here, same bundle hash), `differ` (here, bytes differ), or `partial`.
+  `--ids` prints the actionable set (everything not already identical here),
+  for piping into `mv` / `cp`.
+- **The vault the working directory is in.** With neither `--vault` nor
+  `$DARSAY_HOME` set, darsay now finds the vault the working directory is in
+  — a git-style walk up to the nearest ancestor that holds darsay bundles —
+  before falling back to `~/darsay`, so `cd /Volumes/drive && darsay list`
+  reads the drive. The home directory and above are never treated as a vault,
+  and the chosen vault is announced.
+- `darsay list` now points at bundles on disk that are not in the
+  `<name>/<revision>` layout it reads — a bundle dragged onto a drive by
+  hand at the wrong depth, which used to be invisible. It is an advisory
+  footnote naming each path and the `cp` that places it; the canonical walk
+  is unchanged, so nothing acts on a loose bundle automatically.
+- `mv` / `cp` refuse before copying when a payload file is larger than the
+  destination filesystem can hold — a model shard onto a FAT32 stick, which
+  otherwise fails mid-copy with a cryptic errno. The refusal names the
+  filesystem, the files over the 4 GiB limit, and the fix (reformat as
+  exFAT). exFAT and every modern filesystem are unaffected.
+
+### Changed
+
+- An explicitly named vault that does not exist is reported as such, and
+  a removable disk that is not mounted is named as the likely cause:
+  `list`, `du`, `verify`, and `doctor` say so instead of `no bundles` /
+  `no bundle matching`, and `mv` / `cp` refuse to copy onto an empty stub
+  where a volume should be mounted (the folder an eject leaves behind),
+  which would silently fill the boot disk. The default `~/darsay` missing
+  on first run is still a normal empty vault, not an error.
+- The FAQ gained the sneakernet routines these verbs are for: moving,
+  copying, or attesting a whole drive at once; reading a mounted drive by
+  `cd`-ing into it; asking a drive what it holds that this vault does not;
+  and the two refusals above (an unmounted mount point, a FAT32 stick).
+
+### Fixed
+
+- A bundle archived on this machine and never moved is no longer asked to
+  re-verify because the hostname flapped: `migrate`, `verify`, and
+  `doctor` compare a stable machine name (the hostname's first label, so a
+  macOS `.local` / DHCP suffix does not matter), settable with
+  `$DARSAY_MACHINE_ID`. Older records that stored a full hostname still
+  match the same machine.
+- `mv` / `cp` now flush the copied payload and the rewritten record to
+  the medium before printing that the copy is verified, and the manifest
+  is written atomically (temp, fsync, rename, fsync the directory). On a
+  removable disk the verification read and the success line could both come
+  from the page cache, so a drive pulled right after "Copied … verified"
+  could keep a record that said verified over bytes that never landed;
+  fsync closes that window across a same-filesystem rename too.
+- Every pasted next-step command that names a bundle by id now carries
+  `--vault` when the vault is not the default one, so `migrate`'s verify
+  line, `info`'s hydrate hint, `archive`'s completion and already-exists
+  hints, and `hydrate`'s run hint resolve from where they are pasted. A
+  bundle named by a path prints the path, which needs no vault.
+- `darsay migrate` on a bundle addressed by a path outside the vault — an
+  arrival migrated where rsync left it, as the refusal's own hint spells
+  it — ends with `darsay verify <that path>`. The id it printed before is
+  a search of the vault, so the pasted command answered `no bundle
+  matching`. `info` names such a bundle the same way in its hydrate hint.
+
 ## [0.14.15] - 2026-09-05
 
 
@@ -21,31 +93,6 @@ Tool version (`darsay.__version__`) is independent of
   the guidance. No quality, hardware-fit, or recreation-cost claim is inferred
   from an encoding label.
 
-- `mv` / `cp` refuse before copying when a payload file is larger than the
-  destination filesystem can hold — a model shard onto a FAT32 stick, which
-  otherwise fails mid-copy with a cryptic errno. The refusal names the
-  filesystem, the files over the 4 GiB limit, and the fix (reformat as
-  exFAT). exFAT and every modern filesystem are unaffected.
-- `darsay list` now points at bundles on disk that are not in the
-  `<name>/<revision>` layout it reads — a bundle dragged onto a drive by
-  hand at the wrong depth, which used to be invisible. It is an advisory
-  footnote naming each path and the `cp` that places it; the canonical walk
-  is unchanged, so nothing acts on a loose bundle automatically.
-- `darsay list <other-vault>` overlays another vault — a mounted drive —
-  against this one, read-only: each bundle on the drive shows as `new`
-  (not here), `have` (here, same bundle hash), `differ` (here, bytes
-  differ), or `partial`. `--ids` prints the actionable set (everything not
-  already identical here), for piping into `mv`/`cp`.
-- `verify`, `mv`, and `cp` take more than one bundle, and `--all` acts on
-  every registered bundle in the vault — the way a whole drive is actually
-  moved or attested. `verify --all` re-hashes each and exits non-zero
-  naming any that failed; `cp --all VAULT` / `mv --all VAULT` copy or move
-  the lot. Naming bundles and passing `--all` together is refused.
-- With neither `--vault` nor `$DARSAY_HOME` set, darsay now finds the vault
-  the working directory is in — a git-style walk up to the nearest ancestor
-  that holds darsay bundles — before falling back to `~/darsay`, so
-  `cd /Volumes/drive && darsay list` reads the drive. The home directory and
-  above are never treated as a vault, and the chosen vault is announced.
 ### Changed
 
 - The whole publication has no selectors. `/*` — typed, chosen in the
@@ -91,39 +138,6 @@ Tool version (`darsay.__version__`) is independent of
 - Classification keeps or skips a complete GGUF shard group together.
   Hydration selects its first shard and refuses incomplete groups. Estimates
   respect the selection frozen in an existing archive pin.
-
-- An explicitly named vault that does not exist is reported as such, and
-  a removable disk that is not mounted is named as the likely cause:
-  `list`, `du`, `verify`, and `doctor` say so instead of `no bundles` /
-  `no bundle matching`, and `mv` / `cp` refuse to copy onto an empty stub
-  where a volume should be mounted (the folder an eject leaves behind),
-  which would silently fill the boot disk. The default `~/darsay` missing
-  on first run is still a normal empty vault, not an error.
-### Fixed
-
-- A bundle archived on this machine and never moved is no longer asked to
-  re-verify because the hostname flapped: `migrate`, `verify`, and
-  `doctor` compare a stable machine name (the hostname's first label, so a
-  macOS `.local` / DHCP suffix does not matter), settable with
-  `$DARSAY_MACHINE_ID`. Older records that stored a full hostname still
-  match the same machine.
-- `mv` / `cp` now flush the copied payload and the rewritten record to
-  the medium before printing that the copy is verified, and the manifest
-  is written atomically (temp, fsync, rename, fsync the directory). On a
-  removable disk the verification read and the success line could both come
-  from the page cache, so a drive pulled right after "Copied … verified"
-  could keep a record that said verified over bytes that never landed;
-  fsync closes that window across a same-filesystem rename too.
-- Every pasted next-step command that names a bundle by id now carries
-  `--vault` when the vault is not the default one, so `migrate`'s verify
-  line, `info`'s hydrate hint, `archive`'s completion and already-exists
-  hints, and `hydrate`'s run hint resolve from where they are pasted. A
-  bundle named by a path prints the path, which needs no vault.
-- `darsay migrate` on a bundle addressed by a path outside the vault — an
-  arrival migrated where rsync left it, as the refusal's own hint spells
-  it — ends with `darsay verify <that path>`. The id it printed before is
-  a search of the vault, so the pasted command answered `no bundle
-  matching`. `info` names such a bundle the same way in its hydrate hint.
 
 ## [0.14.14] - 2026-09-03
 
