@@ -237,6 +237,58 @@ def test_mv_refusals(tmp_path, vault, test_provider):
     assert (other / "model" / "extra-print.gguf").is_file()
 
 
+def test_cp_all_copies_every_registered_bundle(tmp_path, test_provider, capsys):
+    src = tmp_path / "src"
+    src.mkdir()
+    test_provider.add_repo("acme/toy", model_files())
+    test_provider.add_repo("acme/other", model_files())
+    archive_quiet("test:acme/toy", vault=src)
+    archive_quiet("test:acme/other", vault=src)
+    dest = tmp_path / "drive"
+    dest.mkdir()
+
+    assert main(["--vault", str(src), "cp", "--all", str(dest)]) == 0
+    ids = {p.parent.parent.name for p in dest.glob("*/*/manifest.json")}
+    assert ids == {"test--acme--toy", "test--acme--other"}
+    # Sources kept: cp is a replica.
+    assert (src / "test--acme--toy" / "aaaaaaaaaaaa" / "manifest.json").is_file()
+
+
+def test_verify_all_and_named_many(tmp_path, test_provider, capsys):
+    src = tmp_path / "src"
+    src.mkdir()
+    test_provider.add_repo("acme/toy", model_files())
+    test_provider.add_repo("acme/other", model_files())
+    a = archive_quiet("test:acme/toy", vault=src)
+    b = archive_quiet("test:acme/other", vault=src)
+
+    assert main(["--vault", str(src), "verify", "--all"]) == 0
+    out = capsys.readouterr().out
+    assert "Verified 2 bundles: all pass." in out
+
+    # A named pair verifies too; a summary only for more than one.
+    assert main(["--vault", str(src), "verify", str(a), str(b)]) == 0
+    assert "Verified 2 bundles: all pass." in capsys.readouterr().out
+
+    # A tampered payload makes the batch exit non-zero and name the bundle.
+    (b / "model" / "model.safetensors").write_bytes(b"tampered")
+    assert main(["--vault", str(src), "verify", "--all"]) == 1
+    out = capsys.readouterr().out
+    assert "1 FAILED" in out and "test--acme--other" in out
+
+
+def test_batch_verbs_refuse_bundles_with_all(tmp_path, test_provider):
+    src = tmp_path / "src"
+    src.mkdir()
+    _registered_bundle(src, test_provider)
+    dest = tmp_path / "drive"
+    dest.mkdir()
+    with pytest.raises(SystemExit, match="not both"):
+        main(["--vault", str(src), "cp", "--all", BUNDLE_ID, str(dest)])
+    with pytest.raises(SystemExit, match="needs a bundle"):
+        main(["--vault", str(src), "verify"])
+
+
 def test_cp_refuses_an_unmounted_volume_stub(tmp_path, test_provider, monkeypatch):
     """An empty folder where a volume mounts but is not mounted: cp refuses
     rather than filling the boot disk (the leftover after an eject)."""

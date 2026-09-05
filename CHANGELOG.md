@@ -69,6 +69,11 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Fixed
 
+- `verify`, `mv`, and `cp` take more than one bundle, and `--all` acts on
+  every registered bundle in the vault — the way a whole drive is actually
+  moved or attested. `verify --all` re-hashes each and exits non-zero
+  naming any that failed; `cp --all VAULT` / `mv --all VAULT` copy or move
+  the lot. Naming bundles and passing `--all` together is refused.
 - An explicitly named vault that does not exist is reported as such, and
   a removable disk that is not mounted is named as the likely cause:
   `list`, `du`, `verify`, and `doctor` say so instead of `no bundles` /

@@ -12,7 +12,7 @@ immutable payload, recorded facts, still loadable as-is.
     darsay classify <owner>/<name>    preservation evidence and retention per weight set
     darsay archive huggingface:Qwen/Qwen3-0.6B    download + hash + manifest + reports
     darsay archive datasets/<owner>/<name>        archive a dataset (payload under data/)
-    darsay verify  <bundle>           re-hash and compare against manifest
+    darsay verify  <bundle>… | --all  re-hash and compare against manifest
     darsay smoke   <bundle> [--inference]
     darsay list [--json]              vault as a catalog view (STATUS / SOURCE / HAVE)
     darsay list CATALOG               overlay a catalog on this vault
@@ -31,8 +31,8 @@ immutable payload, recorded facts, still loadable as-is.
     darsay export  <bundle> [-o DIR]  pack into a single deterministic .mvb.tar
     darsay import  <file.mvb.tar>     unpack + verify into the vault (an older record is migrated as it lands)
     darsay migrate <bundle> | --all   bring an older record (manifest.json) to this darsay's schema; payload untouched
-    darsay mv      <bundle> VAULT     move a registered bundle to another vault (verify, then remove)
-    darsay cp      <bundle> VAULT     copy a registered bundle into another vault (verify there, keep the source)
+    darsay mv      <bundle>… VAULT    move registered bundles to another vault (verify, then remove); --all for the whole vault
+    darsay cp      <bundle>… VAULT    copy registered bundles into another vault (verify there, keep source); --all for the whole vault
     darsay assemble <partial> […]     combine matching partials offline
     darsay hydrate <bundle>           build a runnable env for the bundle
     darsay run     <bundle> [PROMPT]  hydrate if needed, then generate (offline)
@@ -110,6 +110,40 @@ def _bundle_command(
     else:
         tokens = ["darsay", verb, str(bundle_dir), *trailing]
     return shlex.join(tokens)
+
+
+def _resolve_bundles(args, *, require_manifest: bool, verb: str) -> list[Path]:
+    """The bundles a batch verb acts on.
+
+    ``--all`` is every registered bundle in the vault (partials are not
+    records and are skipped); otherwise each named spec, resolved. Refuses
+    an empty invocation and ``--all`` with named bundles, so the two ways
+    never half-combine.
+    """
+    from .vault import (
+        bundle_records,
+        resolve_bundle,
+        using_implicit_vault,
+        vault_absence,
+    )
+
+    vault = _vault_path(args)
+    if getattr(args, "all", False):
+        if args.bundles:
+            raise SystemExit(f"error: name bundles or pass --all to {verb}, not both")
+        absent = vault_absence(vault)
+        if absent and not using_implicit_vault(args.vault):
+            raise SystemExit(f"error: {absent}: {vault}")
+        return [Path(r["path"]) for r in bundle_records(vault) if not r.get("partial")]
+    if not args.bundles:
+        raise SystemExit(
+            f"error: {verb} needs a bundle (path, id, or unique prefix), or --all "
+            "for every registered bundle in the vault"
+        )
+    return [
+        resolve_bundle(vault, spec, require_manifest=require_manifest)
+        for spec in args.bundles
+    ]
 
 
 def _positive_float(value: str) -> float:
@@ -930,8 +964,26 @@ def _archive_next_from_board(args, vault, board_hit):
 def cmd_verify(args) -> int:
     from .verify import verify_bundle
 
-    report = verify_bundle(_bundle_dir(args))
-    return 0 if report["result"] == "pass" else 1
+    bundles = _resolve_bundles(args, require_manifest=True, verb="verify")
+    if not bundles:
+        print("No registered bundles to verify.")
+        return 0
+    failed = []
+    for i, bundle in enumerate(bundles):
+        if i:
+            print()
+        report = verify_bundle(bundle)
+        if report["result"] != "pass":
+            failed.append(bundle)
+    if len(bundles) > 1:
+        print()
+        if failed:
+            print(f"Verified {len(bundles)} bundles: {len(failed)} FAILED.")
+            for bundle in failed:
+                print(f"  fail  {bundle}")
+        else:
+            print(f"Verified {len(bundles)} bundles: all pass.")
+    return 1 if failed else 0
 
 
 def cmd_smoke(args) -> int:
@@ -1721,10 +1773,17 @@ def cmd_migrate(args) -> int:
 def cmd_mv(args) -> int:
     from .relocate import move_bundle
 
+    dest = Path(args.dest_vault).expanduser()
     # Resolve partials too, so a partial gets the verb that fits it instead
     # of "no manifest.json"; move_plan does the refusing.
-    bundle = _bundle_dir(args, require_manifest=False)
-    move_bundle(bundle, Path(args.dest_vault).expanduser(), dry_run=args.dry_run)
+    bundles = _resolve_bundles(args, require_manifest=False, verb="move")
+    if not bundles:
+        print("No registered bundles to move.")
+        return 0
+    for i, bundle in enumerate(bundles):
+        if i:
+            print()
+        move_bundle(bundle, dest, dry_run=args.dry_run)
     if args.dry_run:
         _dry_run_done(args, "nothing copied, nothing removed", "move")
     return 0
@@ -1733,8 +1792,15 @@ def cmd_mv(args) -> int:
 def cmd_cp(args) -> int:
     from .relocate import copy_bundle
 
-    bundle = _bundle_dir(args, require_manifest=False)
-    copy_bundle(bundle, Path(args.dest_vault).expanduser(), dry_run=args.dry_run)
+    dest = Path(args.dest_vault).expanduser()
+    bundles = _resolve_bundles(args, require_manifest=False, verb="copy")
+    if not bundles:
+        print("No registered bundles to copy.")
+        return 0
+    for i, bundle in enumerate(bundles):
+        if i:
+            print()
+        copy_bundle(bundle, dest, dry_run=args.dry_run)
     if args.dry_run:
         _dry_run_done(args, "nothing copied", "copy")
     return 0
@@ -2211,8 +2277,13 @@ def build_parser() -> argparse.ArgumentParser:
 
     bundle_help = "path, bundle id (name@revision12 from `list`), or a unique prefix"
 
-    p = add_cmd("verify", help="re-hash a bundle and compare against its manifest")
-    p.add_argument("bundle", help=bundle_help)
+    p = add_cmd("verify", help="re-hash bundles and compare against their manifests")
+    p.add_argument("bundles", nargs="*", metavar="BUNDLE", help=bundle_help)
+    p.add_argument(
+        "--all",
+        action="store_true",
+        help="verify every registered bundle in the vault",
+    )
     p.set_defaults(func=cmd_verify)
 
     p = add_cmd("smoke", help="run smoke tests on a bundle")
@@ -2587,15 +2658,20 @@ def build_parser() -> argparse.ArgumentParser:
             "is copied)"
         ),
     )
-    p.add_argument("bundle", help=bundle_help)
+    p.add_argument("bundles", nargs="*", metavar="BUNDLE", help=bundle_help)
     p.add_argument(
         "dest_vault",
         metavar="VAULT",
         help="destination vault root; must already exist (an unmounted disk is not a vault)",
     )
+    p.add_argument(
+        "--all",
+        action="store_true",
+        help="move every registered bundle in the source vault",
+    )
     _add_dry_run(
         p,
-        "print where the bundle would land and how (rename, copy + verify, or "
+        "print where each bundle would land and how (rename, copy + verify, or "
         "land on what is already there); move nothing",
     )
     p.set_defaults(func=cmd_mv)
@@ -2608,13 +2684,18 @@ def build_parser() -> argparse.ArgumentParser:
             "(run it again to refresh a backup — only what differs is copied)"
         ),
     )
-    p.add_argument("bundle", help=bundle_help)
+    p.add_argument("bundles", nargs="*", metavar="BUNDLE", help=bundle_help)
     p.add_argument(
         "dest_vault",
         metavar="VAULT",
         help="destination vault root; must already exist (an unmounted disk is not a vault)",
     )
-    _add_dry_run(p, "print where the copy would land and what it costs; copy nothing")
+    p.add_argument(
+        "--all",
+        action="store_true",
+        help="copy every registered bundle in the source vault",
+    )
+    _add_dry_run(p, "print where each copy would land and what it costs; copy nothing")
     p.set_defaults(func=cmd_cp)
 
     p = add_cmd(
