@@ -160,7 +160,9 @@ def canonical_source(source: str) -> str:
 
 
 def include_key(include: list[str] | None) -> tuple[str, ...]:
-    return tuple(sorted(include or ()))
+    """A selection's identity. ``/*`` names the whole repository: no selection at all."""
+    patterns = tuple(sorted(include or ()))
+    return () if patterns == ("/*",) else patterns
 
 
 def entry_key(source: str, revision: str | None, include: list[str] | None) -> tuple:

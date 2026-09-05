@@ -184,14 +184,14 @@ class CollectionState:
             lines += [
                 "Multiple variants form an archive collection, not one runnable model. Prepare a runtime with one encoding and matching companions."
             ]
-        lines += [
-            "",
-            "PINNED REVISION",
-            self.inventory["revision"],
-            "",
-            "EXACT INCLUDE SELECTORS",
-        ]
-        lines += self.include
+        lines += ["", "PINNED REVISION", self.inventory["revision"], ""]
+        if "/*" in self.include:
+            lines += [
+                "SCOPE",
+                "The whole repository at this revision: no include selectors. What the archive retains inside it is a separate, recorded decision.",
+            ]
+        else:
+            lines += ["EXACT INCLUDE SELECTORS", *self.include]
         lines += [
             "",
             GUIDE["recovery"]["label"],

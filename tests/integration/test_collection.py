@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from darsay.archiver import load_manifest
@@ -53,6 +55,33 @@ def test_chosen_collection_pins_one_include_union(vault, test_provider):
     assert (bundle / "model/README.md").is_file()
     assert not (bundle / "model/mmproj-F16.gguf").exists()
     assert not (bundle / "model/model.safetensors").exists()
+
+
+def test_the_whole_publication_is_the_repository_itself(vault, test_provider):
+    from darsay.catalog import include_key
+
+    pack(test_provider)
+    assert include_key(["/*"]) == include_key(None)
+    bundle = archive_quiet("test:acme/pack", vault=vault, choose=lambda _: ["/*"])
+    subset = load_manifest(bundle)["source"]["subset"]
+    # No subset, or the default policy's own record — never a ``/*`` selector.
+    assert subset is None or (subset.get("policy") and subset["include"] != ["/*"])
+    for name in ("model.safetensors", "model-Q4_K_M.gguf", "model-Q8_0.gguf"):
+        assert (bundle / "model" / name).is_file()
+
+    # Typed by hand it is the same scope: an unqualified rerun resumes it
+    # without a prompt or a refusal, and --full is not a different identity.
+    other = vault.parent / "other-vault"
+    archive_quiet("test:acme/pack", vault=other, include=["/*"], dry_run=True)
+    ledger = json.loads(next(other.glob("*/*/transfer.json")).read_text())
+    assert (ledger.get("subset") or {}).get("include") != ["/*"]
+    archive_quiet(
+        "test:acme/pack",
+        vault=other,
+        choose=lambda _: pytest.fail("a resumed pin must not prompt"),
+        resume_scope=True,
+        dry_run=True,
+    )
 
 
 @pytest.mark.parametrize(

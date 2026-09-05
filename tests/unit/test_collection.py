@@ -51,6 +51,8 @@ def test_starting_points_and_actual_scope(inventory):
     }
     assert state.key("\n") is None
     assert state.page == "review"
+    review = " ".join(state.review_lines())
+    assert "no include selectors" in review and "/*" not in review
     assert state.key("\n") == "confirm"
 
 

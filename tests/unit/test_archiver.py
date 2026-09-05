@@ -123,7 +123,12 @@ def test_pin_scope_refuses_a_different_collection():
         _check_pin_scope(["*.gguf", "*Q4_K_M*"], ledger)
     with pytest.raises(SystemExit, match="full file set"):
         _check_pin_scope(["*Q4*"], {"subset": None})
+    # ``/*`` is the repository itself, whichever side of the comparison it is on.
     _check_pin_scope(None, {"subset": {"include": ["/*"]}}, full=True)
+    _check_pin_scope(None, {"subset": {"include": ["/*"]}})
+    _check_pin_scope(["/*"], {"subset": None})
+    with pytest.raises(SystemExit, match="full file set"):
+        _check_pin_scope(["/*", "*Q4*"], {"subset": None})
 
 
 def test_load_manifest_missing_kind_is_implied_on_1x(tmp_path):

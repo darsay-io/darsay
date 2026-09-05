@@ -182,6 +182,8 @@ def _check_pin_scope(
 
     subset = ledger.get("subset") or {}
     pinned = subset.get("include")
+    if include_key(pinned) == ():  # ``/*`` on a pin is the repository itself
+        pinned = None
     if include_key(include) == include_key(pinned):
         return
     if pinned is None:
@@ -196,8 +198,6 @@ def _check_pin_scope(
             "  hint: one source/revision has one collection per vault; combine variants or use separate vaults"
         )
     if full:
-        if pinned == ["/*"]:
-            return
         raise SystemExit(
             f"error: this pin is a subset {pinned}; --full cannot widen it\n"
             "  hint: --force --full re-pins the full file set"
@@ -255,7 +255,13 @@ def archive(
     ``resume_scope=True`` lets an unqualified direct-source command resume
     the recorded subset without repeating its includes. Board/catalog jobs
     keep this false: their row's scope is a requirement, not a new choice.
+
+    ``/*`` — typed, chosen in the picker, or carried by a board row — is the
+    repository itself: no selectors, the same identity and default retention
+    policy as an unqualified command. ``full`` is the retention switch that
+    keeps hash-identical duplicates too.
     """
+    from .catalog import include_key
     from .config import free_space_floor, offline_patience, rate_cap
     from .readme_gen import human_size
     from .transfer import (
@@ -280,6 +286,10 @@ def archive(
         transfer_plan,
     )
 
+    # A stated scope — even ``/*`` — is a decision the picker must not revisit.
+    stated = bool(include) or full
+    if include_key(include) == ():
+        include = None
     ref = source if isinstance(source, SourceRef) else parse_source(source)
     provider = get_provider(ref.provider)
     floor = free_space_floor(vault, min_free)
@@ -297,7 +307,7 @@ def archive(
             f"{pinned['revision'][:12]} (no metadata refresh) ..."
         )
         snapshot = None
-        if resume_scope and not include and not full and not force:
+        if resume_scope and not stated and not force:
             include = (pinned.get("subset") or {}).get("include")
             if include:
                 progress(f"Collection scope: resuming the pinned selectors {include}")
@@ -330,8 +340,7 @@ def archive(
         and snapshot is not None
         and resume is None
         and ref.artifact_type == "model"
-        and not include
-        and not full
+        and not stated
         and shard is None
         and not (bundle_dir / "manifest.json").exists()
     ):
@@ -339,7 +348,7 @@ def archive(
         if selected is not None:
             if not selected:
                 raise SystemExit("No collection selected; no archive has started.")
-            include = selected
+            include = None if include_key(selected) == () else list(selected)
 
     payload_dir = bundle_dir / root
 

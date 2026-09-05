@@ -17,7 +17,7 @@ The three starting points are explicit, editable choices:
 | --- | --- | --- |
 | One considered copy | The smallest complete, known-size 4-bit variant in this publication | Best answers, publisher recommendation, runtime support, or hardware fit |
 | A comparison pair | The smallest complete, known-size 4-bit variant and its 8-bit counterpart | A benchmark result or a guarantee that the larger encoding is better |
-| The whole publication | Every published file at the inspected revision | That every group is complete, original, or impossible to recreate |
+| The whole publication | The repository at the inspected revision, with no selectors | That every group is complete, original, or impossible to recreate |
 
 There is no guessed substitute if a requested family is missing. Choose
 another variant manually. An unknown-size variant can be selected, but it
@@ -68,6 +68,8 @@ expanding it. `--full` cannot silently widen an existing subset.
 So do board jobs, `--next`, shards, and resumed pins. A board or catalog job
 must match its row's source, revision, and includes; it is not a new curation
 session. Non-interactive input/output and `TERM=dumb` never open a TUI.
+`--include '/*'` states the whole repository and means exactly what an
+unqualified source means; it is not a subset.
 
 `--yes` skips both the picker and disk-preflight confirmation. On a fresh
 unqualified source it uses the default conservative archive policy, which
@@ -98,15 +100,21 @@ branch cannot change the meaning of the reviewed selection. Adding a row
 downloads no model payload. Closing or cancelling leaves the form intact.
 
 If inspection fails, you can retry or explicitly choose **Keep an uninspected
-publication**. Its separate review says **Size unknown**, requests all paths
-with `/*`, and shows the requested but unresolved revision. It does not
-pretend a variant or storage budget was verified. No fallback is automatic.
+publication**. Its separate review says **Size unknown**, requests the whole
+repository with no selectors, and shows the requested but unresolved revision.
+It does not pretend a variant or storage budget was verified. No fallback is
+automatic.
 
-Whole-publication scope is recorded as `/*`: every path at that pin, including
-all layouts and companions. In a narrower collection, recognized support
-files accompany the selected groups and are counted once. Other files are
-outside the scope unless explicitly selected. Toggling a group after choosing
-the whole publication switches to selected-group scope; check the new total.
+Whole-publication scope is the repository itself. The row or pin carries no
+include selectors, and `/*` typed by hand means the same thing, so it shares
+the identity, size basis, and resume behaviour of an unqualified
+`darsay archive SOURCE`. What the archive retains inside that scope is a
+separate, recorded decision: by default only hash-identical duplicates within
+the bundle are skipped, and `--full` keeps those too. In a narrower collection,
+recognized support files accompany the selected groups and are counted once.
+Other files are outside the scope unless explicitly selected. Toggling a group
+after choosing the whole publication switches to selected-group scope; check
+the new total.
 
 An existing exact selection is labeled **Already on this board**. A final
 revision-checked save protects another curator's intervening changes. The

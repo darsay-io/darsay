@@ -20,6 +20,11 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Changed
 
+- The whole publication has no selectors. `/*` — typed, chosen in the
+  collection room, or carried by a board row — is the repository itself, so
+  it shares the identity, size basis, and resume behaviour of an unqualified
+  archive and the pin records no subset for it. `--full` remains the
+  retention switch that keeps hash-identical duplicates too.
 - Direct-source archive reruns resume the pinned collection without repeating
   its include patterns. Board/catalog jobs still require their row's identity.
   Explicit includes, `--full`, shards, non-interactive runs, and `--yes` bypass
