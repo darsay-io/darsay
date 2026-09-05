@@ -355,3 +355,23 @@ def test_fsync_tree_is_safe_on_a_bundle_tree(tmp_path):
     # returns None, raises nothing, even on a missing path
     assert fsync_tree(root) is None
     assert fsync_dir(tmp_path / "nope") is None
+
+
+def test_filesystem_type_parses_darwin_and_linux_mount_output():
+    from darsay.transfer import _darwin_mount_types, _linux_mount_types
+
+    darwin = (
+        "/dev/disk3s1 on / (apfs, sealed, local, journaled)\n"
+        "/dev/disk5s1 on /Volumes/USB (msdos, local, nodev)\n"
+    )
+    types = dict(_darwin_mount_types(darwin))
+    assert types["/"] == "apfs"
+    assert types["/Volumes/USB"] == "msdos"
+
+    linux = (
+        "26 1 0:24 / / rw,relatime shared:1 - ext4 /dev/sda1 rw\n"
+        "40 26 0:36 / /media/usb rw - vfat /dev/sdb1 rw,fmask=0022\n"
+    )
+    types = dict(_linux_mount_types(linux))
+    assert types["/"] == "ext4"
+    assert types["/media/usb"] == "vfat"

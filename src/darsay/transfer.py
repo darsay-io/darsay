@@ -2667,6 +2667,64 @@ def mount_source(path: Path) -> str | None:
     return None if best is None else best[1]
 
 
+def _darwin_mount_types(text: str) -> list[tuple[str, str]]:
+    """``mount(8)`` output → ``[(mount point, fstype)]`` (``apfs``, ``msdos`` …)."""
+    pairs = []
+    for line in text.splitlines():
+        head, sep, flags = line.rpartition(" (")
+        _source, on, mount_point = head.partition(" on ")
+        if sep and on:
+            pairs.append((mount_point, flags.split(",")[0].strip().rstrip(")")))
+    return pairs
+
+
+def _linux_mount_types(text: str) -> list[tuple[str, str]]:
+    """``/proc/self/mountinfo`` → ``[(mount point, fstype)]``."""
+    pairs = []
+    for line in text.splitlines():
+        head, sep, tail = line.partition(" - ")
+        fields = head.split()
+        rest = tail.split()
+        if not sep or len(fields) < 5 or not rest:
+            continue
+        mount_point = fields[4]
+        for escape, char in _MOUNTINFO_ESCAPES.items():
+            mount_point = mount_point.replace(escape, char)
+        pairs.append((mount_point, rest[0]))
+    return pairs
+
+
+def filesystem_type(path: Path) -> str | None:
+    """The filesystem type of the disk holding ``path`` (``apfs``, ``msdos`` …).
+
+    ``None`` when it cannot be read. Used to warn before a copy that a
+    payload file is larger than the destination filesystem can hold.
+    """
+    try:
+        if sys.platform == "darwin":
+            out = subprocess.run(
+                ["mount"], check=True, capture_output=True, text=True
+            ).stdout
+            pairs = _darwin_mount_types(out)
+        elif sys.platform.startswith("linux"):
+            pairs = _linux_mount_types(
+                Path("/proc/self/mountinfo").read_text(encoding="utf-8")
+            )
+        else:
+            return None
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    target = os.path.realpath(path)
+    best: tuple[int, str] | None = None
+    for mount_point, fstype in pairs:
+        root = mount_point.rstrip("/")
+        if root and target != root and not target.startswith(root + "/"):
+            continue
+        if best is None or len(root) > best[0]:
+            best = (len(root), fstype)
+    return None if best is None else best[1]
+
+
 def _files_to_hash(
     payload_dir: Path, ledger: dict, *, rehash: bool
 ) -> list[tuple[str, int]]:

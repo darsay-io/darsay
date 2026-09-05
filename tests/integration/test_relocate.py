@@ -304,6 +304,36 @@ def test_batch_verbs_refuse_bundles_with_all(tmp_path, test_provider):
         main(["--vault", str(src), "verify"])
 
 
+def test_relocate_refuses_a_file_too_big_for_a_fat_destination(
+    tmp_path, test_provider, monkeypatch
+):
+    """A model shard on a FAT32 stick fails mid-copy with a cryptic errno;
+    name the 4 GiB wall and the exFAT fix before copying a byte."""
+    import darsay.relocate as relocate_mod
+    import darsay.transfer as transfer_mod
+
+    src = tmp_path / "src"
+    src.mkdir()
+    bundle = _registered_bundle(src, test_provider)
+    dest = tmp_path / "drive"
+    dest.mkdir()
+
+    # Pretend the destination is FAT and lower the cap so a tiny file trips it.
+    monkeypatch.setattr(transfer_mod, "filesystem_type", lambda p: "msdos")
+    monkeypatch.setattr(relocate_mod, "FAT_MAX_FILE", 8)
+
+    with pytest.raises(SystemExit, match="cannot hold a file of 4 GiB or more"):
+        copy_bundle(bundle, dest, progress=silent)
+    with pytest.raises(SystemExit, match="Reformat the disk as exFAT"):
+        move_bundle(bundle, dest, progress=silent)
+    assert list(dest.rglob("manifest.json")) == [], "nothing copied"
+
+    # exFAT (and everything modern) is fine: no refusal.
+    monkeypatch.setattr(transfer_mod, "filesystem_type", lambda p: "exfat")
+    copy_bundle(bundle, dest, progress=silent)
+    assert (dest / "test--acme--toy" / "aaaaaaaaaaaa" / "manifest.json").is_file()
+
+
 def test_cp_refuses_an_unmounted_volume_stub(tmp_path, test_provider, monkeypatch):
     """An empty folder where a volume mounts but is not mounted: cp refuses
     rather than filling the boot disk (the leftover after an eject)."""

@@ -69,6 +69,11 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Fixed
 
+- `mv` / `cp` refuse before copying when a payload file is larger than the
+  destination filesystem can hold — a model shard onto a FAT32 stick, which
+  otherwise fails mid-copy with a cryptic errno. The refusal names the
+  filesystem, the files over the 4 GiB limit, and the fix (reformat as
+  exFAT). exFAT and every modern filesystem are unaffected.
 - `mv` / `cp` now flush the copied payload and the rewritten record to
   the medium before printing that the copy is verified, and the manifest
   is written atomically (temp, fsync, rename, fsync the directory). On a

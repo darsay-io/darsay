@@ -39,6 +39,11 @@ from pathlib import Path
 # travels.
 LEAVE_BEHIND = frozenset({"hydration.json", "transfer.lock"})
 
+# FAT12/16/32 cannot hold a file of 4 GiB or more; exFAT and everything
+# modern can. Model shards routinely exceed it, so name the wall up front.
+FAT_MAX_FILE = 4 * 1024**3 - 1
+FAT_TYPES = frozenset({"msdos", "vfat", "fat", "fat12", "fat16", "fat32"})
+
 # What an rsync of a bundle should not carry: the two files above, and the
 # Finder droppings that would count as an unlisted payload file at the
 # destination. Never ``--delete``: a stray file at the destination is
@@ -246,7 +251,9 @@ def relocation_plan(bundle_dir: Path, dest_vault: Path, *, op: str = "mv") -> di
             )
 
     files = bundle_files(bundle_dir)
-    total = sum(path.stat().st_size for _rel, path in files)
+    sized = [(rel, path, path.stat().st_size) for rel, path in files]
+    total = sum(size for _rel, _path, size in sized)
+    _refuse_files_past_filesystem_limit(dest_vault, sized)
     inventory_paths = {r["path"] for r in manifest["inventory"]["files"]}
     beside_payload = sum(
         path.stat().st_size for rel, path in files if rel not in inventory_paths
@@ -290,6 +297,34 @@ def relocation_plan(bundle_dir: Path, dest_vault: Path, *, op: str = "mv") -> di
             "verdict": disk_verdict(free, needed, floor),
         },
     }
+
+
+def _refuse_files_past_filesystem_limit(dest_vault: Path, sized: list) -> None:
+    """Refuse before copying when a payload file is too big for the dest disk.
+
+    FAT12/16/32 caps a file at just under 4 GiB, which model shards clear
+    easily; the fix is a modern filesystem (exFAT keeps the FAT convenience),
+    so name it rather than fail mid-copy with a cryptic errno.
+    """
+    from .readme_gen import human_size
+    from .transfer import filesystem_type
+
+    fstype = filesystem_type(dest_vault)
+    if not fstype or fstype.lower() not in FAT_TYPES:
+        return
+    too_big = [(rel, size) for rel, _path, size in sized if size > FAT_MAX_FILE]
+    if not too_big:
+        return
+    listed = "\n".join(
+        f"    {rel}  ({human_size(size)})" for rel, size in sorted(too_big)
+    )
+    raise SystemExit(
+        f"error: {dest_vault} is a {fstype} filesystem, which cannot hold a file "
+        f"of 4 GiB or more; {len(too_big)} payload file"
+        f"{'s' if len(too_big) != 1 else ''} exceed that:\n{listed}\n"
+        "  Reformat the disk as exFAT (or APFS / ext4) and rerun — exFAT keeps "
+        "the cross-platform convenience without the 4 GiB limit."
+    )
 
 
 def move_plan(bundle_dir: Path, dest_vault: Path) -> dict:
