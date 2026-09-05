@@ -230,7 +230,7 @@ vault/qwen--qwen3-0.6b/<revision12>/
 └── LICENSE             # upstream license text, surfaced at the root
 ```
 
-The payload under `model/` (or `data/` for datasets) is **immutable after
+The payload under `model/` (or `data/` for datasets, `code/` for repositories) is **immutable after
 archiving**; the bundle hash covers it alone.
 
 <details>
@@ -281,10 +281,12 @@ archiving**; the bundle hash covers it alone.
 | Take in a bundle from an older darsay | `darsay migrate <bundle>` — re-reads its record under the current schema, offline; the payload is untouched (`-n` to read the plan, `--all` for the whole vault) |
 
 Source refs are provider-qualified — `huggingface:Qwen/Qwen3-0.6B`,
-`huggingface:datasets/owner/name`. Unprefixed `owner/name` /
-`datasets/owner/name` and huggingface.co URLs are Hugging Face shorthand.
-An unprefixed `owner/name` that exists only as a dataset is resolved at
-pin time to `huggingface:datasets/owner/name`.
+`huggingface:datasets/owner/name`, `github:owner/repo`. Unprefixed
+`owner/name` / `datasets/owner/name` and huggingface.co URLs are Hugging
+Face shorthand; a github.com repository URL is GitHub's. An unprefixed
+`owner/name` that exists only as a dataset is resolved at pin time to
+`huggingface:datasets/owner/name`. A repository archives as a code bundle
+([Code bundles](docs/CODE.md)).
 
 <details>
 <summary><strong>The rest of the CLI</strong></summary>
@@ -297,6 +299,7 @@ darsay classify OBLITERATUS/Qwen3.8-27B-OBLITERATED   # negative/print verdicts 
 darsay archive  OBLITERATUS/Qwen3.8-27B-OBLITERATED --full   # every published file and layout
 darsay estimate datasets/saidutta69/fable-5-premium
 darsay archive  datasets/saidutta69/fable-5-premium
+darsay archive  github:MiaAI-Lab/Qwen3.8-Flash-Next-Single-DGX-Spark   # a repository at a commit, payload under code/
 darsay archive  Qwen/Qwen3.8-27B --revision v1.0      # pin a tag or commit instead of main
 darsay archive  Qwen/Qwen3.8-27B --max-gb 10          # pause; rerun to resume
 darsay archive  Qwen/Qwen3.8-27B --min-free 10G       # pause below 10 GiB free
@@ -353,11 +356,13 @@ relocatable. [Incremental transfer](docs/INCREMENTAL.md)
 </td>
 <td width="50%" valign="top">
 
-**Datasets are the same shape.**
-Addressed `datasets/owner/name`, payload under
-`data/`. Everything else is identical.
+**Datasets and code are the same shape.**
+A dataset is `datasets/owner/name`, payload under
+`data/`; a GitHub repository is `github:owner/repo`,
+payload under `code/`. Everything else is identical.
 [Datasets](docs/DATASETS.md)
-· [recipe](examples/README.md#archive-a-dataset)
+· [Code bundles](docs/CODE.md)
+· [recipe](examples/README.md#archive-a-repository)
 
 </td>
 </tr>

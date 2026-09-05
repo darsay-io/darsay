@@ -222,6 +222,8 @@ def _curation_and_footer_lines(bundle_dir: Path, m: dict) -> list[str]:
 def render_bundle_readme(bundle_dir: Path, m: dict) -> str:
     if m["artifact_type"] == "dataset":
         return _render_dataset_readme(bundle_dir, m)
+    if m["artifact_type"] == "code":
+        return _render_code_readme(bundle_dir, m)
     return _render_model_readme(bundle_dir, m)
 
 
@@ -311,6 +313,8 @@ def _lineage_lines(ident: dict, lin: dict) -> list[str]:
                     else ""
                 )
             )
+    if desc.get("forks_count") is not None:
+        lines.append(f"- Public forks at archive time: {desc['forks_count']}")
     if lin.get("successors"):
         lines.append(
             "- Successors (curator): " + ", ".join(f"`{x}`" for x in lin["successors"])
@@ -569,6 +573,149 @@ def _render_dataset_readme(bundle_dir: Path, m: dict) -> str:
         "```",
         "",
         "(`darsay hydrate`/`run` apply to model bundles; a dataset bundle has no engine.)",
+        "",
+        "## Reproduce & audit",
+        "",
+        "```bash",
+        "# Re-verify this bundle against its manifest",
+        f"darsay verify {bundle_path}",
+        "",
+        "# Re-create an identical bundle from upstream (bit-for-bit payload)",
+        f"darsay archive {src['address']} --revision {src['revision']}",
+        "```",
+    ]
+
+    lines += _curation_and_footer_lines(bundle_dir, m)
+    return "\n".join(lines)
+
+
+def _languages_cell(languages: dict | None) -> str:
+    if not languages:
+        return "not reported upstream"
+    total = sum(v or 0 for v in languages.values()) or 1
+    top = sorted(languages.items(), key=lambda kv: -(kv[1] or 0))[:4]
+    return ", ".join(f"{name} {100 * (n or 0) / total:.0f}%" for name, n in top)
+
+
+def _render_code_readme(bundle_dir: Path, m: dict) -> str:
+    ident = m["identity"]
+    src = m["source"]
+    lic = m["licensing"]
+    inv = m["inventory"]
+    cm = m.get("code_metadata") or {}
+    val = m["validation"]
+    lin = m["lineage"]
+    arc = m["archive"]
+    sec = m["security"]
+
+    check = val["checksum_verification"]
+    declared = (cm.get("runtime_declarations") or {}).get("found") or {}
+    counts = (cm.get("runtime_declarations") or {}).get("counts") or {}
+
+    lines = [
+        f"# {ident['publisher']} / {ident['model_name']}",
+        "",
+        f"> Archived code bundle `{m['bundle_id']}` — schema v{m['schema_version']}, artifact type `{m['artifact_type']}`.",
+        "",
+        "| | |",
+        "|---|---|",
+        f"| **Publisher** | {ident['publisher']} |",
+        f"| **Family** | {_family_cell(ident)} |",
+        f"| **Created upstream** | {ident['release_date'] or 'unknown'} |",
+        f"| **Languages** | {_languages_cell(cm.get('languages'))} |",
+        f"| **Default branch** | {cm.get('default_branch') or '?'} |",
+        f"| **Declares** | {', '.join(sorted(declared)) if declared else 'no standard build/run files'} |",
+    ]
+    _header_table_close(lines, lic, inv, arc, sec)
+    lines += _source_lines(src)
+    lines += _licensing_lines(lic)
+
+    lines += ["", "## Repository", ""]
+    lines.append(f"- Description (upstream): {cm.get('description') or 'none'}")
+    if cm.get("homepage"):
+        lines.append(f"- Homepage (upstream): {cm['homepage']}")
+    lines.append(
+        f"- Topics (upstream): {', '.join(cm['topics']) if cm.get('topics') else 'none'}"
+    )
+    lines.append(
+        f"- Languages (upstream, by bytes): {_languages_cell(cm.get('languages'))}"
+    )
+    if cm.get("archived_upstream"):
+        lines.append("- Upstream had already marked this repository **archived**")
+    if declared:
+        lines += [
+            "",
+            "Standard build/run files in the tree (read from the inventory — what",
+            "the tree carries, not what it is for):",
+            "",
+        ]
+        for label in sorted(declared):
+            shown = ", ".join(f"`{p}`" for p in declared[label][:6])
+            more = counts.get(label, len(declared[label])) - min(
+                6, len(declared[label])
+            )
+            lines.append(
+                f"- {label}: {shown}" + (f" … +{more} more" if more > 0 else "")
+            )
+    if cm.get("submodules"):
+        lines += [
+            "",
+            "Submodules named by the tree — **not fetched**; each is its own "
+            "repository at the recorded commit:",
+            "",
+        ]
+        for sub in cm["submodules"]:
+            lines.append(f"- `{sub.get('path')}` @ `{sub.get('revision')}`")
+    if cm.get("symlinks"):
+        lines.append("")
+        lines.append(
+            "Symbolic links in the tree are stored as files holding the link "
+            "target (git's own representation): "
+            + ", ".join("`" + p + "`" for p in cm["symlinks"][:8])
+        )
+
+    lines += [
+        "",
+        "## Validation",
+        "",
+        f"- Checksums: **{check['status'].upper()}** at {check['at']} ({check['files_checked']} files)",
+        f"- Completeness: **{val['completeness']['status']}**"
+        + (
+            f" — missing recommended: {', '.join(val['completeness']['missing_recommended'])}"
+            if val["completeness"].get("missing_recommended")
+            else ""
+        ),
+        "- Full report: [VERIFICATION.md](VERIFICATION.md) · history in `verification.json`",
+        "",
+        "## Lineage",
+        "",
+    ]
+    lines += _lineage_lines(ident, lin)
+    lines += _archive_record_lines(arc, sec)
+    lines += _inventory_lines(inv)
+
+    bundle_path = arc["location"]
+    root = (inv.get("layout") or {}).get("payload_root", "code/").rstrip("/")
+    name = ident["model_name"]
+    lines += [
+        "",
+        "## Using this bundle",
+        "",
+        f"The payload under `{root}/` is the repository's tree at commit",
+        f"`{src['revision']}` — every file as published, no `.git` directory.",
+        "Work from a copy; the payload is immutable:",
+        "",
+        "```bash",
+        f'cp -R "{bundle_path}/{root}" ./{name}',
+        "```",
+        "",
+        "To compare with upstream's history, clone and check out the same commit:",
+        "",
+        "```bash",
+        f"git clone {src['upstream_url']} && git -C {name} checkout {src['revision']}",
+        "```",
+        "",
+        "(`darsay hydrate`/`run` apply to model bundles; a code bundle has no engine.)",
         "",
         "## Reproduce & audit",
         "",

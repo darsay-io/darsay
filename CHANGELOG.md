@@ -9,6 +9,50 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+### Added
+
+- **GitHub is the second source provider.** `darsay archive github:owner/repo`
+  (`gh:owner/repo`, or a github.com repository URL) pins one commit,
+  lists its tree, and fetches every blob with the standard library alone —
+  no new dependency. Each file carries the git blob SHA-1 the tree names,
+  so `verify` has an upstream expectation for every byte; a Git LFS
+  pointer is resolved to the object's SHA-256 and true size at pin time,
+  and the object, never the pointer, is what lands. `HEAD` is the default
+  revision (the repository's default branch, whatever its name);
+  `--revision` takes a branch, tag, or commit, and a URL that buries one
+  (`…/tree/v1.2`, `…/commit/…`) is refused with the command that says it
+  plainly. `GITHUB_TOKEN` / `GH_TOKEN` read private repositories and lift
+  the API allowance; an exhausted allowance is a refusal naming the reset
+  time. A tree GitHub cannot list in one call is refused, never pinned
+  partially. [Sources](docs/SOURCES.md).
+- **Code is the third artifact type.** A repository is archived as a
+  `code` bundle: a source tree at a pinned commit under `code/`, with the
+  same anatomy as a model or dataset bundle — manifest, `SHA256SUMS`,
+  README, `curation.md`, export, import, `mv` / `cp`, `verify`. The
+  record's `code_metadata` carries what upstream said (description,
+  homepage, topics, languages by bytes, default branch, whether upstream
+  had already archived it, the submodules and symlinks the tree names)
+  and, read from the inventory, which standard build/run files the tree
+  holds — `container`, `compose`, `python`, `node`, `rust`, `go`, `nix`,
+  `make`, `env_template`, `shell` — evidence of what the tree can do,
+  never a verdict on what it is for. Lineage records a fork's parent as
+  upstream declares it and the fork count at archive time. `estimate`
+  prices a repository and prints those facts before anything is fetched;
+  `hydrate` / `run` refuse a code bundle by name; `smoke` records nothing
+  for it. Manifest schema 2.2.0, additive. [Code bundles](docs/CODE.md).
+
+### Changed
+
+- The `To archive:` line `estimate` prints adds `--revision` only when the
+  ref is not the provider's default — `main` on Hugging Face, `HEAD` on
+  GitHub — instead of comparing every provider against `main`.
+- `estimate` and `info` on a non-model bundle name the bundle's type in
+  the lines that do not apply to it (`engines`, RAM) instead of saying
+  "dataset" for everything that is not a model.
+- AGPL-3.0 joined the license table, so an AGPL repository's rights flags
+  are recorded instead of marked for manual review.
+- `info` omits the smoke line for a bundle that has no smoke tests.
+
 ## [0.14.16] - 2026-09-05
 
 

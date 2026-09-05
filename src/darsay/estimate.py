@@ -3,7 +3,7 @@
 `darsay estimate` is a read-only preflight for `archive`: it asks the
 source provider for the pinned revision's file inventory and reports what
 the bundle would cost — payload size, parameter count (models) or a formats
-breakdown (datasets), engines, completeness, disk headroom — without
+breakdown (datasets, code), engines, completeness, disk headroom — without
 downloading a single payload byte or writing anything to disk.
 
 File sizes and parameter counts come straight from upstream metadata and are
@@ -374,9 +374,13 @@ def estimate(
                 subset["policy"] = policy_record["policy"]
                 subset["classification"] = policy_record["classification"]
 
-    primary_suffixes = DATA_SUFFIXES if repo_type == "dataset" else WEIGHT_SUFFIXES
-    primary = [f for f in files if f["path"].lower().endswith(primary_suffixes)]
-    support = [f for f in files if not f["path"].lower().endswith(primary_suffixes)]
+    if repo_type == "code":
+        # A source tree has no weights/support split: every file is the payload.
+        primary, support = list(files), []
+    else:
+        primary_suffixes = DATA_SUFFIXES if repo_type == "dataset" else WEIGHT_SUFFIXES
+        primary = [f for f in files if f["path"].lower().endswith(primary_suffixes)]
+        support = [f for f in files if not f["path"].lower().endswith(primary_suffixes)]
     total = sum(f["size"] or 0 for f in files)
     primary_bytes = sum(f["size"] or 0 for f in primary)
     single_model_bytes = model_weight_bytes(primary)
@@ -406,22 +410,30 @@ def estimate(
         precision["bytes_per_param"] = bytes_per_param(
             single_model_bytes, params.get("total") if params else None
         )
-    from .providers.huggingface import parents_from_metadata
-
     named = lineage_of_source(ref.canonical)
     lineage = {
         **named.as_dict(),
         "architecture": (config or {}).get("model_type")
         or ((snapshot.metadata or {}).get("gguf") or {}).get("architecture"),
-        "parents": parents_from_metadata(
-            snapshot.metadata or {}, canonical_prefix=f"{ref.provider}:"
-        ),
+        "parents": provider.declared_parents(ref, snapshot.metadata or {}),
     }
 
     root = payload_root_for(repo_type)
     prospective_paths = [f"{root}/{f['path']}" for f in files]
     engines = detect_engines(prospective_paths)
     completeness = check_completeness(repo_type, prospective_paths)
+    code = None
+    if repo_type == "code":
+        from .metadata import runtime_declarations
+
+        repository = (snapshot.metadata or {}).get("repository") or {}
+        code = {
+            "description": repository.get("description"),
+            "languages": repository.get("languages"),
+            "default_branch": repository.get("default_branch"),
+            "submodules": repository.get("submodules"),
+            "runtime_declarations": runtime_declarations([f["path"] for f in files]),
+        }
 
     bundle_dir = bundle_dir_for(vault, ref, snapshot.revision)
     transfer = _existing_transfer(ref, revision, vault, bundle_dir, files)
@@ -480,11 +492,20 @@ def estimate(
         "parameters": snapshot.parameters,
         "precision": precision,
         "lineage": lineage,
-        "formats": _format_breakdown(files) if repo_type == "dataset" else None,
+        "formats": _format_breakdown(files)
+        if repo_type in ("dataset", "code")
+        else None,
+        "code": code,
         "payload": {
             "file_count": len(files),
             "total_size_bytes": total,
-            ("data" if repo_type == "dataset" else "weights"): {
+            (
+                "data"
+                if repo_type == "dataset"
+                else "files"
+                if repo_type == "code"
+                else "weights"
+            ): {
                 "count": len(primary),
                 "bytes": primary_bytes,
             },
@@ -507,8 +528,8 @@ def estimate(
             "min_vram_gb": ram_gb,
             "notes": (
                 "scratch = largest file in flight during download; "
-                "RAM/VRAM not applicable to dataset bundles."
-                if repo_type == "dataset"
+                f"RAM/VRAM not applicable to {repo_type} bundles."
+                if repo_type != "model"
                 else "RAM/VRAM = one complete model's weight bytes x1.2; "
                 "not estimated for GGUF packs or incomplete selections. "
                 "scratch = largest file in flight during download."
@@ -525,9 +546,10 @@ def estimate(
     }
     if variants:
         listed = provider.variants(ref, progress)
-        if listed is None and repo_type == "dataset":
+        if listed is None and repo_type != "model":
             progress(
-                "(--variants lists quantized variants of a model; not applicable to datasets)"
+                "(--variants lists quantized variants of a model; "
+                f"not applicable to {repo_type} bundles)"
             )
         est["variants"] = listed
     return est
@@ -729,7 +751,9 @@ def print_estimate(est: dict, progress=print) -> None:
     p = progress
     src, pay = est["source"], est["payload"]
     params = est["parameters"]
-    is_dataset = est.get("artifact_type") == "dataset"
+    kind = est.get("artifact_type") or "model"
+    is_dataset = kind == "dataset"
+    is_code = kind == "code"
     ref = src.get("address") or (
         f"datasets/{src['repo_id']}" if is_dataset else src["repo_id"]
     )
@@ -756,10 +780,41 @@ def print_estimate(est: dict, progress=print) -> None:
                 f"  subset:       only files matching {', '.join(sub['include'])}{extra} "
                 f"(full repo: {sub['full_file_count']} files, {human_size(sub['full_total_size_bytes'])})"
             )
-    elif not is_dataset:
+    elif kind == "model":
         p("  archive:      " + _negatives_summary(est.get("classification")))
 
-    if is_dataset:
+    if is_code:
+        code = est.get("code") or {}
+        if code.get("description"):
+            p(f"  about:        {code['description']}  [upstream]")
+        languages = code.get("languages") or {}
+        if languages:
+            total_bytes = sum(v or 0 for v in languages.values()) or 1
+            top = sorted(languages.items(), key=lambda kv: -(kv[1] or 0))[:4]
+            p(
+                "  languages:    "
+                + ", ".join(
+                    f"{name} {100 * (n or 0) / total_bytes:.0f}%" for name, n in top
+                )
+                + "  [upstream]"
+            )
+        found = (code.get("runtime_declarations") or {}).get("found") or {}
+        if found:
+            p(
+                "  declares:     "
+                + ", ".join(
+                    f"{label} ({len(paths)})" for label, paths in sorted(found.items())
+                )
+                + "  [read from the inventory]"
+            )
+        else:
+            p("  declares:     no standard build/run files in the tree")
+        if code.get("submodules"):
+            p(
+                f"  submodules:   {len(code['submodules'])} named by the tree — "
+                "not fetched (each is its own repository)"
+            )
+    if is_dataset or is_code:
         fmts = est["formats"] or {}
         if fmts:
             breakdown = ", ".join(
@@ -791,7 +846,10 @@ def print_estimate(est: dict, progress=print) -> None:
         )
     else:
         p("  parameters:   not published upstream")
-    if not is_dataset:
+    if is_code:
+        for line in _lineage_lines(est):
+            p(line)
+    elif not is_dataset:
         for line in _precision_lines(est):
             p(line)
         for line in _lineage_lines(est):
@@ -817,25 +875,36 @@ def print_estimate(est: dict, progress=print) -> None:
             )
 
     primary_key, primary_label = (
-        ("data", "data") if is_dataset else ("weights", "weights")
+        ("data", "data")
+        if is_dataset
+        else ("files", "files")
+        if is_code
+        else ("weights", "weights")
     )
     p(
         f"  payload:      {_n_files(pay['file_count'])}, {human_size(pay['total_size_bytes'])}"
         + (" + unknown bytes" if pay["unknown_size_count"] else "")
         + f" ({est.get('size_basis', 'repository')})"
     )
-    p(
-        f"                {primary_label} {human_size(pay[primary_key]['bytes'])} in {_n_files(pay[primary_key]['count'])}"
-        + (
-            f" (largest {human_size(pay['largest_file']['size'])}: {pay['largest_file']['path']})"
-            if pay["largest_file"]
-            else ""
+    if is_code:
+        if pay["largest_file"]:
+            p(
+                f"                largest {human_size(pay['largest_file']['size'])}: "
+                f"{pay['largest_file']['path']}"
+            )
+    else:
+        p(
+            f"                {primary_label} {human_size(pay[primary_key]['bytes'])} in {_n_files(pay[primary_key]['count'])}"
+            + (
+                f" (largest {human_size(pay['largest_file']['size'])}: {pay['largest_file']['path']})"
+                if pay["largest_file"]
+                else ""
+            )
         )
-    )
-    p(
-        f"                support {human_size(pay['support']['bytes'])} in {_n_files(pay['support']['count'])}"
-    )
-    if not is_dataset and params:
+        p(
+            f"                support {human_size(pay['support']['bytes'])} in {_n_files(pay['support']['count'])}"
+        )
+    if kind == "model" and params:
         from .catalog import expected_weight_bytes, hints_for
 
         if "redundant" in hints_for(est):
@@ -851,8 +920,8 @@ def print_estimate(est: dict, progress=print) -> None:
         p(
             f"                WARNING: {pay['unknown_size_count']} files have no upstream size"
         )
-    if is_dataset:
-        p("  engines:      none (dataset bundle — hydrate/run not applicable)")
+    if kind != "model":
+        p(f"  engines:      none ({kind} bundle — hydrate/run not applicable)")
     else:
         p(f"  engines:      {', '.join(est['engines']) or 'none recognized'}")
     comp = est["completeness"]
@@ -868,7 +937,7 @@ def print_estimate(est: dict, progress=print) -> None:
         p(line)
 
     e = est["estimates"]
-    if is_dataset:
+    if kind != "model":
         p(
             f"  estimated:    download scratch +{human_size(e['download_scratch_bytes'])} (largest file in flight)"
         )
@@ -925,7 +994,13 @@ def print_estimate(est: dict, progress=print) -> None:
     import shlex
 
     cmd = f"darsay archive {shlex.quote(ref)}"
-    if src["revision_ref"] != "main":
+    try:
+        default_ref = get_provider(
+            src.get("provider") or "huggingface"
+        ).default_revision
+    except SystemExit:
+        default_ref = "main"
+    if src["revision_ref"] != default_ref:
         cmd += f" --revision {shlex.quote(str(src['revision_ref']))}"
     if est["subset"] and not est["subset"].get("policy"):
         for pat in est["subset"]["include"]:

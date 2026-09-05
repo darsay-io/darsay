@@ -110,6 +110,25 @@ def dataset_files(*, extra: dict[str, bytes] | None = None) -> dict[str, bytes]:
     return files
 
 
+def code_files(*, extra: dict[str, bytes] | None = None) -> dict[str, bytes]:
+    """A serving-recipe repository: launcher scripts, a container recipe,
+    a compose file, Python requirements, an env template, a source dir."""
+    files = {
+        "README.md": b"# Toy recipe\n\nServes acme/toy on one box.\n",
+        "LICENSE": b"MIT License\n",
+        "Dockerfile": b"FROM python:3.12-slim\nCOPY . /app\n",
+        "compose.yaml": b"services:\n  serve:\n    build: .\n",
+        "requirements.txt": b"vllm\n",
+        ".env.sample": b"MODEL_ID=acme/toy\n",
+        "start.sh": b"#!/bin/sh\ndocker compose up\n",
+        "stop.sh": b"#!/bin/sh\ndocker compose down\n",
+        "files/patch_engine.py": b"print('patched')\n",
+    }
+    if extra:
+        files.update(extra)
+    return files
+
+
 def _gguf_string(text: str) -> bytes:
     raw = text.encode("utf-8")
     return struct.pack("<Q", len(raw)) + raw

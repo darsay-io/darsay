@@ -32,10 +32,10 @@ Conventions:
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | Version of this schema (`"2.1.0"`). Major changes only on breaking layout. |
+| `schema_version` | Version of this schema (`"2.2.0"`). Major changes only on breaking layout. |
 | `kind` | Always `"darsay.bundle"`. A file with the field missing is read as `"darsay.bundle"`. Any other value is a load error. |
-| `artifact_type` | Registry key driving completeness rules and the payload root (`"model"` or `"dataset"`; future: GGUF packs, papers — see `src/darsay/schema.py`). |
-| `bundle_id` | `<bundle directory name>@<first 12 of pinned revision>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Hugging Face dataset bundles take a `datasets--` prefix (`datasets--saidutta69--fable-5-premium@684cb1f849fe`) since model and dataset namespaces can collide on that host. Other providers include their id in the directory name. Stable, deterministic, unique per (source, revision). |
+| `artifact_type` | Registry key driving completeness rules and the payload root (`"model"`, `"dataset"`, or `"code"`; future: GGUF packs, papers — see `src/darsay/schema.py`). |
+| `bundle_id` | `<bundle directory name>@<first 12 of pinned revision>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Hugging Face dataset bundles take a `datasets--` prefix (`datasets--saidutta69--fable-5-premium@684cb1f849fe`) since model and dataset namespaces can collide on that host. Other providers include their id in the directory name (`github--owner--repo@09d4424be2b7`). Stable, deterministic, unique per (source, revision). |
 
 ## `identity`
 
@@ -59,20 +59,20 @@ Provenance of the download.
 
 | Field | Meaning |
 |---|---|
-| `origin` | Hosting service id (`huggingface`). Same value as `provider` for the Hugging Face plugin. |
-| `provider` | Acquisition plugin id (`huggingface`). |
-| `address` | Canonical source ref (`huggingface:Qwen/Qwen3-0.6B`, `huggingface:datasets/owner/name`). |
+| `origin` | Hosting service id (`huggingface`, `github`). Same value as `provider`. |
+| `provider` | Acquisition plugin id (`huggingface`, `github`). |
+| `address` | Canonical source ref (`huggingface:Qwen/Qwen3-0.6B`, `huggingface:datasets/owner/name`, `github:owner/repo`). |
 | `repo_id`, `upstream_url` | Provider-native locator and its web URL. |
 | `revision` | Full commit hash the download is pinned to. Re-archiving this revision reproduces the payload bit-for-bit. |
-| `revision_ref` | The ref that was requested (`main`, a tag, or a hash). |
+| `revision_ref` | The ref that was requested (`main`, a tag, or a hash; `HEAD` — the default branch — is GitHub's default). |
 | `last_modified_upstream` | Upstream's last-commit time at archive time. |
 | `download_timestamp` | When the transfer completed and the bundle was registered. |
 | `transfer` | Durable summary of incremental acquisition: `sessions`, `started`, `completed`, actual `bytes_network`, `bytes_adopted`, `bytes_local_sources`, and `retries`. One uninterrupted archive has `sessions: 1`; totals may span budgeted, resumed, or offline-assembly runs. |
 | `downloader` | Tool name/version, `provider`, Python version, platform, plus the provider's client library versions (`huggingface_hub` for the Hugging Face plugin) — enough to reconstruct the download environment. |
 | `mirrors_used` | Stable `local:<bundle_id>` references when registered sibling bundles supplied matching LFS blobs (empty list otherwise). Every local copy is independently re-hashed before attribution. |
 | `signatures` | Upstream cryptographic signatures, when provided (null otherwise — Hugging Face repos generally ship none). |
-| `access` | `{gated, notes}`. `gated` is the Hub gate status at archive time: `"auto"` (agree → instant access, contact info shared with the authors), `"manual"` (authors approve each request), or `false`. The gate agreement text lives in Hub repo settings, **not** in the repo tree, so it is not part of the snapshot — `notes` records that. Gates are enforced server-side on file downloads; an archive of a gated repo means the archiving account had accepted the terms. |
-| `upstream_stats_at_archive` | Downloads/month and likes at archive time — a popularity snapshot for the historical record. |
+| `access` | `{gated, notes}`. `gated` is the Hub gate status at archive time: `"auto"` (agree → instant access, contact info shared with the authors), `"manual"` (authors approve each request), or `false`. The gate agreement text lives in Hub repo settings, **not** in the repo tree, so it is not part of the snapshot — `notes` records that. Gates are enforced server-side on file downloads; an archive of a gated repo means the archiving account had accepted the terms. GitHub: `"private"` when the repository is private — the token that read it is not part of the record. |
+| `upstream_stats_at_archive` | Downloads/month and likes at archive time — a popularity snapshot for the historical record. GitHub has no download count (`null`); `likes` is the star count. |
 | `upstream_tags` | Raw repo tags at archive time. |
 | `subset` | Present when the pin is not the whole repo — an explicit `archive --include`, or the default negatives selection. `{include, sidecars, sidecar_file_count, full_file_count, full_total_size_bytes, kept_file_count, kept_total_size_bytes, omitted_file_count, full_files[]}`. `full_files` is the complete upstream inventory (path, size, sha256, git_sha1, sorted by path) so the bundle states exactly what it left out. `inventory.files` is only the kept payload. `null` when the pin is the whole repo (`--full`, datasets, or nothing skippable). |
 | `subset.policy` | `"negatives"` when the selection was made by default classification: retain all weights and support except weight sets whose every file has a hash-identical retained same-bundle twin ([Quantization §4](QUANTIZATION.md#4-mechanics)); absent for explicit `--include` subsets. It names the preservation policy, not the verdict for every retained byte. Duplicate paths are omitted; their content remains. |
@@ -175,6 +175,22 @@ Worked example (`cornell-movie-review-data/rotten_tomatoes`, features elided):
 darsay[datasets])"}`. Here declared and measured agree at 10,662 —
 when they disagree, both are kept; the manifest never averages claims.)
 
+## `code_metadata` — code bundles only
+
+A source tree at a pinned commit ([Code bundles](CODE.md)). What upstream
+said about the repository, recorded at pin time, and what the inventory
+shows. Nothing here asserts what the tree is for.
+
+| Field | Meaning |
+|---|---|
+| `description`, `homepage`, `topics` | As the host reported them at pin time; null when unset. |
+| `languages` | Bytes per language as the host counts them (`{"Python": 105081, "Shell": 53793}`); null when the host reported nothing. |
+| `default_branch` | The branch `HEAD` resolved to. |
+| `archived_upstream` | The host had already marked the repository archived — it was frozen where it lived. |
+| `submodules` | `[{path, revision}]` the tree names. **Not fetched**; each is its own repository at that commit. Null when none. |
+| `symlinks` | Paths stored as git stores a symbolic link — a file holding the link target. Null when none. |
+| `runtime_declarations` | `{read_from: "inventory", found: {label: [paths]}, counts: {label: n}}` — which standard build/run files the tree carries: `container` (Dockerfile, Containerfile), `compose`, `python` (pyproject, requirements, environment.yml, lockfiles), `node`, `rust`, `go`, `nix`, `make` (root only), `env_template` (root only), `shell` (root-level `*.sh`). Lists are capped at 20 with the true count in `counts`; an absent label matched nothing. Evidence of what the tree can do, never a verdict on its purpose. |
+
 ## `runtime` — model bundles only
 
 | Field | Meaning |
@@ -206,11 +222,11 @@ lineage — family, generation, member — lives in `identity`
 
 | Field | Meaning |
 |---|---|
-| `parents` | Edges to the works this one was made from, each `{source, relation, declared_by}`. `source` is a canonical ref (`huggingface:Qwen/Qwen3.8-27B`, `huggingface:datasets/owner/name`). `relation` is the label upstream gave the edge — `finetune`, `adapter`, `merge`, `quantized` (the Hub's model-tree relations), `trained_on` (from the card's `datasets`), `derived` (a dataset's `source_datasets`) — or null when a parent is declared without a label. `declared_by` is `card` or `tag`. Null when nothing is declared. The Hub has no relation for alignment edits (abliteration); those surface in `identity.variants` (read from the name) and in `curation.md`. |
-| `descendants` | An archive-time snapshot of what pointed back at this work. Models: `quantized` (repo ids declaring `base_model:quantized`), `gguf` (the `*gguf*` subset of those), `finetunes_count`, `adapters_count`. Datasets: `models_trained_on` (repo ids declaring `dataset:<id>`). A null list means the query failed; a length equal to `query_limit` means **at least** that many — renderers show `≥`. |
+| `parents` | Edges to the works this one was made from, each `{source, relation, declared_by}`. `source` is a canonical ref (`huggingface:Qwen/Qwen3.8-27B`, `huggingface:datasets/owner/name`). `relation` is the label upstream gave the edge — `finetune`, `adapter`, `merge`, `quantized` (the Hub's model-tree relations), `trained_on` (from the card's `datasets`), `derived` (a dataset's `source_datasets`), `fork` (a GitHub repository's upstream) — or null when a parent is declared without a label. `declared_by` is `card`, `tag`, or `api` (the fork edge). Null when nothing is declared. The Hub has no relation for alignment edits (abliteration); those surface in `identity.variants` (read from the name) and in `curation.md`. |
+| `descendants` | An archive-time snapshot of what pointed back at this work. Models: `quantized` (repo ids declaring `base_model:quantized`), `gguf` (the `*gguf*` subset of those), `finetunes_count`, `adapters_count`. Datasets: `models_trained_on` (repo ids declaring `dataset:<id>`). Code: `forks_count` at archive time. A null list means the query failed; a length equal to `query_limit` means **at least** that many — renderers show `≥`. |
 | `successors`, `related` | **curator** — the next generation, and kin the name grammar cannot see. |
 | `as_of` | When the descendant queries ran. This section is a historical snapshot, not a live index. |
-| `query_limit` | Cap on the descendant queries (100). |
+| `query_limit` | Cap on the descendant queries (100); null for a provider that counts rather than lists. |
 
 ## `archive`
 
@@ -280,8 +296,8 @@ last touched it. Tool version (`darsay.__version__`) moves independently.
   `migrate`, whose purpose is exactly that, and which says so in
   `archive.migrations`.
 - **2.x will not** rename or remove a field, change `payload_root` for
-  `model` or `dataset`, change `bundle_hash` or what it covers, or rewrite
-  payload.
+  `model`, `dataset`, or `code`, change `bundle_hash` or what it covers, or
+  rewrite payload.
 - **New artifact types** (GGUF packs, papers) are a new `artifact_type`
   plus payload root — not a 3.0. Readers take `inventory.layout.payload_root`
   from the record.
@@ -293,7 +309,9 @@ typed, provenance-carrying `parents`; `model_metadata.precision` became
 the release-precision label with `precision_detail` and
 `bytes_per_param` beside it; `source.subset.policy` reads `"negatives"`
 and verdicts read `negative`. Payload stays byte-immutable across majors.
-2.1.0 added `archive.migrations`.
+2.1.0 added `archive.migrations`. 2.2.0 added the `code` artifact type —
+payload root `code/`, `code_metadata`, the `fork` relation — with no
+change to existing records.
 
 ## Migration
 

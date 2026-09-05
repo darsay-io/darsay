@@ -35,7 +35,12 @@ from .hashing import bundle_hash
 from .identity import machine_name
 from .licensing import build_licensing_record
 from .lineage import lineage_of_source
-from .metadata import estimate_runtime, extract_dataset_metadata, extract_model_metadata
+from .metadata import (
+    estimate_runtime,
+    extract_code_metadata,
+    extract_dataset_metadata,
+    extract_model_metadata,
+)
 from .schema import (
     ARTIFACT_TYPES,
     BUNDLE_METADATA_FILES,
@@ -447,10 +452,7 @@ def archive(
                 existing = json.loads(manifest_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError, TypeError):
                 existing = {}
-            if (
-                isinstance(existing, dict)
-                and existing.get("artifact_type") == "dataset"
-            ):
+            if isinstance(existing, dict) and existing.get("artifact_type") != "model":
                 next_hint = f"`{paste} info {bundle_id}`"
             raise SystemExit(
                 f"error: bundle already exists: {bundle_dir}\n"
@@ -671,11 +673,12 @@ def _register_bundle(
     inventory_paths = [r["path"] for r in file_records]
     total_size = sum(r["size"] for r in file_records)
     completeness = check_completeness(repo_type, inventory_paths)
+    model_metadata = runtime = dataset_metadata = code_metadata = None
     if repo_type == "dataset":
-        model_metadata = runtime = None
         dataset_metadata = extract_dataset_metadata(payload_dir, card, file_records)
+    elif repo_type == "code":
+        code_metadata = extract_code_metadata(payload_dir, metadata, file_records)
     else:
-        dataset_metadata = None
         model_metadata = extract_model_metadata(payload_dir, card)
         runtime = estimate_runtime(payload_dir, model_metadata)
     license_id = card.get("license")
@@ -757,6 +760,8 @@ def _register_bundle(
         **(
             {"dataset_metadata": dataset_metadata}
             if repo_type == "dataset"
+            else {"code_metadata": code_metadata}
+            if repo_type == "code"
             else {"model_metadata": model_metadata, "runtime": runtime}
         ),
         "validation": {
@@ -771,6 +776,8 @@ def _register_bundle(
             "smoke_tests": (
                 {"structure": {"status": "not-run"}}
                 if repo_type == "dataset"
+                else {}
+                if repo_type == "code"
                 else {
                     "tokenizer": {"status": "not-run"},
                     "inference": {"status": "not-run"},
@@ -840,6 +847,9 @@ def _write_curation_template(bundle_dir: Path, manifest: dict) -> None:
     path = bundle_dir / "curation.md"
     if path.exists():
         return
+    noun = {"dataset": "dataset", "code": "code"}.get(
+        manifest.get("artifact_type"), "model"
+    )
     path.write_text(
         f"""# Curation notes — {manifest["bundle_id"]}
 
@@ -848,7 +858,7 @@ README.md; nothing here is machine-generated after this template._
 
 ## Historical significance
 
-_Why this model matters._
+_Why this {noun} matters._
 
 ## Derivation & alignment changes
 

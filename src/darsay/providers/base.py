@@ -80,6 +80,16 @@ def _describe_os_error(exc: BaseException) -> str | None:
     return None
 
 
+# Under a rate cap, read in chunks worth about a quarter second so pacing
+# sleeps are short and the running rate stays smooth; never below this.
+_MIN_THROTTLED_CHUNK = 64 * 1024
+
+
+def throttled_chunk_size(max_rate: int, default: int) -> int:
+    """Read chunk for a capped transfer: about a quarter second of bytes."""
+    return max(_MIN_THROTTLED_CHUNK, min(default, max_rate // 4))
+
+
 def describe_network_error(exc: BaseException) -> str | None:
     """A short reason when ``exc`` or anything it was raised from is the
     operating system saying the network is unreachable; ``None`` otherwise.
@@ -217,6 +227,13 @@ class SourceProvider(ABC):
 
     def variants(self, source: SourceRef, progress) -> dict | None:
         """``estimate --variants`` payload, or None when the provider has no such listing."""
+        return None
+
+    def declared_parents(self, source: SourceRef, metadata: dict) -> list[dict] | None:
+        """Parent edges upstream declares in a pin's ``metadata`` — the
+        ``lineage.parents`` an estimate can show without another query.
+        Each edge is ``{source, relation, declared_by}``; ``None`` when
+        nothing is declared. The default declares nothing."""
         return None
 
     def lineage(self, source: SourceRef, metadata: dict) -> dict:

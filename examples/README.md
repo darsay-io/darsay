@@ -22,6 +22,7 @@ This page is the cookbook you return to.
 | Keep an unattended box from filling its disk | [Leave room on the disk](#leave-room-on-the-disk) |
 | Price one quant in a huge GGUF pack | [Price one quant](#price-one-quant-from-a-pack-repo) |
 | Archive a dataset | [Dataset](#archive-a-dataset) |
+| Archive a GitHub repository | [Repository](#archive-a-repository) |
 | Load the payload myself | [Use the files directly](#use-the-files-directly) |
 | Put a bundle on a USB drive | [Export](#export-to-a-usb-drive) |
 | Split a download with a friend | [Cooperative shards](#split-a-download-across-machines) |
@@ -377,6 +378,33 @@ time to `huggingface:datasets/owner/name`.
 
 `hydrate` / `run` do not apply — a dataset has no engine. Open `data/`
 with whatever already reads the format. Design: [Datasets](../docs/DATASETS.md).
+
+---
+
+## Archive a repository
+
+Code is the third artifact type: a GitHub repository at one commit,
+payload under `code/`. Same verbs.
+
+```bash
+darsay estimate github:MiaAI-Lab/Qwen3.8-Flash-Next-Single-DGX-Spark
+darsay archive  github:MiaAI-Lab/Qwen3.8-Flash-Next-Single-DGX-Spark
+darsay info     github--miaai-lab--qwen3.8-flash-next-single-dgx-spark
+```
+
+Paste-from-browser URLs work. `HEAD` — the default branch — is the
+default revision; a tag or commit goes on `--revision`:
+
+```bash
+darsay archive https://github.com/MiaAI-Lab/Qwen3.8-Flash-Next-Single-DGX-Spark
+darsay archive github:MiaAI-Lab/Qwen3.8-Flash-Next-Single-DGX-Spark --revision 09d4424be2b7
+```
+
+`estimate` says what the tree declares about being run — `container`,
+`compose`, `python`, `shell`, an env template — before anything is
+fetched. `hydrate` / `run` do not apply; copy `code/` out and follow its
+README. A private repository needs `GITHUB_TOKEN` in the environment.
+Design: [Code bundles](../docs/CODE.md).
 
 ---
 

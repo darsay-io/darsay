@@ -13,7 +13,8 @@ not proofs of originality or permission to omit artifacts.
 ## Environment
 
 - Python 3.14 venv at `.venv` (`.venv/bin/darsay`, `.venv/bin/python`).
-- Core dependency is `huggingface_hub` only (Hugging Face provider); `blake3`, `tokenizers`,
+- Core dependency is `huggingface_hub` only (Hugging Face provider; the GitHub
+  provider is standard library); `blake3`, `tokenizers`,
   `transformers`/`torch` are optional extras — every feature that needs them
   must degrade gracefully (record `skipped` with a reason, never crash).
 - Test suite is pytest (`pip install -e ".[dev]"`; `pytest`). Unit +
@@ -78,9 +79,12 @@ not proofs of originality or permission to omit artifacts.
   management, `hydrate`/`run`), `runners/` (standalone per-engine scripts run
   inside hydrated envs — stdlib + engine only, no darsay imports),
   `sources.py` (source-ref grammar + provider registry), `providers/`
-  (acquisition backends; Hugging Face is the first plugin; a provider
-  classifies its transport's transient failures via
-  `transient_network_error` — transfer.py never imports httpx),
+  (acquisition backends: `huggingface.py`, and `github.py` — stdlib HTTP,
+  pins one commit, resolves LFS pointers, archives a repository as a
+  `code` bundle under `code/`; a provider classifies its transport's
+  transient failures via `transient_network_error` — transfer.py never
+  imports httpx — and `declared_parents` is what `estimate` shows without
+  a query),
   `cli.py` (every subcommand runs under `_run`: no tracebacks reach users
   unless `DARSAY_DEBUG=1`).
 - `tests/` — pytest pyramid: `unit/`, `integration/` (fake `test:` provider),
@@ -103,6 +107,13 @@ not proofs of originality or permission to omit artifacts.
   and why bundle longevity rests on the formats, not the tool.
   `docs/DATASETS.md` — dataset bundles: Hub-address refs, per-type payload
   roots, dataset manifest sections.
+  `docs/CODE.md` — code bundles: `github:owner/repo`, payload `code/`,
+  `code_metadata` and the `runtime_declarations` vocabulary (evidence of
+  what a tree can do, never a verdict on its purpose).
+  `docs/proposals/workbench.md` — the direction: bundles presented to a
+  runtime on a named bench on existing standards (HF cache layout, OCI
+  digests, compose, an OpenAI-compatible endpoint); the model + code +
+  image binding lives outside the manifests.
   `docs/INCREMENTAL.md` — incremental archiving: idempotent resumable transfer — pin →
   reconcile → plan → transfer → register, `transfer.json` ledger, session
   budgets, local-source adoption.

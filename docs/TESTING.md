@@ -15,7 +15,7 @@ darsay's test suite is a pyramid. Fast hermetic tests are the default;
 the live Hub path is opt-in and small.
 
 ```
-              e2e               live Hugging Face Hub, one tiny model
+              e2e               live Hugging Face Hub and GitHub, one tiny model and one tiny repository
           ------------
        process safety           signals, competing processes, goldens
       ----------------
@@ -36,7 +36,7 @@ to run on every commit.
 | **Unit** | Call one module. Use `tmp_path` for files. Import optional extras and record `skipped`. | Network. Register a provider. Build a full bundle unless the function under test requires one. | `tests/unit/` |
 | **Integration** | Drive `archive` / `verify` / `export` / `assemble` / catalogs / the CLI against a `TestProvider` that serves bytes from memory. Touch a temp vault. Stub `_invoke_runner` to prove `run` records without installing torch. | Hugging Face, torch installs, hydration `ensure_env`. Catalog tests stay hermetic (`test:` + fixture JSON). | `tests/integration/` |
 | **Process safety** | Launch real CLI processes against disposable `test:` bundles; deliver SIGKILL at deterministic journal/commit boundaries; force lock contention; compare reviewed public-contract goldens. | Network, wall-clock race assumptions, user configuration, or real vaults. | `tests/integration/test_doctor_safety.py`, `tests/doctor_fixtures/`, `tests/golden/` |
-| **E2E** | `estimate` → `archive` → `list` / `info` → `verify` → `export` → `import` of `sshleifer/tiny-gpt2`. Asserts `kind`. | Large repos, gated repos, `darsay run`. | `tests/e2e/` |
+| **E2E** | `estimate` → `archive` → `list` / `info` → `verify` → `export` → `import` of `sshleifer/tiny-gpt2`. Asserts `kind`. GitHub: `estimate` → `archive` → `verify` of `octocat/Hello-World`. | Large repos, gated repos, `darsay run`. | `tests/e2e/` |
 
 The fake provider (`tests/fakes.py`) is a real `SourceProvider`. Registering
 it is the extensibility check: archive and estimate never import

@@ -6,6 +6,9 @@ The public archive/estimate API takes a source ref, not a Hub repo id:
     huggingface:datasets/owner/name
     hf:Qwen/Qwen3-0.6B
     https://huggingface.co/Qwen/Qwen3-0.6B
+    github:owner/repo
+    gh:owner/repo
+    https://github.com/owner/repo
 
 Unprefixed ``owner/name`` and ``datasets/owner/name`` remain Hugging Face
 shorthand so existing commands keep working. They are convenience, not the
@@ -63,9 +66,11 @@ def register_provider(provider: SourceProvider) -> None:
 def _ensure_providers() -> None:
     if _PROVIDERS:
         return
+    from .providers.github import GitHubProvider
     from .providers.huggingface import HuggingFaceProvider
 
     register_provider(HuggingFaceProvider())
+    register_provider(GitHubProvider())
 
 
 def get_provider(name: str) -> SourceProvider:

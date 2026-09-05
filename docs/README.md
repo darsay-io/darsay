@@ -21,7 +21,7 @@
 | | Current |
 |---|---|
 | Tool | **0.14.16** |
-| Manifest schema | **2.1.0** |
+| Manifest schema | **2.2.0** |
 | Catalog schema | **3.0.0** |
 | MVB format | **1.3** |
 | License | Apache 2.0 |
@@ -73,6 +73,7 @@ required to open a bundle. Everything else is how we got there.
 | [**Incremental transfer**](INCREMENTAL.md) | Budgets, Ctrl-C, Range partials, the free-space floor and `config.toml`, `--shard N/T`, `assemble`, `assemble --handoff` |
 | [**FAQ**](FAQ.md) | Moving or copying a bundle to another disk (`mv` / `cp`, or rsync — always valid); `mv` vs `assemble --handoff`; what travels, what stays |
 | [**Datasets**](DATASETS.md) | The source is `datasets/owner/name`; payload under `data/` |
+| [**Code bundles**](CODE.md) | The source is `github:owner/repo`; payload under `code/`; what the tree declares about being run |
 | [**Sources**](SOURCES.md) | Provider-qualified refs; Hugging Face is a plugin |
 | [**Quantization**](QUANTIZATION.md) | Collection scope, preservation evidence, precision and bytes per parameter, `darsay classify`, published variants |
 | [**Catalogs**](CATALOGS.md) | Shareable want-lists; closed works; the family view; darsay.io boards as remote catalogs; the vault is the same list, realized |

@@ -75,6 +75,15 @@ LICENSE_INFO = {
         "patent_grant": True,
         "trademark_terms": None,
     },
+    "agpl-3.0": {
+        "name": "GNU Affero General Public License v3.0",
+        "commercial_use": True,
+        "redistribution": True,
+        "modification": True,
+        "attribution_required": True,
+        "patent_grant": True,
+        "trademark_terms": None,
+    },
     "llama2": {
         "name": "Llama 2 Community License",
         "commercial_use": True,  # with the >700M MAU carve-out

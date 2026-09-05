@@ -301,10 +301,17 @@ def select_engine(manifest: dict, requested: str | None) -> str:
             f"(detected: {', '.join(detected) or 'none'})"
         )
     if not detected:
-        if manifest.get("artifact_type") == "dataset":
+        kind = manifest.get("artifact_type")
+        if kind and kind != "model":
+            from .schema import payload_root as manifest_payload_root
+
+            noun = {"dataset": "datasets", "code": "code bundles"}.get(
+                kind, f"{kind} bundles"
+            )
             raise SystemExit(
-                "error: datasets have no inference engine — "
-                "open data/ directly, or `darsay info` for the recorded facts"
+                f"error: {noun} have no inference engine — "
+                f"open {manifest_payload_root(manifest)}/ directly, or "
+                "`darsay info` for the recorded facts"
             )
         raise SystemExit(
             "error: no known engine matches this payload "

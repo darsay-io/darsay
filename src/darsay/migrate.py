@@ -288,6 +288,8 @@ def _record_from_1x(
     }
     if artifact_type == "dataset":
         record["dataset_metadata"] = deepcopy(old.get("dataset_metadata"))
+    elif artifact_type == "code":
+        record["code_metadata"] = deepcopy(old.get("code_metadata"))
     else:
         record["model_metadata"] = model_metadata
         record["runtime"] = deepcopy(old.get("runtime"))

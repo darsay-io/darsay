@@ -78,3 +78,16 @@ def test_unknown_artifact_type():
 
 def test_registry_has_model_and_dataset():
     assert set(ARTIFACT_TYPES) >= {"model", "dataset"}
+
+
+def test_code_type_payload_root_and_completeness():
+    assert payload_root_for("code") == "code"
+    assert payload_root({"inventory": {"layout": {"payload_root": "code/"}}}) == "code"
+    assert ARTIFACT_TYPES["code"]["payload_root"] == "code/"
+    result = check_completeness("code", ["code/README.md", "code/LICENSE", "code/x.py"])
+    assert result["status"] == "complete"
+    assert result["missing_recommended"] == []
+    bare = check_completeness("code", ["code/start.sh"])
+    assert bare["status"] == "complete"
+    assert bare["missing_recommended"] == ["readme", "license"]
+    assert check_completeness("code", [])["status"] == "incomplete"

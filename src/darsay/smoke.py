@@ -203,6 +203,12 @@ def run_smoke(bundle_dir: Path, inference: bool = False, progress=print) -> dict
         if inference:
             progress("  (--inference applies to model bundles; ignored)")
         manifest["validation"]["smoke_tests"] = {"structure": result}
+    elif manifest["artifact_type"] == "code":
+        progress(
+            "No smoke test applies to a code bundle — its check is the "
+            "checksum verification (`darsay verify`)."
+        )
+        manifest["validation"]["smoke_tests"] = {}
     else:
         progress("Running tokenizer smoke test ...")
         tok_result = {"at": now, **tokenizer_test(payload_root)}

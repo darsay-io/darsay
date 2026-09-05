@@ -109,22 +109,28 @@ class TestProvider(SourceProvider):
         if parts and parts[0] == "datasets":
             artifact_type = "dataset"
             parts = parts[1:]
+        elif parts and parts[0] == "code":
+            artifact_type = "code"
+            parts = parts[1:]
         if from_url and len(parts) > 2:
             parts = parts[:2]
         if len(parts) != 2:
             raise SystemExit(
-                f"error: cannot parse test source {locator!r} — expected owner/name "
-                "or datasets/owner/name"
+                f"error: cannot parse test source {locator!r} — expected owner/name, "
+                "datasets/owner/name, or code/owner/name"
             )
         repo_id = "/".join(parts)
         publisher, _, name = repo_id.partition("/")
         slug = repo_id.replace("/", "--").lower()
-        bundle_name = (
-            f"{self.name}--datasets--{slug}"
+        prefix = {"dataset": "datasets--", "code": "code--"}.get(artifact_type, "")
+        bundle_name = f"{self.name}--{prefix}{slug}"
+        path = (
+            f"datasets/{repo_id}"
             if artifact_type == "dataset"
-            else f"{self.name}--{slug}"
+            else f"code/{repo_id}"
+            if artifact_type == "code"
+            else repo_id
         )
-        path = f"datasets/{repo_id}" if artifact_type == "dataset" else repo_id
         return SourceRef(
             provider=self.name,
             artifact_type=artifact_type,
@@ -302,11 +308,14 @@ class TestProvider(SourceProvider):
         except OSError:
             return 0
 
-    def lineage(self, source: SourceRef, metadata: dict) -> dict:
+    def declared_parents(self, source: SourceRef, metadata: dict) -> list[dict] | None:
         from darsay.providers.huggingface import parents_from_metadata
 
+        return parents_from_metadata(metadata, canonical_prefix="test:")
+
+    def lineage(self, source: SourceRef, metadata: dict) -> dict:
         return {
-            "parents": parents_from_metadata(metadata, canonical_prefix="test:"),
+            "parents": self.declared_parents(source, metadata),
             "descendants": {
                 "quantized": [],
                 "gguf": None,

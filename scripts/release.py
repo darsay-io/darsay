@@ -73,6 +73,7 @@ DOCS_ROWS = (
 CLI_DOCS = (
     "README.md",
     "docs/GETTING-STARTED.md",
+    "docs/CODE.md",
     "docs/CONCEPTS.md",
     "docs/CATALOGS.md",
     "docs/COLLECTIONS.md",

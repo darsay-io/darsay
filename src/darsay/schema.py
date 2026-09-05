@@ -3,7 +3,7 @@
 New artifact types (standalone GGUF packs, papers, ...) slot in by adding a
 registry entry: where the payload lives, what files a complete bundle must
 contain and which are recommended. The manifest carries `artifact_type` so
-consumers can dispatch; `model` and `dataset` are the two current types.
+consumers can dispatch; `model`, `dataset`, and `code` are the current types.
 
 Acquisition backends are a separate registry (`sources.SourceProvider`);
 see docs/SOURCES.md. Do not special-case a hosting service here.
@@ -28,6 +28,7 @@ MANIFEST_TOP_KEYS = (
     "inventory",
     "model_metadata",
     "dataset_metadata",
+    "code_metadata",
     "runtime",
     "validation",
     "lineage",
@@ -117,6 +118,20 @@ ARTIFACT_TYPES = {
                 ["data/LICENSE*", "data/LICENCE*", "data/COPYING*", "data/license*"],
             ),
             ("dataset_infos", ["data/dataset_infos.json"]),
+        ],
+    },
+    # A source tree at a pinned commit (a GitHub repository). What the tree
+    # is for is not asserted here; code_metadata.runtime_declarations records
+    # which standard run/build files it carries.
+    "code": {
+        "payload_root": "code/",
+        "required": [("files", ["code/*"])],
+        "recommended": [
+            ("readme", ["code/README.md", "code/README*", "code/readme*"]),
+            (
+                "license",
+                ["code/LICENSE*", "code/LICENCE*", "code/COPYING*", "code/license*"],
+            ),
         ],
     },
 }

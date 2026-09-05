@@ -12,6 +12,7 @@ immutable payload, recorded facts, still loadable as-is.
     darsay classify <owner>/<name>    preservation evidence and retention per weight set
     darsay archive huggingface:Qwen/Qwen3-0.6B    download + hash + manifest + reports
     darsay archive datasets/<owner>/<name>        archive a dataset (payload under data/)
+    darsay archive github:<owner>/<repo>          archive a GitHub repository at a commit (payload under code/)
     darsay verify  <bundle>… | --all  re-hash and compare against manifest
     darsay smoke   <bundle> [--inference]
     darsay list [--json]              vault as a catalog view (STATUS / SOURCE / HAVE)
@@ -47,8 +48,9 @@ Every command that writes takes -n / --dry-run: the same checks, the same
 report in the conditional, nothing written, and the real command to paste.
 
 Source refs are provider-qualified (`huggingface:Qwen/Qwen3-0.6B`,
-`huggingface:datasets/<owner>/<name>`). Unprefixed `owner/name`,
-`datasets/owner/name`, and huggingface.co URLs are Hugging Face shorthand.
+`huggingface:datasets/<owner>/<name>`, `github:<owner>/<repo>`). Unprefixed
+`owner/name`, `datasets/owner/name`, and huggingface.co URLs are Hugging
+Face shorthand; github.com repository URLs are GitHub's.
 Bundle-path commands dispatch on the manifest's artifact_type.
 """
 
@@ -757,7 +759,7 @@ def cmd_archive(args) -> int:
 
     artifact = load_manifest(bundle).get("artifact_type")
     next_cmd = _bundle_command(
-        args, "info" if artifact == "dataset" else "run", bundle, bundle_id
+        args, "run" if artifact == "model" else "info", bundle, bundle_id
     )
     print(f"\nBundle ready: {bundle}")
     print(f"  id:           {bundle_id}")
@@ -1718,6 +1720,19 @@ def cmd_info(args) -> int:
         print(
             f"  formats:    {fmts or '?'}  declared examples={f'{declared:,}' if declared is not None else '?'}"
         )
+    elif m["artifact_type"] == "code":
+        cm = m.get("code_metadata") or {}
+        if cm.get("description"):
+            print(f"  about:      {cm['description']}")
+        languages = cm.get("languages") or {}
+        if languages:
+            top = sorted(languages.items(), key=lambda kv: -(kv[1] or 0))[:4]
+            print(f"  languages:  {', '.join(name for name, _ in top)}")
+        found = (cm.get("runtime_declarations") or {}).get("found") or {}
+        if found:
+            print(
+                f"  declares:   {', '.join(sorted(found))}  [read from the inventory]"
+            )
     else:
         meta = m["model_metadata"]
         print(
@@ -1736,11 +1751,12 @@ def cmd_info(args) -> int:
         f"  integrity:  {m['security']['integrity_status']}  last check {m['archive']['last_integrity_check']}"
     )
     smoke = m["validation"]["smoke_tests"]
-    print(
-        "  smoke:      "
-        + " ".join(f"{name}={r['status']}" for name, r in smoke.items())
-    )
-    if m["artifact_type"] != "dataset":
+    if smoke:
+        print(
+            "  smoke:      "
+            + " ".join(f"{name}={r['status']}" for name, r in smoke.items())
+        )
+    if m["artifact_type"] == "model":
         from .hydrate import load_hydration
 
         hyd = load_hydration(bundle)
@@ -2290,11 +2306,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="machine-readable output")
     p.set_defaults(func=cmd_classify)
 
-    p = add_cmd("archive", help="download and archive a model or dataset as a bundle")
+    p = add_cmd(
+        "archive",
+        help="download and archive a model, dataset, or repository as a bundle",
+    )
     p.add_argument(
         "source",
         nargs="?",
-        help="e.g. huggingface:Qwen/Qwen3-0.6B, datasets/<owner>/<name>, or a huggingface.co URL",
+        help="e.g. huggingface:Qwen/Qwen3-0.6B, datasets/<owner>/<name>, github:<owner>/<repo>, or a provider URL",
     )
     p.add_argument(
         "--next",

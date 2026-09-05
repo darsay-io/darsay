@@ -1,4 +1,4 @@
-"""Extract model/dataset metadata from the archived payload.
+"""Extract model / dataset / code metadata from the archived payload.
 
 Everything here reads only the downloaded files — no network — so `regen` and
 `verify` can rebuild metadata offline from the archive itself. For datasets,
@@ -262,6 +262,126 @@ def extract_dataset_metadata(
         "task_categories": listed(card_data.get("task_categories")),
         "size_categories": listed(card_data.get("size_categories")),
         "languages": listed(card_data.get("language")),
+    }
+
+
+# The standard files that say how a source tree is built or run — the
+# vocabulary a harness layer dispatches on. Each entry: label, name
+# patterns (matched against the file name at any depth, or against the
+# whole path when the pattern has a slash), and whether only the tree root
+# counts. Recorded from the inventory as evidence, never as a verdict.
+RUNTIME_DECLARATIONS = (
+    (
+        "container",
+        ("Dockerfile", "Dockerfile.*", "*.Dockerfile", "Containerfile"),
+        False,
+    ),
+    (
+        "compose",
+        (
+            "compose.yaml",
+            "compose.yml",
+            "docker-compose.yaml",
+            "docker-compose.yml",
+            "docker-compose.*.yaml",
+            "docker-compose.*.yml",
+        ),
+        False,
+    ),
+    (
+        "python",
+        (
+            "pyproject.toml",
+            "setup.py",
+            "setup.cfg",
+            "requirements.txt",
+            "requirements-*.txt",
+            "requirements/*.txt",
+            "environment.yml",
+            "environment.yaml",
+            "uv.lock",
+            "poetry.lock",
+        ),
+        False,
+    ),
+    ("node", ("package.json",), False),
+    ("rust", ("Cargo.toml",), False),
+    ("go", ("go.mod",), False),
+    ("nix", ("flake.nix", "shell.nix", "default.nix"), False),
+    ("make", ("Makefile", "makefile", "GNUmakefile", "justfile", "Justfile"), True),
+    ("env_template", (".env.sample", ".env.example", ".env.template"), True),
+    ("shell", ("*.sh",), True),
+)
+RUNTIME_DECLARATION_CAP = 20
+
+
+def runtime_declarations(paths: list[str]) -> dict:
+    """Which standard build/run files a source tree carries, by label.
+
+    ``paths`` are payload-relative. Lists are sorted and capped at
+    ``RUNTIME_DECLARATION_CAP`` entries with the true count beside them;
+    a label with no match is absent. ``read_from`` says where this came
+    from: the inventory, not a claim about what the tree is for.
+    """
+    from fnmatch import fnmatch
+
+    found: dict[str, list[str]] = {}
+    for label, patterns, root_only in RUNTIME_DECLARATIONS:
+        matched = set()
+        for path in paths:
+            if root_only and "/" in path:
+                continue
+            name = path.rsplit("/", 1)[-1]
+            for pattern in patterns:
+                target = path if "/" in pattern else name
+                if fnmatch(target, pattern):
+                    matched.add(path)
+                    break
+        if matched:
+            found[label] = sorted(matched)
+    counts = {label: len(items) for label, items in found.items()}
+    return {
+        "read_from": "inventory",
+        "found": {
+            label: items[:RUNTIME_DECLARATION_CAP] for label, items in found.items()
+        }
+        or None,
+        "counts": counts or None,
+    }
+
+
+def extract_code_metadata(
+    payload_root: Path,
+    metadata: dict | None = None,
+    file_records: list[dict] | None = None,
+) -> dict:
+    """The record for a source tree: what upstream said about the repository
+    (``metadata["repository"]``, as the provider recorded it at pin time)
+    and what the inventory shows. Nothing here asserts a purpose."""
+    repo = (metadata or {}).get("repository") or {}
+    paths = [
+        r["path"].split("/", 1)[1] if "/" in r["path"] else r["path"]
+        for r in (file_records or [])
+    ]
+    if not paths:
+        paths = [
+            p.relative_to(payload_root).as_posix()
+            for p in payload_root.rglob("*")
+            if p.is_file() and ".cache" not in p.relative_to(payload_root).parts
+        ]
+    languages = repo.get("languages")
+    if not isinstance(languages, dict) or not languages:
+        languages = None
+    return {
+        "description": repo.get("description"),
+        "homepage": repo.get("homepage"),
+        "topics": list(repo.get("topics") or []) or None,
+        "languages": languages,
+        "default_branch": repo.get("default_branch"),
+        "archived_upstream": repo.get("archived_upstream"),
+        "submodules": repo.get("submodules"),
+        "symlinks": repo.get("symlinks"),
+        "runtime_declarations": runtime_declarations(paths),
     }
 
 

@@ -9,7 +9,7 @@
 # Source providers
 
 > **In one sentence.** `estimate` and `archive` take a source ref.
-> Hugging Face is the first provider, not the product.
+> Hugging Face is the first provider and GitHub the second; neither is the product.
 
 Acquisition is a plugin. The archive format, the vault, and the CLI verbs do
 not belong to Hugging Face. Hugging Face is the first **source provider**:
@@ -42,6 +42,23 @@ huggingface:datasets/owner/name
 datasets/owner/name                      # Hugging Face shorthand
 https://huggingface.co/datasets/owner/name
 ```
+
+GitHub repositories, archived as **code** bundles ([Code bundles](CODE.md)):
+
+```
+github:owner/repo
+gh:owner/repo
+https://github.com/owner/repo
+```
+
+The default revision is `HEAD` — the repository's default branch,
+whatever it is called — and `--revision` takes a branch, tag, or commit.
+A URL that buries the revision (`…/tree/v1.2`, `…/commit/abc…`,
+`…/releases/tag/v1`) is refused with the `--revision` command that says
+the same thing unambiguously; a deep link to an issue or a pull request
+resolves to the repository. `GITHUB_TOKEN` (or `GH_TOKEN`) in the
+environment reads private repositories and lifts the unauthenticated API
+allowance.
 
 Unprefixed `owner/name` and `datasets/owner/name` stay as Hugging Face
 shorthand so existing commands keep working. They are convenience, not the
@@ -80,6 +97,7 @@ Each backend implements:
 | `transient_network_error` | Classify a `download_file` failure worth waiting out (`"DNS lookup failed"`, `"connection reset"`) versus a real error; the base class reads the OS-level cause chain, a plugin adds its transport library's types |
 | `transfer_session` | Optional wrap around a transfer run (resume semantics, caches); receives the operator's `max_rate` so the transport can pace smoothly |
 | `variants` | `estimate --variants` (or `None`) |
+| `declared_parents` | The parents a pin's metadata already declares — what `estimate` shows without another query |
 | `lineage` | Parents as upstream declares them, and a best-effort snapshot of descendants at register time |
 | `access_record` | Gate / authorization notes for the manifest |
 
@@ -97,10 +115,20 @@ httpx error classification, chunk sizing under a rate cap, and the payload
 bucket, and the panel's outage states are provider-neutral and live in
 `transfer.py` / `progress.py`.
 
+## GitHub specifics that stay in the plugin
+
+The REST pin (repository, commit, recursive tree, languages), raw-content
+and LFS-media URLs, `.gitattributes` parsing and pointer resolution, Range
+resume with a restart when the host answers `200`, the bearer token from
+`GITHUB_TOKEN` / `GH_TOKEN`, the rate-limit refusal that names the reset
+time, and `urllib` error classification all live in
+`src/darsay/providers/github.py`. It needs only the standard library: no
+new dependency came with the second provider.
+
 Hugging Face bundle directory names are **unchanged**
 (`owner--name`, `datasets--owner--name`) so existing vaults resume. A later
 provider includes its id in `SourceRef.bundle_name` so locators cannot
-collide across hosts.
+collide across hosts — GitHub bundles are `github--owner--repo`.
 
 ## Adding a provider
 
@@ -109,15 +137,16 @@ collide across hosts.
 3. Declare `url_hosts` if the provider has a web URL people will paste.
 4. Do not add a `--provider` flag or a new archive subcommand.
 
-The core dependency on `huggingface_hub` remains until a second provider
-ships; it is a dependency of the Hugging Face plugin, not of the archive
-format. Optional extras are unchanged.
+The core dependency on `huggingface_hub` belongs to the Hugging Face
+plugin, not to the archive format; the GitHub plugin needs only the
+standard library. Optional extras are unchanged.
 
 ## Manifest
 
 The record stores `source.provider` and `source.address` alongside
 `origin` / `repo_id` / `upstream_url`. `origin` is the hosting service
-id (`"huggingface"` for Hub archives). See [MANIFEST.md](MANIFEST.md).
+id (`"huggingface"` for Hub archives, `"github"` for repositories). See
+[MANIFEST.md](MANIFEST.md).
 
 ---
 

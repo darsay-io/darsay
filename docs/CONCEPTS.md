@@ -31,6 +31,7 @@ subcommand.
 vault/
 ├── qwen--qwen3-0.6b/<rev>/          # a model bundle
 ├── datasets--rotten_tomatoes/<rev>/ # a dataset bundle
+├── github--miaai-lab--recipe/<rev>/ # a code bundle (a repository at a commit)
 ├── catalogs/summer/                 # a catalog (want-list; no payload)
 ├── config.toml                      # optional: this vault's operator settings
 └── .runtime/                        # disposable inference envs (not archival)
@@ -252,24 +253,24 @@ two boring formats:
   with stock `tar`. Spec and manual recovery: [MVB-FORMAT.md](MVB-FORMAT.md).
 
 The payload is already a format the world knows: a Hugging Face repo
-layout. The tool is glue. The bundles are the product.
+layout, or a git tree. The tool is glue. The bundles are the product.
 
-## Two artifact types, one shape
+## Three artifact types, one shape
 
 A bundle is type-agnostic: immutable payload + recorded facts + derived
 views + one curator file. The type only changes the payload root and
 what “complete” means.
 
-| | Model | Dataset |
-|---|---|---|
-| Address | `huggingface:owner/name` | `huggingface:datasets/owner/name` |
-| Shorthand | `owner/name` | `datasets/owner/name` |
-| Payload | `model/` | `data/` |
-| Engines | transformers, llama-cpp, … | none — open the files |
-| Extra manifest | `model_metadata`, `runtime` | `dataset_metadata` |
+| | Model | Dataset | Code |
+|---|---|---|---|
+| Address | `huggingface:owner/name` | `huggingface:datasets/owner/name` | `github:owner/repo` |
+| Shorthand | `owner/name` | `datasets/owner/name` | `gh:owner/repo`, the github.com URL |
+| Payload | `model/` | `data/` | `code/` — the tree at one commit |
+| Engines | transformers, llama-cpp, … | none — open the files | none — copy the tree out and follow its README |
+| Extra manifest | `model_metadata`, `runtime` | `dataset_metadata` | `code_metadata` — what upstream said, what the tree declares about running |
 
 No new verbs. `verify` / `export` / `info` dispatch on
-`manifest.artifact_type`. [Datasets](DATASETS.md).
+`manifest.artifact_type`. [Datasets](DATASETS.md), [Code bundles](CODE.md).
 
 ## Sources are plugins
 
@@ -283,7 +284,8 @@ https://huggingface.co/Qwen/Qwen3-0.6B
 Qwen/Qwen3-0.6B                          # shorthand
 ```
 
-A second host is another `SourceProvider`, not a new CLI flag.
+GitHub is the second provider — `github:owner/repo`, or the repository
+URL — and a third host is another `SourceProvider`, not a new CLI flag.
 [Sources](SOURCES.md).
 
 ## Negatives and prints

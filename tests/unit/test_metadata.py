@@ -91,3 +91,86 @@ def test_estimate_runtime_lists_engines_from_formats(tmp_path):
     assert runtime["supported_engines"] == ["transformers"]
     assert runtime["tested_hardware"] is None
     assert runtime["cpu_inference"] is True
+
+
+def test_runtime_declarations_read_the_inventory_without_a_verdict():
+    from darsay.metadata import RUNTIME_DECLARATION_CAP, runtime_declarations
+
+    paths = [
+        "README.md",
+        "Dockerfile",
+        "docker/Dockerfile.gpu",
+        "compose.yaml",
+        "pyproject.toml",
+        "requirements/dev.txt",
+        "start.sh",
+        "scripts/nested.sh",  # shell counts at the root only
+        "Makefile",
+        "sub/Makefile",  # so does make
+        ".env.example",
+        "package.json",
+        "Cargo.toml",
+        "go.mod",
+        "flake.nix",
+    ]
+    out = runtime_declarations(paths)
+    assert out["read_from"] == "inventory"
+    found = out["found"]
+    assert found["container"] == ["Dockerfile", "docker/Dockerfile.gpu"]
+    assert found["compose"] == ["compose.yaml"]
+    assert found["python"] == ["pyproject.toml", "requirements/dev.txt"]
+    assert found["shell"] == ["start.sh"]
+    assert found["make"] == ["Makefile"]
+    assert found["env_template"] == [".env.example"]
+    assert found["node"] == ["package.json"]
+    assert found["rust"] == ["Cargo.toml"]
+    assert found["go"] == ["go.mod"]
+    assert found["nix"] == ["flake.nix"]
+    assert out["counts"]["container"] == 2
+    assert runtime_declarations(["README.md"]) == {
+        "read_from": "inventory",
+        "found": None,
+        "counts": None,
+    }
+    many = [f"s{i}.sh" for i in range(RUNTIME_DECLARATION_CAP + 5)]
+    capped = runtime_declarations(many)
+    assert len(capped["found"]["shell"]) == RUNTIME_DECLARATION_CAP
+    assert capped["counts"]["shell"] == RUNTIME_DECLARATION_CAP + 5
+
+
+def test_extract_code_metadata_records_upstream_and_inventory(tmp_path):
+    from darsay.metadata import extract_code_metadata
+    from tests.payloads import code_files
+
+    payload = tmp_path / "code"
+    for name, data in code_files().items():
+        path = payload / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+    (payload / ".cache" / "github").mkdir(parents=True)
+    (payload / ".cache" / "github" / "x.sh.incomplete").write_bytes(b"partial")
+    meta = extract_code_metadata(
+        payload,
+        {"repository": {"description": "d", "languages": {}, "default_branch": "main"}},
+    )
+    assert meta["description"] == "d"
+    assert meta["languages"] is None  # empty upstream map is unknown, not {}
+    assert meta["default_branch"] == "main"
+    assert meta["topics"] is None
+    found = meta["runtime_declarations"]["found"]
+    assert found["shell"] == [
+        "start.sh",
+        "stop.sh",
+    ]  # the partial in .cache is not payload
+    assert found["container"] == ["Dockerfile"]
+    # With file records, the inventory (not the disk) is the source of paths.
+    records = [
+        {"path": "code/only.sh", "size": 1},
+        {"path": "code/deep/Dockerfile", "size": 1},
+    ]
+    from_records = extract_code_metadata(payload, {}, records)
+    assert from_records["runtime_declarations"]["found"] == {
+        "container": ["deep/Dockerfile"],
+        "shell": ["only.sh"],
+    }
+    assert from_records["description"] is None

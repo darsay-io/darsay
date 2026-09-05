@@ -24,6 +24,7 @@ from .base import (
     SourceRef,
     describe_network_error,
     iter_causes,
+    throttled_chunk_size,
 )
 
 # Hub lineage tags: `base_model:<repo_id>` declares a parent, and
@@ -40,10 +41,6 @@ _TRANSIENT_STATUSES = frozenset({408, 425, 429, 500, 502, 503, 504})
 # The Hub client's own retry commentary. darsay reports outages itself, so
 # these would only duplicate the panel's account.
 _HUB_RETRY_CHATTER = ("Error while downloading from",)
-# Under a rate cap, read in chunks worth about a quarter second so pacing
-# sleeps are short and the running rate stays smooth; never below this.
-_MIN_THROTTLED_CHUNK = 64 * 1024
-
 _FORMAT_TAGS = (
     "gguf",
     "mlx",
@@ -131,11 +128,6 @@ def _variant_formats(model_id: str, tags: list[str] | None) -> list[str] | None:
         if hint in lowered and hint not in found:
             found.append(hint)
     return found or None
-
-
-def throttled_chunk_size(max_rate: int, default: int) -> int:
-    """Read chunk for a capped transfer: about a quarter second of bytes."""
-    return max(_MIN_THROTTLED_CHUNK, min(default, max_rate // 4))
 
 
 class _RetryChatterFilter(logging.Filter):
@@ -617,6 +609,9 @@ class HuggingFaceProvider(SourceProvider):
             "count_listed": len(rows),
             "repos": rows,
         }
+
+    def declared_parents(self, source: SourceRef, metadata: dict) -> list[dict] | None:
+        return parents_from_metadata(metadata, canonical_prefix=f"{self.name}:")
 
     def lineage(self, source: SourceRef, metadata: dict) -> dict:
         """The manifest ``lineage`` section, from upstream declarations and
