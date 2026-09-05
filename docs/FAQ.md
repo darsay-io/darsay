@@ -248,7 +248,62 @@ destination is a *file*, not a vault. [MVB format](MVB-FORMAT.md).
 
 Because `/Volumes/big` with the disk unmounted is a folder on the boot
 disk. Copying 60 GB into it would succeed and be wrong. Mount the disk,
-or make the folder on purpose, and rerun.
+or make the folder on purpose, and rerun. If the disk was ejected and
+left an empty folder where it used to mount, `mv` and `cp` refuse that
+too — an empty directory under `/Volumes` (or `/media`, `/mnt`) that is
+not itself a mount point reads as a disk that is not plugged in, and
+writing there would fill the boot disk. `list`, `du`, `verify`, and
+`doctor` say the same when a vault you named is not there: "the vault
+directory does not exist; if it is on a removable disk, that disk may
+not be mounted". A default `~/darsay` that does not exist yet is just an
+empty vault, not an error.
+
+### The disk is FAT32. Anything to watch for?
+
+Yes: FAT32 cannot hold a single file of 4 GiB or more, which a model
+shard clears easily. `mv` and `cp` read the destination filesystem and
+refuse before copying a byte when a payload file is too big, naming the
+files and the fix — reformat the stick as exFAT, which keeps the
+cross-platform convenience without the limit. exFAT and every modern
+filesystem (APFS, ext4, NTFS, Btrfs, ZFS) are fine.
+
+### Can I move, copy, or verify a whole drive at once?
+
+Yes. `mv`, `cp`, and `verify` take more than one bundle, and `--all`
+acts on every registered bundle in the vault:
+
+```bash
+darsay --vault /Volumes/drive verify --all       # attest the whole drive
+darsay cp --all /Volumes/backup                   # replicate this vault to a disk
+darsay --vault /Volumes/drive mv --all ~/darsay   # move everything in
+```
+
+`verify --all` re-hashes each bundle and exits non-zero naming any that
+failed. `cp --all` / `mv --all` copy or move the lot, each verified at
+the destination before the source is kept or removed. Naming bundles and
+passing `--all` together is refused, so the two ways never half-combine.
+
+### What is on this drive that I do not have?
+
+```bash
+darsay list /Volumes/drive
+```
+
+Point `list` at another vault — a mounted drive — and it overlays that
+vault against this one, read-only. Each bundle on the drive shows as
+`new` (not here), `have` (here, same bundle hash), `differ` (here, but
+the bytes differ), or `partial`. `--ids` prints just the actionable set
+(everything not already identical here). Those ids live on the drive, so
+copy them from there:
+
+```bash
+darsay --vault /Volumes/drive cp \
+  $(darsay --vault ~/darsay list /Volumes/drive --ids) ~/darsay
+```
+
+A bundle dragged onto a disk by hand at the wrong depth (not
+`<name>/<revision>/`) is invisible to the normal walk; `list` names it in
+a footnote with the `cp` that files it into the layout.
 
 ### What travels with `mv` / `cp`, and what stays behind?
 
