@@ -89,7 +89,7 @@ def test_archive_refuses_to_overwrite_without_force(vault, test_provider):
     archive_quiet("test:acme/toy", vault=vault)
     with pytest.raises(SystemExit, match="already exists") as exc:
         archive_quiet("test:acme/toy", vault=vault)
-    assert "darsay info" in str(exc.value)
+    assert f"darsay --vault {vault} info" in str(exc.value)
     assert "--force re-pins" in str(exc.value)
 
 

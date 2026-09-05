@@ -370,7 +370,7 @@ def test_cli_dry_run_then_migrate_then_verify(vault, capsys):
     assert (
         f"Wrote manifest.json, README.md, SHA256SUMS  (schema {SCHEMA_VERSION})" in out
     )
-    assert f"next:  darsay verify {TOY}@{REV}" in out
+    assert f"next:  darsay --vault {vault} verify {TOY}@{REV}" in out
     assert load_manifest(bundle)["identity"]["family"] == "Toy"
 
     assert main(["--vault", str(vault), "verify", str(bundle)]) == 0
@@ -413,8 +413,8 @@ def test_cli_migrate_all_walks_the_vault(vault, test_provider, capsys):
     out = capsys.readouterr().out
     assert out.count("Wrote manifest.json") == 2
     assert f"Migrated 2 records to schema {SCHEMA_VERSION}." in out
-    assert f"  darsay verify {PLAIN}@{REV}\n" in out
-    assert f"  darsay verify {ROWS}@{REV}\n" in out
+    assert f"  darsay --vault {vault} verify {PLAIN}@{REV}\n" in out
+    assert f"  darsay --vault {vault} verify {ROWS}@{REV}\n" in out
 
     assert main(["--vault", str(vault), "migrate", "--all"]) == 0
     assert "Every record in" in capsys.readouterr().out
@@ -588,7 +588,7 @@ def test_migrate_says_when_the_records_own_verification_still_stands(vault, caps
     assert "next:" not in out
     assert (
         f"done:  the record says the payload passed verification at this path on "
-        f"{date}; `darsay verify {TOY}@{REV}` re-hashes it at any time"
+        f"{date}; `darsay --vault {vault} verify {TOY}@{REV}` re-hashes it at any time"
     ) in out
 
 
@@ -607,8 +607,8 @@ def test_migrate_all_sends_only_the_arrivals_to_verify(vault, capsys):
     assert main(["--vault", str(vault), "migrate", "--all"]) == 0
     out = capsys.readouterr().out
     assert "  next: re-hash each payload where it landed:\n" in out
-    assert f"  darsay verify {ROWS}@{REV}\n" in out
-    assert f"  darsay verify {PLAIN}@{REV}\n" not in out
+    assert f"  darsay --vault {vault} verify {ROWS}@{REV}\n" in out
+    assert f"  darsay --vault {vault} verify {PLAIN}@{REV}\n" not in out
     assert (
         "  1 record say the payload passed verification at its path; "
         "`darsay verify` re-hashes at any time"

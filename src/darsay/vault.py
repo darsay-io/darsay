@@ -237,6 +237,21 @@ def iter_bundle_dirs(vault: Path) -> list[Path]:
     return sorted(found)
 
 
+def command_prefix(vault: Path) -> list[str]:
+    """``["darsay"]``, plus ``--vault <vault>`` when a bare command looks elsewhere.
+
+    A pasted ``darsay <verb> <id>`` searches the default vault
+    (``$DARSAY_HOME`` or ``~/darsay``); when this vault is not that one the
+    command needs ``--vault`` to resolve the id, so a hint printed under
+    ``--vault`` prints it back.
+    """
+    try:
+        same = Path(vault).resolve() == default_vault().resolve()
+    except OSError:
+        same = False
+    return ["darsay"] if same else ["darsay", "--vault", str(vault)]
+
+
 def registered_in(vault: Path, bundle_dir: Path) -> bool:
     """Whether ``bundle_dir`` is one of the vault's own ``<name>/<rev>`` rows.
 

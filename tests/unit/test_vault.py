@@ -264,3 +264,13 @@ def test_registered_in_is_the_vaults_own_two_level_row(tmp_path, monkeypatch):
     assert not registered_in(
         vault, tmp_path / "arrivals" / "acme--toy" / "aaaaaaaaaaaa"
     )
+
+
+def test_command_prefix_adds_vault_only_when_not_the_default(tmp_path, monkeypatch):
+    from darsay.vault import command_prefix
+
+    home = tmp_path / "darsay"
+    monkeypatch.setenv("DARSAY_HOME", str(home))
+    assert command_prefix(home) == ["darsay"]
+    other = tmp_path / "drive"
+    assert command_prefix(other) == ["darsay", "--vault", str(other)]

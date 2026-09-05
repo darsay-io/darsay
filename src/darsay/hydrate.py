@@ -695,7 +695,14 @@ def hydrate_bundle(
             f"Hydration recorded with a FAILING probe — see {bundle_dir / HYDRATION_FILE}"
         )
     else:
-        progress(f"Hydrated. Next: darsay run {manifest['bundle_id']}")
+        import shlex
+
+        from .vault import command_prefix
+
+        run_cmd = shlex.join(
+            [*command_prefix(bundle_dir.parent.parent), "run", manifest["bundle_id"]]
+        )
+        progress(f"Hydrated. Next: {run_cmd}")
     return record
 
 

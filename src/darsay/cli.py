@@ -93,17 +93,23 @@ def _bundle_dir(
     )
 
 
-def _handle(args, bundle_dir: Path, bundle_id: str) -> str:
-    """How a pasted command names ``bundle_dir``: its id in the vault, else its path.
+def _bundle_command(
+    args, verb: str, bundle_dir: Path, bundle_id: str, *trailing: str
+) -> str:
+    """A pasteable ``darsay … <bundle> …`` that resolves from where it is run.
 
-    An id is a search of the vault; a bundle addressed by a path somewhere
-    else gets that path back, quoted for the shell.
+    A bundle the vault lists is named by its id, with ``--vault`` when the
+    vault is not the default so the id resolves; one addressed by a path
+    somewhere else is named by that path, which needs no vault.
     """
-    from .vault import registered_in
+    from .vault import command_prefix, registered_in
 
-    if registered_in(_vault_path(args), bundle_dir):
-        return bundle_id
-    return shlex.quote(str(bundle_dir))
+    vault = _vault_path(args)
+    if registered_in(vault, bundle_dir):
+        tokens = [*command_prefix(vault), verb, bundle_id, *trailing]
+    else:
+        tokens = ["darsay", verb, str(bundle_dir), *trailing]
+    return shlex.join(tokens)
 
 
 def _positive_float(value: str) -> float:
@@ -705,10 +711,8 @@ def cmd_archive(args) -> int:
     from .archiver import load_manifest
 
     artifact = load_manifest(bundle).get("artifact_type")
-    next_cmd = (
-        f"darsay info {bundle_id}"
-        if artifact == "dataset"
-        else f"darsay run {bundle_id}"
+    next_cmd = _bundle_command(
+        args, "info" if artifact == "dataset" else "run", bundle, bundle_id
     )
     print(f"\nBundle ready: {bundle}")
     print(f"  id:           {bundle_id}")
@@ -1564,7 +1568,7 @@ def cmd_info(args) -> int:
         else:
             print(
                 "  hydration:  not hydrated "
-                f"(darsay hydrate {_handle(args, bundle, m['bundle_id'])})"
+                f"({_bundle_command(args, 'hydrate', bundle, m['bundle_id'])})"
             )
     return 0
 
@@ -1674,28 +1678,27 @@ def cmd_migrate(args) -> int:
     pending = [plan for plan in todo if not plan.get("verified_here")]
     stands = [plan for plan in todo if plan.get("verified_here")]
     print()
-    # The id names a bundle the vault lists; one migrated by a path
-    # elsewhere is named by that path, or the pasted command finds nothing.
-    handle = lambda plan: _handle(args, Path(plan["path"]), plan["bundle_id"])  # noqa: E731
+    # The id names a bundle the vault lists (with --vault when it is not the
+    # default); one migrated by a path elsewhere is named by that path.
+    cmd = lambda plan: _bundle_command(  # noqa: E731
+        args, "verify", Path(plan["path"]), plan["bundle_id"]
+    )
     if len(todo) == 1:
         plan = todo[0]
         if pending:
-            print(
-                f"  next:  darsay verify {handle(plan)}   "
-                "(re-hash the payload where it landed)"
-            )
+            print(f"  next:  {cmd(plan)}   (re-hash the payload where it landed)")
         else:
             print(
                 f"  done:  the record says the payload passed verification at this "
-                f"path on {plan['verified_here']}; `darsay verify "
-                f"{handle(plan)}` re-hashes it at any time"
+                f"path on {plan['verified_here']}; `{cmd(plan)}` re-hashes it at "
+                "any time"
             )
         return 0
     print(f"Migrated {len(todo)} records to schema {todo[0]['to_schema']}.")
     if pending:
         print("  next: re-hash each payload where it landed:")
         for plan in pending:
-            print(f"  darsay verify {handle(plan)}")
+            print(f"  {cmd(plan)}")
     if stands:
         print(
             f"  {len(stands)} record{'s' if len(stands) != 1 else ''} say the "

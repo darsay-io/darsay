@@ -69,6 +69,11 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Fixed
 
+- Every pasted next-step command that names a bundle by id now carries
+  `--vault` when the vault is not the default one, so `migrate`'s verify
+  line, `info`'s hydrate hint, `archive`'s completion and already-exists
+  hints, and `hydrate`'s run hint resolve from where they are pasted. A
+  bundle named by a path prints the path, which needs no vault.
 - `darsay migrate` on a bundle addressed by a path outside the vault — an
   arrival migrated where rsync left it, as the refusal's own hint spells
   it — ends with `darsay verify <that path>`. The id it printed before is

@@ -343,7 +343,7 @@ def test_archive_next_hint_is_run_for_models_info_for_datasets(
     assert main(["--vault", str(vault), "archive", "test:acme/toy"]) == 0
     model_out = capsys.readouterr().out
     assert "next:" in model_out
-    assert "darsay run test--acme--toy@" in model_out
+    assert f"darsay --vault {vault} run test--acme--toy@" in model_out
 
     test_provider.add_repo(
         "acme/reviews",
@@ -354,8 +354,8 @@ def test_archive_next_hint_is_run_for_models_info_for_datasets(
     )
     assert main(["--vault", str(vault), "archive", "test:datasets/acme/reviews"]) == 0
     data_out = capsys.readouterr().out
-    assert "darsay info " in data_out
-    assert "darsay run " not in data_out.split("next:")[-1]
+    assert f"darsay --vault {vault} info " in data_out
+    assert " run " not in data_out.split("next:")[-1]
 
 
 def test_smoke_dataset_structure_via_cli(vault, test_provider, capsys):

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import json
 import platform
+import shlex
 import shutil
 import socket
 from datetime import datetime, timezone
@@ -412,7 +413,10 @@ def archive(
         manifest_path = bundle_dir / "manifest.json"
         if manifest_path.exists() and not force and not dry_run:
             bundle_id = f"{bundle_dir.parent.name}@{bundle_dir.name}"
-            next_hint = f"`darsay info {bundle_id}` or `darsay run {bundle_id}`"
+            from .vault import command_prefix
+
+            paste = shlex.join(command_prefix(bundle_dir.parent.parent))
+            next_hint = f"`{paste} info {bundle_id}` or `{paste} run {bundle_id}`"
             try:
                 existing = json.loads(manifest_path.read_text(encoding="utf-8"))
             except (OSError, json.JSONDecodeError, TypeError):
@@ -421,7 +425,7 @@ def archive(
                 isinstance(existing, dict)
                 and existing.get("artifact_type") == "dataset"
             ):
-                next_hint = f"`darsay info {bundle_id}`"
+                next_hint = f"`{paste} info {bundle_id}`"
             raise SystemExit(
                 f"error: bundle already exists: {bundle_dir}\n"
                 f"  {bundle_id} is already in the vault — {next_hint}.\n"
