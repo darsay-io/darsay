@@ -218,10 +218,20 @@ def _private_dir(path: Path) -> None:
         os.close(fd)
 
 
+def _mount_hint(vault: Path) -> str:
+    """`` (this disk may not be mounted)`` when the root is under a mount point."""
+    from .vault import _mount_root_of
+
+    root = _mount_root_of(vault)
+    return f" (a removable disk here may not be mounted under {root})" if root else ""
+
+
 def _ensure_vault(vault: Path) -> None:
     """Require an existing vault; doctor must never create a mistyped root."""
     if not vault.exists():
-        raise DoctorError(f"vault root not found: {vault}", EXIT_NOINPUT)
+        raise DoctorError(
+            f"vault root not found: {vault}{_mount_hint(vault)}", EXIT_NOINPUT
+        )
     if not vault.is_dir():
         raise DoctorError(f"vault root is not a directory: {vault}", EXIT_NOINPUT)
 
@@ -2248,7 +2258,9 @@ def _diagnose(args, vault: Path, *, force_fix: bool = False) -> int:
     since_timestamp = _parse_since(getattr(args, "since", None))
     checks = _selection_scope(args)
     if not vault.exists():
-        raise DoctorError(f"vault root not found: {vault}", EXIT_NOINPUT)
+        raise DoctorError(
+            f"vault root not found: {vault}{_mount_hint(vault)}", EXIT_NOINPUT
+        )
     # Diagnosis creates an evidence run, so serialize it with mutations and
     # refuse to hide an interrupted prior transaction behind a healthy report.
     attempts = 1 if fix and not dry_run else 2

@@ -944,10 +944,16 @@ def cmd_smoke(args) -> int:
 
 
 def cmd_list(args) -> int:
-    from .vault import bundle_records
+    from .vault import bundle_records, using_implicit_vault, vault_absence
 
     machine = args.json or args.ids or getattr(args, "next", False)
     vault = _vault_path(args, announce=not machine)
+    # A default vault that does not exist yet is a first run, not an error;
+    # an explicitly named one that is missing (an unmounted disk) is.
+    absent = vault_absence(vault)
+    if absent and not using_implicit_vault(args.vault):
+        print(f"error: {absent}: {vault}", file=sys.stderr)
+        return 1
     records = bundle_records(vault)
     catalog_spec = getattr(args, "catalog", None)
     if catalog_spec:
@@ -1386,9 +1392,13 @@ def cmd_rm(args) -> int:
 
 def cmd_du(args) -> int:
     from .readme_gen import human_size
-    from .vault import bundle_records, dir_size
+    from .vault import bundle_records, dir_size, using_implicit_vault, vault_absence
 
     vault = _vault_path(args, announce=not args.json)
+    absent = vault_absence(vault)
+    if absent and not using_implicit_vault(args.vault):
+        print(f"error: {absent}: {vault}", file=sys.stderr)
+        return 1
     records = bundle_records(vault)
     runtime = Path(os.environ.get("DARSAY_RUNTIME") or vault / ".runtime")
     runtime_bytes = dir_size(runtime)

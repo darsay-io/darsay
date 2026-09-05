@@ -274,3 +274,30 @@ def test_command_prefix_adds_vault_only_when_not_the_default(tmp_path, monkeypat
     assert command_prefix(home) == ["darsay"]
     other = tmp_path / "drive"
     assert command_prefix(other) == ["darsay", "--vault", str(other)]
+
+
+def test_vault_absence_distinguishes_missing_unmounted_and_stub(tmp_path, monkeypatch):
+    import darsay.vault as vault_mod
+    from darsay.vault import vault_absence
+
+    mounts = tmp_path / "mounts"
+    monkeypatch.setattr(vault_mod, "MOUNT_ROOTS", (str(mounts),))
+
+    # A healthy, populated vault: nothing to say.
+    good = tmp_path / "vault"
+    _write_bundle(good, "acme--toy", "aaaaaaaaaaaa")
+    assert vault_absence(good) is None
+
+    # Missing, plain path vs missing under a mount root.
+    assert "does not exist" in vault_absence(tmp_path / "gone")
+    assert "may not be mounted" in vault_absence(mounts / "USB")
+
+    # An empty stub where a volume mounts, but is not a mount point: refuse.
+    stub = mounts / "USB"
+    stub.mkdir(parents=True)
+    assert "not a mounted volume" in vault_absence(stub)
+
+    # An empty directory that is not under a mount root is just empty.
+    plain_empty = tmp_path / "empty-but-fine"
+    plain_empty.mkdir()
+    assert vault_absence(plain_empty) is None

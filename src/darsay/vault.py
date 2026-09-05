@@ -237,6 +237,52 @@ def iter_bundle_dirs(vault: Path) -> list[Path]:
     return sorted(found)
 
 
+# Where removable and external disks mount, so an absent directory there
+# reads as "not plugged in", not "empty".
+MOUNT_ROOTS = ("/Volumes", "/media", "/mnt", "/run/media")
+
+
+def _mount_root_of(path: Path) -> str | None:
+    p = str(Path(path).expanduser().resolve())
+    for root in MOUNT_ROOTS:
+        if p == root or p.startswith(root + "/"):
+            return root
+    return None
+
+
+def vault_absence(vault: Path) -> str | None:
+    """Why ``vault`` is not a usable directory, or ``None`` when it is fine.
+
+    On a laptop a missing directory under ``/Volumes`` (or ``/media`` etc.)
+    is almost always a disk that is not mounted, and an *empty* directory
+    that sits where a volume mounts but is not itself a mount point is the
+    stub the OS leaves after an eject — writing there fills the boot disk.
+    Both are named so, apart from a plain typo.
+    """
+    v = Path(vault).expanduser()
+    root = _mount_root_of(v)
+    if not v.exists():
+        if root:
+            return (
+                "the vault directory does not exist; if it is on a removable disk, "
+                f"that disk may not be mounted under {root}"
+            )
+        return "the vault directory does not exist"
+    if not v.is_dir():
+        return "the vault path is not a directory"
+    if root and not os.path.ismount(v):
+        try:
+            empty = not any(v.iterdir())
+        except OSError:
+            empty = False
+        if empty:
+            return (
+                f"this is an empty folder under {root}, not a mounted volume — the "
+                "disk may not be plugged in (writing here would fill the boot disk)"
+            )
+    return None
+
+
 def command_prefix(vault: Path) -> list[str]:
     """``["darsay"]``, plus ``--vault <vault>`` when a bare command looks elsewhere.
 
@@ -404,6 +450,12 @@ def resolve_bundle(
                 f"\n  hint: darsay list {folded}"
                 f"\n  hint: darsay archive --next {folded}"
             )
+    absent = vault_absence(vault)
+    if absent:
+        raise SystemExit(
+            f"error: {absent}: {vault}\n"
+            "  hint: mount the disk, or point --vault at a vault that exists"
+        )
     raise SystemExit(
         f"error: no bundle matching {raw!r} in {vault}/\n"
         f"  hint: darsay list   (or darsay --vault {vault} list)"

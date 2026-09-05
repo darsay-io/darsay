@@ -237,6 +237,28 @@ def test_mv_refusals(tmp_path, vault, test_provider):
     assert (other / "model" / "extra-print.gguf").is_file()
 
 
+def test_cp_refuses_an_unmounted_volume_stub(tmp_path, test_provider, monkeypatch):
+    """An empty folder where a volume mounts but is not mounted: cp refuses
+    rather than filling the boot disk (the leftover after an eject)."""
+    import darsay.vault as vault_mod
+
+    mounts = tmp_path / "mounts"
+    monkeypatch.setattr(vault_mod, "MOUNT_ROOTS", (str(mounts),))
+    src_vault = tmp_path / "src"
+    src_vault.mkdir()
+    bundle = _registered_bundle(src_vault, test_provider)
+
+    stub = mounts / "USB"
+    stub.mkdir(parents=True)  # exists, empty, not a mount point
+    with pytest.raises(SystemExit, match="not a mounted volume"):
+        copy_bundle(bundle, stub, progress=silent)
+    assert list(stub.iterdir()) == [], "cp wrote nothing into the stub"
+
+    missing = mounts / "GONE"
+    with pytest.raises(SystemExit, match="may not be mounted under"):
+        copy_bundle(bundle, missing, progress=silent)
+
+
 def test_mv_dry_run_moves_nothing_and_ends_with_the_real_command(
     tmp_path, vault, test_provider, capsys
 ):

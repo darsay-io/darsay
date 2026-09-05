@@ -69,6 +69,13 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Fixed
 
+- An explicitly named vault that does not exist is reported as such, and
+  a removable disk that is not mounted is named as the likely cause:
+  `list`, `du`, `verify`, and `doctor` say so instead of `no bundles` /
+  `no bundle matching`, and `mv` / `cp` refuse to copy onto an empty stub
+  where a volume should be mounted (the folder an eject leaves behind),
+  which would silently fill the boot disk. The default `~/darsay` missing
+  on first run is still a normal empty vault, not an error.
 - Every pasted next-step command that names a bundle by id now carries
   `--vault` when the vault is not the default one, so `migrate`'s verify
   line, `info`'s hydrate hint, `archive`'s completion and already-exists

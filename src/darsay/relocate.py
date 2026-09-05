@@ -204,12 +204,26 @@ def relocation_plan(bundle_dir: Path, dest_vault: Path, *, op: str = "mv") -> di
     if not rev:
         raise SystemExit(f"error: malformed bundle_id in manifest: {bundle_id}")
 
+    from .vault import _mount_root_of, vault_absence
+
     dest_vault = Path(dest_vault).expanduser()
     if not dest_vault.is_dir():
+        root = _mount_root_of(dest_vault)
+        hint = (
+            f"\n  if this is a removable disk, it may not be mounted under {root}."
+            if root
+            else ""
+        )
         raise SystemExit(
-            f"error: destination vault does not exist: {dest_vault}\n"
+            f"error: destination vault does not exist: {dest_vault}{hint}\n"
             f"  {op} does not create vaults: an unmounted disk must not become a "
             "folder on this one. Create it, or mount it, and rerun."
+        )
+    stub = vault_absence(dest_vault)
+    if stub:
+        raise SystemExit(
+            f"error: {op} refuses to copy onto {dest_vault}: {stub}.\n"
+            "  Mount the disk and rerun."
         )
     dest = dest_vault / name / rev
     source_real = bundle_dir.resolve()
