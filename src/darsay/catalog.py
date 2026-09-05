@@ -25,7 +25,7 @@ from .lineage import display_generation, group_by_family, lineage_of_source
 from .readme_gen import _curation_body, human_size
 from .sources import parse_source
 
-CATALOG_SCHEMA_VERSION = "3.0.0"
+CATALOG_SCHEMA_VERSION = "3.1.0"
 CATALOG_SCHEMA_MAJOR = 3
 CATALOG_KIND = "darsay.catalog"
 STALE_AFTER_DAYS = 7
@@ -56,6 +56,7 @@ DIGEST_KEYS = frozenset(
         "precision",
         "bytes_per_param",
         "architecture",
+        "attention",
         "parents",
     }
 )
@@ -331,6 +332,9 @@ def estimate_digest(est: dict) -> dict:
         "precision": precision.get("label"),
         "bytes_per_param": precision.get("bytes_per_param"),
         "architecture": lineage.get("architecture"),
+        "attention": est.get("attention")
+        if isinstance(est.get("attention"), dict)
+        else None,
         "parents": _clean_parents(lineage.get("parents")),
     }
     assert set(digest) == DIGEST_KEYS

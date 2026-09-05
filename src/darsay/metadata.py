@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from .attention import attention_shape
 from .precision import bytes_per_param, precision_facts
 from .safetensors_meta import summarize_safetensors
 from .weight_variants import model_weight_bytes
@@ -107,6 +108,8 @@ def extract_model_metadata(payload_root: Path, card_data: dict | None = None) ->
         "num_hidden_layers": config.get("num_hidden_layers"),
         "num_attention_heads": config.get("num_attention_heads"),
         "num_key_value_heads": config.get("num_key_value_heads"),
+        # What one token of context costs: the KV cache's shape (attention.py).
+        "attention": attention_shape(config),
         "tie_word_embeddings": config.get("tie_word_embeddings"),
         "tokenizer": {
             "class": tokenizer_config.get("tokenizer_class"),

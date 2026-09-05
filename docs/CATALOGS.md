@@ -6,7 +6,7 @@
   <a href="../README.md">README</a>
 </p>
 
-# catalog.json — schema reference (v3.0.0)
+# catalog.json — schema reference (v3.1.0)
 
 > **In one sentence.** A catalog is a curated list of works. The vault is
 > that list, realized. Possession is a view, not a rewrite of this file.
@@ -54,7 +54,7 @@ writable.
 
 | Field | Meaning |
 |---|---|
-| `catalog_schema_version` | `"3.0.0"`. Major = breaking. |
+| `catalog_schema_version` | `"3.1.0"`. Major = breaking; 3.1.0 added the digest's `attention`. |
 | `kind` | Always `"darsay.catalog"`. |
 | `id` | Slug. Matches the directory name when stored at `catalogs/<id>/`. Lowercase letter, then letters, digits, `.`, `_`, `-` (max 64). |
 | `title` | Human title. Defaults to `id`. |
@@ -105,6 +105,7 @@ Stale after 7 days (`*` on SIZE in `list`).
 | `precision` | The release precision label — `BF16`, `FP8`, `MXFP4`, `AWQ INT4`, `Q4_K_M` — from `config.json`'s `quantization_config`, the dominant dtype, or (GGUF-only repos) the file name ([Quantization §2](QUANTIZATION.md#2-precision-and-size-scope)); `null` when nothing establishes it. Precision does not establish original-release status. |
 | `bytes_per_param` | Measured model weight bytes over `parameters`. About 2 is a 16-bit release, about 1 an 8-bit release, about 0.5 a 4-bit one. `null` when either side is unknown, and for GGUF packs, incomplete shard selections, or projector-only selections. |
 | `architecture` | `config.json` `model_type` (`qwen3_5_moe_text`), falling back to the Hub's GGUF architecture metadata; `null` when neither is available. |
+| `attention` | The KV cache's shape from `config.json` — `{kind, full_layers, sliding_layers, sliding_window, recurrent_layers, kv_heads, head_dim, values, kv_bytes_per_token}` — so a reader can price a context length: the cache for N tokens is `kv_heads × head_dim × values × bytes per value × (full_layers × N + sliding_layers × min(N, sliding_window))`, and `kv_bytes_per_token` is that at sixteen bits for one token across every attending layer. `kind` is `mha` / `gqa` / `mqa` / `mla` (`values` 1: one latent per token). Recurrent layers are counted, not priced. `null` for a GGUF-only repository or a config that does not establish the shape. Same field as the manifest's `model_metadata.attention`. |
 | `parents` | Parent edges as upstream declares them: `[{source, relation}]` where `relation` is `finetune` / `adapter` / `merge` / `quantized` / `trained_on` or `null` when unlabeled. From the card's `base_model` and `datasets` and the Hub's `base_model:*` tags. `null` when nothing is declared. |
 
 The GGUF inventory remains complete even on a selected row, so a reader

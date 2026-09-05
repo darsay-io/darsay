@@ -235,3 +235,40 @@ def test_record_tested_hardware_leaves_schema_version_alone():
     )
     assert manifest["schema_version"] == "1.6.0"
     assert manifest["runtime"]["tested_hardware"][0]["engine"] == "transformers"
+
+
+def test_preflight_names_the_kv_cache_beside_the_weights():
+    manifest = {
+        "model_metadata": {
+            "architecture": "ToyForCausalLM",
+            "attention": {
+                "kind": "gqa",
+                "full_layers": 32,
+                "sliding_layers": 0,
+                "sliding_window": None,
+                "recurrent_layers": 0,
+                "kv_heads": 8,
+                "head_dim": 128,
+                "values": 2,
+                "kv_bytes_per_token": 131072,
+            },
+        },
+        "runtime": {"estimated_min_ram_gb": 24.0},
+    }
+    issues = preflight_run(
+        manifest, "transformers", env_exists=True, ram_bytes=8 * 1024**3
+    )
+    message = next(i["message"] for i in issues if i["code"] == "insufficient-ram")
+    assert "weights × 1.2, before a KV cache of 8k context ≈ 1.0 GiB" in message
+    tight = preflight_run(
+        manifest, "transformers", env_exists=True, ram_bytes=26 * 1024**3
+    )
+    assert "before a KV cache of 8k context ≈ 1.0 GiB" in next(
+        i["message"] for i in tight if i["code"] == "tight-ram"
+    )
+    # No shape on record: the message stays the weights alone.
+    bare = {"model_metadata": {}, "runtime": {"estimated_min_ram_gb": 24.0}}
+    plain = preflight_run(bare, "transformers", env_exists=True, ram_bytes=8 * 1024**3)
+    assert "KV cache" not in next(
+        i["message"] for i in plain if i["code"] == "insufficient-ram"
+    )

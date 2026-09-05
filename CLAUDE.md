@@ -65,6 +65,13 @@ not proofs of originality or permission to omit artifacts.
   `precision.py` (release-precision labels from `config.json` /
   dtypes / GGUF names, and measured bytes per parameter; mirrored in
   `website/src/lib/precision.ts`),
+  `attention.py` (the KV cache's shape from `config.json` — attending,
+  sliding, and recurrent layers, KV heads, head dimension, a key and a
+  value per head or MLA's one latent — and `kv_bytes_per_token` at
+  sixteen bits; the digest's and manifest's `attention`, the `estimate`
+  `kv cache:` line, the README's Runtime line, and the preflight's note;
+  never guessed from a parameter count; mirrored in
+  `website/src/lib/attention.ts` against `tests/fixtures/attention-configs.json`),
   `classify.py` (negative / print / support / unknown verdicts over a
   repo's weight sets; the archive default retains all weights and support
   except weight sets whose every file has a hash-identical same-bundle twin;

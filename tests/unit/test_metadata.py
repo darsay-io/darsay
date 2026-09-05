@@ -174,3 +174,23 @@ def test_extract_code_metadata_records_upstream_and_inventory(tmp_path):
         "shell": ["only.sh"],
     }
     assert from_records["description"] is None
+
+
+def test_extract_model_metadata_records_the_attention_shape(tmp_path):
+    payload = tmp_path / "model"
+    payload.mkdir()
+    for name, data in model_files().items():
+        (payload / name).write_bytes(data)
+    meta = extract_model_metadata(payload)
+    # The toy config: one layer, two heads of four, both kept — 1 × 2 × 4 × 2 × 2 B.
+    assert meta["attention"] == {
+        "kind": "mha",
+        "full_layers": 1,
+        "sliding_layers": 0,
+        "sliding_window": None,
+        "recurrent_layers": 0,
+        "kv_heads": 2,
+        "head_dim": 4,
+        "values": 2,
+        "kv_bytes_per_token": 32,
+    }

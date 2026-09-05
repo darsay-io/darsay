@@ -6,7 +6,7 @@
   <a href="../README.md">README</a>
 </p>
 
-# manifest.json — schema reference (v2.1.0)
+# manifest.json — schema reference (v2.3.0)
 
 > **In one sentence.** The manifest is the recorded facts about a bundle.
 > Unknown is `null`. The tool never fabricates.
@@ -32,7 +32,7 @@ Conventions:
 
 | Field | Meaning |
 |---|---|
-| `schema_version` | Version of this schema (`"2.2.0"`). Major changes only on breaking layout. |
+| `schema_version` | Version of this schema (`"2.3.0"`). Major changes only on breaking layout. |
 | `kind` | Always `"darsay.bundle"`. A file with the field missing is read as `"darsay.bundle"`. Any other value is a load error. |
 | `artifact_type` | Registry key driving completeness rules and the payload root (`"model"`, `"dataset"`, or `"code"`; future: GGUF packs, papers — see `src/darsay/schema.py`). |
 | `bundle_id` | `<bundle directory name>@<first 12 of pinned revision>`, e.g. `qwen--qwen3-0.6b@c1899de289a0`. Hugging Face dataset bundles take a `datasets--` prefix (`datasets--saidutta69--fable-5-premium@684cb1f849fe`) since model and dataset namespaces can collide on that host. Other providers include their id in the directory name (`github--owner--repo@09d4424be2b7`). Stable, deterministic, unique per (source, revision). |
@@ -115,6 +115,7 @@ torch required).
 | `bytes_per_param` | Measured: model weight bytes over `parameter_count`. Null when either is unknown, and for GGUF packs, incomplete shard selections, or projector-only selections. |
 | `quantization` | `quantization_config.quant_method` when present, else null. |
 | `hidden_size`, `num_hidden_layers`, `num_attention_heads`, `num_key_value_heads`, `tie_word_embeddings` | Architecture shape. |
+| `attention` | What one token of context costs in memory, read from `config.json`: `{kind, full_layers, sliding_layers, sliding_window, recurrent_layers, kv_heads, head_dim, values, kv_bytes_per_token}`. `kind` is `mha`, `gqa`, `mqa`, or `mla`; `values` is 2 for a key and a value per head, 1 for MLA's single latent; `kv_bytes_per_token` is what one token adds to the KV cache at sixteen bits across every attending layer. Sliding layers stop growing at `sliding_window`; recurrent layers (linear attention, state-space blocks) hold a state per sequence and are counted, not priced. Null when the config does not establish the shape — never a guess from the parameter count. Since 2.3.0. |
 | `tokenizer` | `class`, `vocab_size`, `model_max_length`, `special_tokens` (bos/eos/pad/…), `chat_template_present`. |
 | `languages` | From the model card, when declared. |
 | `training_cutoff` | **curator** — rarely published. |
@@ -312,7 +313,8 @@ the release-precision label with `precision_detail` and
 and verdicts read `negative`. Payload stays byte-immutable across majors.
 2.1.0 added `archive.migrations`. 2.2.0 added the `code` artifact type —
 payload root `code/`, `code_metadata`, the `fork` relation — with no
-change to existing records.
+change to existing records. 2.3.0 added `model_metadata.attention`, the
+KV cache's shape, so a bundle's README can price a context length.
 
 ## Migration
 

@@ -32,6 +32,21 @@ def human_params(n: int | None) -> str:
     return str(n)
 
 
+def _kv_cache_lines(shape: dict | None) -> list[str]:
+    """The second occupant of memory, priced from the record's attention shape."""
+    from .attention import describe_attention, human_kv_at, human_kv_per_token
+
+    per = human_kv_per_token(shape)
+    if per is None:
+        return []
+    at = human_kv_at(shape, 32768)
+    return [
+        f"- KV cache: {per} ({describe_attention(shape)})"
+        + (f"; {at}" if at else "")
+        + " — on top of the weights, for the context you run at"
+    ]
+
+
 def _tested_hardware_line(tested: list | None) -> str:
     if not tested:
         return "- Tested hardware: not yet tested — `darsay run` records the first real run"
@@ -403,6 +418,7 @@ def _render_model_readme(bundle_dir: Path, m: dict) -> str:
         "",
         f"- Engines (from shipped formats): {', '.join(rt['supported_engines']) if rt['supported_engines'] else 'unknown'}",
         f"- Estimated minimum RAM/VRAM: {rt['estimated_min_ram_gb']} GB (estimate, weights x1.2)",
+        *_kv_cache_lines(meta.get("attention")),
         _tested_hardware_line(rt["tested_hardware"]),
         f"- CPU inference: {'yes' if rt['cpu_inference'] else 'unknown'}",
         "",

@@ -1,0 +1,107 @@
+[
+  {
+    "name": "meta-llama/Llama-3.1-8B",
+    "config": {"model_type": "llama", "hidden_size": 4096, "num_hidden_layers": 32, "num_attention_heads": 32, "num_key_value_heads": 8},
+    "attention": {"kind": "gqa", "full_layers": 32, "sliding_layers": 0, "sliding_window": null, "recurrent_layers": 0, "kv_heads": 8, "head_dim": 128, "values": 2, "kv_bytes_per_token": 131072}
+  },
+  {
+    "name": "Qwen/Qwen3-32B",
+    "config": {"model_type": "qwen3", "hidden_size": 5120, "num_hidden_layers": 64, "num_attention_heads": 64, "num_key_value_heads": 8, "head_dim": 128},
+    "attention": {"kind": "gqa", "full_layers": 64, "sliding_layers": 0, "sliding_window": null, "recurrent_layers": 0, "kv_heads": 8, "head_dim": 128, "values": 2, "kv_bytes_per_token": 262144}
+  },
+  {
+    "name": "Qwen/Qwen3-235B-A22B",
+    "config": {"model_type": "qwen3_moe", "hidden_size": 4096, "num_hidden_layers": 94, "num_attention_heads": 64, "num_key_value_heads": 4, "head_dim": 128, "num_experts": 128, "num_experts_per_tok": 8},
+    "attention": {"kind": "gqa", "full_layers": 94, "sliding_layers": 0, "sliding_window": null, "recurrent_layers": 0, "kv_heads": 4, "head_dim": 128, "values": 2, "kv_bytes_per_token": 192512}
+  },
+  {
+    "name": "deepseek-ai/DeepSeek-V3",
+    "config": {"model_type": "deepseek_v3", "hidden_size": 7168, "num_hidden_layers": 61, "num_attention_heads": 128, "num_key_value_heads": 128, "kv_lora_rank": 512, "qk_rope_head_dim": 64, "qk_nope_head_dim": 128, "v_head_dim": 128},
+    "attention": {"kind": "mla", "full_layers": 61, "sliding_layers": 0, "sliding_window": null, "recurrent_layers": 0, "kv_heads": 1, "head_dim": 576, "values": 1, "kv_bytes_per_token": 70272}
+  },
+  {
+    "name": "google/gemma-3-27b-it",
+    "config": {"model_type": "gemma3", "architectures": ["Gemma3ForConditionalGeneration"], "text_config": {"model_type": "gemma3_text", "hidden_size": 5376, "num_hidden_layers": 62, "num_attention_heads": 32, "num_key_value_heads": 16, "head_dim": 128, "sliding_window": 1024, "sliding_window_pattern": 6}, "vision_config": {"hidden_size": 1152, "num_hidden_layers": 27}},
+    "attention": {"kind": "gqa", "full_layers": 10, "sliding_layers": 52, "sliding_window": 1024, "recurrent_layers": 0, "kv_heads": 16, "head_dim": 128, "values": 2, "kv_bytes_per_token": 507904}
+  },
+  {
+    "name": "openai/gpt-oss-20b",
+    "config": {"model_type": "gpt_oss", "hidden_size": 2880, "num_hidden_layers": 24, "num_attention_heads": 64, "num_key_value_heads": 8, "head_dim": 64, "sliding_window": 128, "layer_types": ["sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention", "sliding_attention", "full_attention"]},
+    "attention": {"kind": "gqa", "full_layers": 12, "sliding_layers": 12, "sliding_window": 128, "recurrent_layers": 0, "kv_heads": 8, "head_dim": 64, "values": 2, "kv_bytes_per_token": 49152}
+  },
+  {
+    "name": "Qwen/Qwen3-Next-80B-A3B-Instruct",
+    "config": {"model_type": "qwen3_next", "hidden_size": 2048, "num_hidden_layers": 48, "num_attention_heads": 16, "num_key_value_heads": 2, "head_dim": 256, "layer_types": ["linear_attention", "linear_attention", "linear_attention", "full_attention", "linear_attention", "linear_attention", "linear_attention", "full_attention", "linear_attention", "linear_attention", "linear_attention", "full_attention", "linear_attention", "linear_attention", "linear_attention", "full_attention", "linear_attention", "linear_attention", "linear_attention", "full_attention", "linear_attention", "linear_attention", "linear_attention", "full_attention", "linear_attention", "linear_attention", "linear_attention", "full_attention", "linear_attention", "linear_attention", "linear_attention", "full_attention", "linear_attention", "linear_attention", "linear_attention", "full_attention", "linear_attention", "linear_attention", "linear_attention", "full_attention", "linear_attention", "linear_attention", "linear_attention", "full_attention", "linear_attention", "linear_attention", "linear_attention", "full_attention"]},
+    "attention": {"kind": "gqa", "full_layers": 12, "sliding_layers": 0, "sliding_window": null, "recurrent_layers": 36, "kv_heads": 2, "head_dim": 256, "values": 2, "kv_bytes_per_token": 24576}
+  },
+  {
+    "name": "mistralai/Mistral-7B-v0.1",
+    "config": {"model_type": "mistral", "hidden_size": 4096, "num_hidden_layers": 32, "num_attention_heads": 32, "num_key_value_heads": 8, "sliding_window": 4096},
+    "attention": {"kind": "gqa", "full_layers": 0, "sliding_layers": 32, "sliding_window": 4096, "recurrent_layers": 0, "kv_heads": 8, "head_dim": 128, "values": 2, "kv_bytes_per_token": 131072}
+  },
+  {
+    "name": "meta-llama/Llama-2-7b-hf",
+    "config": {"model_type": "llama", "hidden_size": 4096, "num_hidden_layers": 32, "num_attention_heads": 32},
+    "attention": {"kind": "mha", "full_layers": 32, "sliding_layers": 0, "sliding_window": null, "recurrent_layers": 0, "kv_heads": 32, "head_dim": 128, "values": 2, "kv_bytes_per_token": 524288}
+  },
+  {
+    "name": "tiiuae/falcon-7b",
+    "config": {"model_type": "falcon", "hidden_size": 4544, "n_layer": 32, "n_head": 71, "multi_query": true},
+    "attention": {"kind": "mqa", "full_layers": 32, "sliding_layers": 0, "sliding_window": null, "recurrent_layers": 0, "kv_heads": 1, "head_dim": 64, "values": 2, "kv_bytes_per_token": 8192}
+  },
+  {
+    "name": "openai-community/gpt2",
+    "config": {"model_type": "gpt2", "n_embd": 768, "n_layer": 12, "n_head": 12},
+    "attention": {"kind": "mha", "full_layers": 12, "sliding_layers": 0, "sliding_window": null, "recurrent_layers": 0, "kv_heads": 12, "head_dim": 64, "values": 2, "kv_bytes_per_token": 36864}
+  },
+  {
+    "name": "microsoft/Phi-3-mini-4k-instruct",
+    "config": {"model_type": "phi3", "hidden_size": 3072, "num_hidden_layers": 32, "num_attention_heads": 32, "num_key_value_heads": 32, "sliding_window": 2047},
+    "attention": {"kind": "mha", "full_layers": 0, "sliding_layers": 32, "sliding_window": 2047, "recurrent_layers": 0, "kv_heads": 32, "head_dim": 96, "values": 2, "kv_bytes_per_token": 393216}
+  },
+  {
+    "name": "Qwen/Qwen2.5-7B-Instruct",
+    "config": {"model_type": "qwen2", "hidden_size": 3584, "num_hidden_layers": 28, "num_attention_heads": 28, "num_key_value_heads": 4, "sliding_window": 131072, "use_sliding_window": false},
+    "attention": {"kind": "gqa", "full_layers": 28, "sliding_layers": 0, "sliding_window": null, "recurrent_layers": 0, "kv_heads": 4, "head_dim": 128, "values": 2, "kv_bytes_per_token": 57344}
+  },
+  {
+    "name": "ibm-granite/granite-4.0-h-small",
+    "config": {"model_type": "granitemoehybrid", "hidden_size": 4096, "num_hidden_layers": 40, "num_attention_heads": 32, "num_key_value_heads": 8, "layers_block_type": ["mamba", "mamba", "mamba", "mamba", "mamba", "mamba", "mamba", "mamba", "mamba", "attention", "mamba", "mamba", "mamba", "mamba", "mamba", "mamba", "mamba", "mamba", "mamba", "attention", "mamba", "mamba", "mamba", "mamba", "mamba", "mamba", "mamba", "mamba", "mamba", "attention", "mamba", "mamba", "mamba", "mamba", "mamba", "mamba", "mamba", "mamba", "mamba", "attention"]},
+    "attention": {"kind": "gqa", "full_layers": 4, "sliding_layers": 0, "sliding_window": null, "recurrent_layers": 36, "kv_heads": 8, "head_dim": 128, "values": 2, "kv_bytes_per_token": 16384}
+  },
+  {
+    "name": "nvidia/Nemotron-H-8B-Base-8K",
+    "config": {"model_type": "nemotron_h", "hidden_size": 4096, "num_hidden_layers": 52, "num_attention_heads": 32, "num_key_value_heads": 8, "hybrid_override_pattern": "M-M-M-M*-M-M-M-M*-M-M-M-M*-M-M-M-M*-M-M-M-M-M-M-M-M-"},
+    "attention": {"kind": "gqa", "full_layers": 4, "sliding_layers": 0, "sliding_window": null, "recurrent_layers": 24, "kv_heads": 8, "head_dim": 128, "values": 2, "kv_bytes_per_token": 16384}
+  },
+  {
+    "name": "ai21labs/AI21-Jamba-1.5-Mini",
+    "config": {"model_type": "jamba", "hidden_size": 4096, "num_hidden_layers": 32, "num_attention_heads": 32, "num_key_value_heads": 8, "attn_layer_period": 8, "attn_layer_offset": 4},
+    "attention": {"kind": "gqa", "full_layers": 4, "sliding_layers": 0, "sliding_window": null, "recurrent_layers": 28, "kv_heads": 8, "head_dim": 128, "values": 2, "kv_bytes_per_token": 16384}
+  },
+  {
+    "name": "google/gemma-2-9b",
+    "config": {"model_type": "gemma2", "hidden_size": 3584, "num_hidden_layers": 42, "num_attention_heads": 16, "num_key_value_heads": 8, "head_dim": 256, "sliding_window": 4096},
+    "attention": {"kind": "gqa", "full_layers": 21, "sliding_layers": 21, "sliding_window": 4096, "recurrent_layers": 0, "kv_heads": 8, "head_dim": 256, "values": 2, "kv_bytes_per_token": 344064}
+  },
+  {
+    "name": "a vision encoder alone",
+    "config": {"model_type": "siglip_vision_model", "vision_config": {"hidden_size": 1152, "num_hidden_layers": 27}},
+    "attention": null
+  },
+  {
+    "name": "an empty config",
+    "config": {},
+    "attention": null
+  },
+  {
+    "name": "a hidden size the heads do not divide",
+    "config": {"model_type": "odd", "hidden_size": 1000, "num_hidden_layers": 4, "num_attention_heads": 7},
+    "attention": null
+  },
+  {
+    "name": "not an object",
+    "config": [],
+    "attention": null
+  }
+]

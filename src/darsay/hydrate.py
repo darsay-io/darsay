@@ -28,6 +28,7 @@ import tempfile
 from fnmatch import fnmatch
 from pathlib import Path
 
+from .attention import human_kv_at
 from .identity import machine_name
 
 HYDRATION_FILE = "hydration.json"
@@ -152,13 +153,17 @@ def preflight_run(
         ram_label = "physical RAM" if sys.platform == "darwin" else "available RAM"
         if ram_bytes is not None:
             ram_label = "RAM"
+        # The estimate is the weights; the KV cache for the context you run
+        # at comes on top, and the record's attention shape prices it.
+        kv = human_kv_at((manifest.get("model_metadata") or {}).get("attention"), 8192)
+        kv_note = f", before a KV cache of {kv}" if kv else ""
         if have_gb < needed:
             issues.append(
                 {
                     "level": "error",
                     "code": "insufficient-ram",
                     "message": (
-                        f"this payload wants ~{needed} GB RAM (weights × 1.2); "
+                        f"this payload wants ~{needed} GB RAM (weights × 1.2{kv_note}); "
                         f"this machine reports {have_gb:.1f} GB {ram_label}. "
                         "Archive a GGUF subset or pass --ignore-preflight."
                     ),
@@ -170,7 +175,7 @@ def preflight_run(
                     "level": "warning",
                     "code": "tight-ram",
                     "message": (
-                        f"this payload wants ~{needed} GB RAM; this machine reports "
+                        f"this payload wants ~{needed} GB RAM{kv_note}; this machine reports "
                         f"{have_gb:.1f} GB {ram_label} — likely tight."
                     ),
                 }

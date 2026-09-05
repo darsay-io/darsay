@@ -19,6 +19,12 @@ import sys
 from pathlib import Path
 
 from .archiver import bundle_dir_for, utc_now
+from .attention import (
+    attention_shape,
+    describe_attention,
+    human_kv_at,
+    human_kv_per_token,
+)
 from .config import free_space_floor
 from .hydrate import detect_engines
 from .lineage import lineage_of_source
@@ -38,6 +44,9 @@ from .weight_variants import gguf_variants, model_weight_bytes
 WEIGHT_SUFFIXES = (".safetensors", ".bin", ".gguf", ".pt", ".pth")
 DATA_SUFFIXES = (".parquet", ".jsonl", ".json", ".csv", ".arrow", ".txt", ".tsv")
 RAM_FACTOR = 1.2  # same heuristic as metadata.estimate_runtime
+# The context the report prices a KV cache at: a working conversation, not
+# the model's ceiling — the reader scales from here.
+KV_EXAMPLE_TOKENS = 32768
 # config.json is read whole for the precision facts; anything larger is not a config.
 CONFIG_CAP_BYTES = 1024 * 1024
 
@@ -494,6 +503,8 @@ def estimate(
         else [],
         "parameters": snapshot.parameters,
         "precision": precision,
+        # The KV cache's shape, so a context length can be priced without the weights.
+        "attention": attention_shape(config) if repo_type == "model" else None,
         "lineage": lineage,
         "formats": _format_breakdown(files)
         if repo_type in ("dataset", "code")
@@ -842,6 +853,19 @@ def _precision_lines(est: dict) -> list[str]:
     return lines
 
 
+def _kv_lines(est: dict) -> list[str]:
+    """``kv cache:     128 KiB per token at 16-bit — 32 layers × 8 KV heads × 128 (GQA); 32k context ≈ 4.0 GiB``."""
+    shape = est.get("attention")
+    per = human_kv_per_token(shape)
+    if per is None:
+        return []
+    line = f"  kv cache:     {per} — {describe_attention(shape)}"
+    at = human_kv_at(shape, KV_EXAMPLE_TOKENS)
+    if at:
+        line += f"; {at}"
+    return [line + "  [config.json]"]
+
+
 def _lineage_lines(est: dict) -> list[str]:
     """``family:       Qwen · generation 3.8 · member 2.4T-A95B  [read from the name]``."""
     lin = est.get("lineage") or {}
@@ -981,6 +1005,8 @@ def print_estimate(est: dict, progress=print) -> None:
             p(line)
     elif not is_dataset:
         for line in _precision_lines(est):
+            p(line)
+        for line in _kv_lines(est):
             p(line)
         for line in _lineage_lines(est):
             p(line)

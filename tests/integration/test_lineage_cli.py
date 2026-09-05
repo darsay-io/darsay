@@ -30,7 +30,7 @@ def test_a_home_url_is_a_closed_work_that_holds_its_place(vault, test_provider, 
     catalog = json.loads((vault / "catalogs" / "summer" / "catalog.json").read_text())
     sources = [e["source"] for e in catalog["entries"]]
     assert HOME in sources
-    assert catalog["catalog_schema_version"] == "3.0.0"
+    assert catalog["catalog_schema_version"] == "3.1.0"
 
     # The overlay lists it as closed, priced as closed, in the same family.
     assert main(["--vault", str(vault), "list", "summer", "--json"]) == 0

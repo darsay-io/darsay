@@ -77,6 +77,30 @@ mismatch exits non-zero *before* downloading torch. Pass
 `--ignore-preflight` to try anyway. The first hydrate of an engine
 prints the expected install size (torch + transformers is often 1–2 GiB).
 
+### What the RAM estimate counts, and what it does not
+
+The estimate is the **weights**, with a fifth on top for the runtime's
+own buffers. It is not the whole bill. A running model also holds a **KV
+cache** — the key and value of every token in the context — and its size
+is set by the model's shape, not by its parameter count:
+
+    bytes per token = layers × KV heads × head dimension × 2 values × bytes per value
+
+`model_metadata.attention` records that shape when `config.json`
+establishes it, and the bundle's README prices it at 16-bit (the
+runtimes' default) per token and at a 32k context; the preflight names
+the cache for 8k tokens beside the weights. Two things follow. The
+llama-cpp runner takes its context from the GGUF (`n_ctx=0`), which is
+the model's *trained* ceiling — a 128k-context model reserves a 128k
+cache the moment it loads, which on a dense 70B is 40 GiB at 16-bit
+before the first token; a loader that fails or swaps at "plenty of RAM"
+is usually reserving a context it was never going to use. And a machine
+is not a model's alone: leave the operating system, the display, and the
+page cache their share — about a quarter of unified memory on a Mac, a
+tenth of system RAM on Linux, a gigabyte of a discrete card. The whole
+arithmetic, machine by machine and runtime by runtime, is the memory
+course at [darsay.io/docs/learn/memory/](https://darsay.io/docs/learn/memory/).
+
 ## Environments
 
 Envs are **shared, content-addressed venvs**: keyed by

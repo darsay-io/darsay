@@ -11,6 +11,25 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Added
 
+- **The KV cache is priced beside the weights.** A running model holds
+  two things: its weights, and the key and value of every token in the
+  context. The second was invisible to darsay. `estimate` now reads the
+  attention shape from `config.json` — attending layers, KV heads, head
+  dimension, whether a layer keeps a key and a value or one latent (MLA),
+  which layers slide over a window and which are recurrent — and prints
+  what one token costs at 16-bit and what a 32k context costs
+  (`kv cache: 128 KiB per token at 16-bit — 32 layers × 8 KV heads × 128
+  (GQA); 32k context ≈ 4.0 GiB`). The shape is recorded as the catalog
+  digest's `attention` (catalog schema **3.1.0**, additive) so a board
+  can price a context on a row, and as the manifest's
+  `model_metadata.attention` (manifest schema **2.3.0**, additive) so a
+  bundle's README carries the same line under *Runtime*; the RAM preflight
+  names the cache for 8k tokens beside the weights it compares. Nothing
+  is guessed from a parameter count: a GGUF-only repository or a config
+  that does not say has `null`. The arithmetic and how to run within it
+  is the memory course at darsay.io/docs/learn/memory/, which
+  [Hydration](docs/HYDRATION.md) and the docs index now point at.
+  Mirrored on darsay.io against `tests/fixtures/attention-configs.json`.
 - **GitHub is the second source provider.** `darsay archive github:owner/repo`
   (`gh:owner/repo`, or a github.com repository URL) pins one commit,
   lists its tree, and fetches every blob with the standard library alone —

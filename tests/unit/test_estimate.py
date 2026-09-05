@@ -202,3 +202,25 @@ def test_dominant_format_by_bytes_then_count():
         == "gguf"
     )
     assert _dominant_format([{"path": "weights", "size": 1}]) == "(none)"
+
+
+def test_kv_lines_price_one_token_and_a_working_context():
+    from darsay.estimate import _kv_lines
+
+    shape = {
+        "kind": "gqa",
+        "full_layers": 32,
+        "sliding_layers": 0,
+        "sliding_window": None,
+        "recurrent_layers": 0,
+        "kv_heads": 8,
+        "head_dim": 128,
+        "values": 2,
+        "kv_bytes_per_token": 131072,
+    }
+    assert _kv_lines({"attention": shape}) == [
+        "  kv cache:     128 KiB per token at 16-bit — 32 layers × 8 KV heads × 128 (GQA); "
+        "32k context ≈ 4.0 GiB  [config.json]"
+    ]
+    assert _kv_lines({"attention": None}) == []
+    assert _kv_lines({}) == []

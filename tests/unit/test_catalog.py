@@ -415,13 +415,13 @@ def test_project_stored_estimate_cleans_hints():
 
 def test_save_writes_the_current_schema_version(tmp_path):
     path = tmp_path / "catalog.json"
-    raw = _catalog([_entry("huggingface:acme/toy")], catalog_schema_version="3.0.0")
+    raw = _catalog([_entry("huggingface:acme/toy")], catalog_schema_version="3.1.0")
     path.write_text(json.dumps(raw), encoding="utf-8")
     loaded = load_catalog(path)
-    assert loaded["catalog_schema_version"] == "3.0.0"
+    assert loaded["catalog_schema_version"] == "3.1.0"
     save_catalog(path, loaded)
     again = json.loads(path.read_text(encoding="utf-8"))
-    assert again["catalog_schema_version"] == CATALOG_SCHEMA_VERSION == "3.0.0"
+    assert again["catalog_schema_version"] == CATALOG_SCHEMA_VERSION == "3.1.0"
 
 
 def test_adopt_preserves_hints():

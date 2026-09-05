@@ -21,8 +21,8 @@
 | | Current |
 |---|---|
 | Tool | **0.14.16** |
-| Manifest schema | **2.2.0** |
-| Catalog schema | **3.0.0** |
+| Manifest schema | **2.3.0** |
+| Catalog schema | **3.1.0** |
 | MVB format | **1.3** |
 | License | Apache 2.0 |
 
@@ -49,6 +49,14 @@ export, shards, verify. Then the spec for the command you are about to run.
 [FAQ](FAQ.md) — moving and copying bundles between vaults, rsync's standing (first-class,
 always), `darsay mv` versus `assemble --handoff`, what travels and what stays,
 and a record written by an older darsay (`darsay migrate`).
+
+**You want to run a model well on the machine you have.**
+[Hydration](HYDRATION.md) for `darsay hydrate` and `darsay run`, and
+what the RAM preflight counts. The field itself — weights in memory,
+the KV cache, context, what to leave free, the knobs of every runtime —
+is the memory course at
+[darsay.io/docs/learn/memory/](https://darsay.io/docs/learn/memory/),
+part of [Learn the field](https://darsay.io/docs/learn/).
 
 **You are reading this in 2040 and the CLI is gone.**
 [Manifest](MANIFEST.md) and [MVB format](MVB-FORMAT.md) are the two
