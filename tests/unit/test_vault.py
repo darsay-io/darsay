@@ -330,3 +330,28 @@ def test_find_loose_bundles_ignores_layout_reserved_and_payload(tmp_path):
         '{"bundle_id": "acme--toy@aaaaaaaaaaaa"}', encoding="utf-8"
     )
     assert find_loose_bundles(vault) == [loose]
+
+
+def test_write_manifest_is_atomic_and_leaves_no_temp(tmp_path):
+    from darsay.archiver import write_manifest
+
+    bundle = tmp_path / "acme--toy" / "aaaaaaaaaaaa"
+    bundle.mkdir(parents=True)
+    manifest = {"bundle_id": "acme--toy@aaaaaaaaaaaa", "schema_version": "2.1.0"}
+    write_manifest(bundle, manifest)
+    write_manifest(bundle, {**manifest, "note": "again"})
+    # no .tmp left behind either time
+    assert not list(bundle.glob(".manifest.json*.tmp"))
+    assert json.loads((bundle / "manifest.json").read_text())["note"] == "again"
+
+
+def test_fsync_tree_is_safe_on_a_bundle_tree(tmp_path):
+    from darsay.transfer import fsync_dir, fsync_tree
+
+    root = tmp_path / "b"
+    (root / "model").mkdir(parents=True)
+    (root / "manifest.json").write_text("{}", encoding="utf-8")
+    (root / "model" / "w.bin").write_bytes(b"x" * 32)
+    # returns None, raises nothing, even on a missing path
+    assert fsync_tree(root) is None
+    assert fsync_dir(tmp_path / "nope") is None

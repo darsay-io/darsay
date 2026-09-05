@@ -23,6 +23,7 @@ the first provider, not the archive format.
 from __future__ import annotations
 
 import json
+import os
 import platform
 import shlex
 import shutil
@@ -107,9 +108,34 @@ def write_manifest(bundle_dir: Path, manifest: dict) -> None:
         if key not in MANIFEST_TOP_KEYS and not str(key).startswith("_"):
             payload[key] = value
     path = bundle_dir / "manifest.json"
-    path.write_text(
-        json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8"
-    )
+    _atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False) + "\n")
+
+
+def _atomic_write_text(path: Path, text: str) -> None:
+    """Write ``text`` so a reader never sees a torn file, and fsync it down.
+
+    A same-directory temporary is fsynced, renamed over the target, and the
+    directory fsynced — the manifest is the record, so a half-written one
+    (a crash, a pulled disk) must never be observable.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    try:
+        with tmp.open("w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, path)
+    finally:
+        tmp.unlink(missing_ok=True)
+    try:
+        fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError:
+        pass
 
 
 def read_manifest(bundle_dir: Path) -> dict:

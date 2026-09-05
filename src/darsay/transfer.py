@@ -409,6 +409,52 @@ def load_ledger(bundle_dir: Path) -> dict:
     return ledger
 
 
+def fsync_dir(path: Path) -> None:
+    """Flush a directory's entries to the medium. Best effort."""
+    try:
+        fd = os.open(path, os.O_RDONLY)
+    except OSError:
+        return
+    try:
+        os.fsync(fd)
+    except OSError:
+        pass
+    finally:
+        os.close(fd)
+
+
+def fsync_tree(root: Path) -> None:
+    """fsync every file and directory under ``root`` (deepest first), then root.
+
+    Durability before a copy is called ``verified``: on a removable disk the
+    verification read and the success line can both come from the page cache
+    while the platter holds less, so a yanked drive keeps a record that says
+    verified over bytes that never landed. This forces the bytes and the
+    record down first. Best effort — a filesystem that cannot fsync a
+    directory is skipped, not fatal.
+    """
+    root = Path(root)
+    entries = sorted(root.rglob("*"))
+    for p in entries:
+        if p.is_symlink() or not p.is_file():
+            continue
+        try:
+            fd = os.open(p, os.O_RDONLY)
+        except OSError:
+            continue
+        try:
+            os.fsync(fd)
+        except OSError:
+            pass
+        finally:
+            os.close(fd)
+    for p in sorted(
+        (e for e in entries if e.is_dir() and not e.is_symlink()), reverse=True
+    ):
+        fsync_dir(p)
+    fsync_dir(root)
+
+
 def save_ledger(bundle_dir: Path, ledger: dict) -> None:
     """Atomically persist the ledger in its bundle directory."""
     path = ledger_path(bundle_dir)

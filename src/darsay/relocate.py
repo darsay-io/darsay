@@ -485,6 +485,7 @@ def _copy_and_verify(
     """
     from .archiver import load_manifest
     from .readme_gen import human_size
+    from .transfer import fsync_dir, fsync_tree
     from .verify import hash_payload, record_verification
 
     rev = dest.name
@@ -517,8 +518,13 @@ def _copy_and_verify(
                 f"{len(checksum['missing'])} missing, {len(checksum['extra'])} extra)"
             )
         stamp(staging)
+        # Force the payload and the record down before the bundle appears in
+        # the layout — a yanked disk must not keep a "verified" record over
+        # unflushed bytes.
+        fsync_tree(staging)
         dest.parent.mkdir(parents=True, exist_ok=True)
         staging.rename(dest)
+        fsync_dir(dest.parent)
     finally:
         shutil.rmtree(staging_root, ignore_errors=True)
     return report, cloned
@@ -546,7 +552,7 @@ def _land_onto(
     from .hashing import iter_payload_files
     from .readme_gen import human_size
     from .schema import payload_root
-    from .transfer import transfer_lock
+    from .transfer import fsync_tree, transfer_lock
     from .verify import record_verification
 
     manifest = load_manifest(source)
@@ -631,6 +637,7 @@ def _land_onto(
             "replaced": replaced,
         }
         stamp(dest, landed)
+        fsync_tree(dest)
     return report, landed
 
 
@@ -768,6 +775,9 @@ def move_bundle(
                 (dest / name).unlink(missing_ok=True)
             _stamp_new_home(dest, dest, bundle_dir, method="rename")
             refresh_verification_md(dest)
+            from .transfer import fsync_dir
+
+            fsync_dir(dest.parent)
             prune_empty_parent(bundle_dir)
             progress(f"Moved {plan['bundle_id']} → {dest}  (renamed; bytes untouched)")
             return dest

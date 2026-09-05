@@ -237,6 +237,21 @@ def test_mv_refusals(tmp_path, vault, test_provider):
     assert (other / "model" / "extra-print.gguf").is_file()
 
 
+def test_cp_leaves_no_staging_or_temp_files_at_the_destination(tmp_path, test_provider):
+    src = tmp_path / "src"
+    src.mkdir()
+    bundle = _registered_bundle(src, test_provider)
+    dest = tmp_path / "drive"
+    dest.mkdir()
+
+    copy_bundle(bundle, dest, progress=silent)
+    landed = dest / "test--acme--toy" / "aaaaaaaaaaaa"
+    assert (landed / "manifest.json").is_file()
+    # no staging dir, no atomic-write temp anywhere under the destination
+    assert not list(dest.glob("test--acme--toy/.cp-*"))
+    assert not list(dest.rglob(".manifest.json*.tmp"))
+
+
 def test_cp_all_copies_every_registered_bundle(tmp_path, test_provider, capsys):
     src = tmp_path / "src"
     src.mkdir()

@@ -69,6 +69,13 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Fixed
 
+- `mv` / `cp` now flush the copied payload and the rewritten record to
+  the medium before printing that the copy is verified, and the manifest
+  is written atomically (temp, fsync, rename, fsync the directory). On a
+  removable disk the verification read and the success line could both come
+  from the page cache, so a drive pulled right after "Copied … verified"
+  could keep a record that said verified over bytes that never landed;
+  fsync closes that window across a same-filesystem rename too.
 - `darsay list` now points at bundles on disk that are not in the
   `<name>/<revision>` layout it reads — a bundle dragged onto a drive by
   hand at the wrong depth, which used to be invisible. It is an advisory
