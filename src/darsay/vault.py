@@ -315,6 +315,41 @@ def registered_in(vault: Path, bundle_dir: Path) -> bool:
         return False
 
 
+def find_loose_bundles(vault: Path) -> list[Path]:
+    """Directories holding a darsay manifest that ``list`` does not see.
+
+    ``iter_bundle_dirs`` is exactly the ``<name>/<revision>`` layout; a
+    bundle dragged onto a disk by hand can land at another depth and become
+    invisible. This finds those — advisory only, so ``list`` can point at
+    them; nothing acts on one automatically (``cp`` / ``mv`` place it in the
+    layout). Reserved trees, hidden and staging directories, and manifests
+    that sit inside a registered bundle are not loose.
+    """
+    if not vault.is_dir():
+        return []
+    registered = set(iter_bundle_dirs(vault))
+    loose = []
+    for manifest_path in vault.rglob("manifest.json"):
+        d = manifest_path.parent
+        if d in registered:
+            continue
+        try:
+            rel_parts = d.resolve().relative_to(vault.resolve()).parts
+        except (OSError, ValueError):
+            continue
+        if any(part in RESERVED_DIRS or part.startswith(".") for part in rel_parts):
+            continue
+        if any(d == r or d.is_relative_to(r) for r in registered):
+            continue
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if isinstance(data, dict) and data.get("bundle_id"):
+            loose.append(d)
+    return sorted(loose)
+
+
 def _source_address_from_manifest(manifest: dict) -> str | None:
     """Canonical source address from the manifest."""
     return (manifest.get("source") or {}).get("address")

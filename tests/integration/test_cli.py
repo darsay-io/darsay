@@ -1095,3 +1095,21 @@ def test_list_overlays_another_vault_as_a_drive(tmp_path, test_provider, capsys)
     statuses = {b["bundle_id"].split("@")[0]: b["status"] for b in data["bundles"]}
     assert statuses["test--acme--other"] == "new"
     assert statuses["test--acme--toy"] == "have"
+
+
+def test_list_notes_a_loose_bundle_at_the_wrong_depth(tmp_path, test_provider, capsys):
+    import shutil
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    test_provider.add_repo("acme/toy", model_files())
+    bundle = archive_quiet("test:acme/toy", vault=vault)
+    # drop a copy at depth 1 (not <name>/<rev>): invisible to the normal walk
+    loose = vault / "toy-from-alice"
+    shutil.copytree(bundle, loose)
+
+    assert main(["--vault", str(vault), "list"]) == 0
+    out = capsys.readouterr().out
+    assert "note: 1 bundle on disk is not in the name/revision layout" in out
+    assert str(loose) in out
+    assert f"darsay cp <path> {vault}" in out

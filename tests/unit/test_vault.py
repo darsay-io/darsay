@@ -8,6 +8,7 @@ import pytest
 from darsay.vault import (
     bundle_id_for,
     default_vault,
+    find_loose_bundles,
     iter_bundle_dirs,
     prune_empty_parent,
     registered_in,
@@ -301,3 +302,31 @@ def test_vault_absence_distinguishes_missing_unmounted_and_stub(tmp_path, monkey
     plain_empty = tmp_path / "empty-but-fine"
     plain_empty.mkdir()
     assert vault_absence(plain_empty) is None
+
+
+def test_find_loose_bundles_ignores_layout_reserved_and_payload(tmp_path):
+    vault = tmp_path / "vault"
+    # a proper <name>/<rev> bundle: not loose
+    _write_bundle(vault, "acme--toy", "aaaaaaaaaaaa")
+    # a manifest inside that bundle's payload: not loose
+    inside = vault / "acme--toy" / "aaaaaaaaaaaa" / "model"
+    inside.mkdir(parents=True)
+    (inside / "manifest.json").write_text(
+        '{"note": "a payload file"}', encoding="utf-8"
+    )
+    # a reserved tree: not loose
+    _write_bundle(vault / "catalogs", "x", "y")
+    # a hidden staging dir: not loose
+    staging = vault / ".cp-aaaaaaaaaaaa" / "aaaaaaaaaaaa"
+    staging.mkdir(parents=True)
+    (staging / "manifest.json").write_text('{"bundle_id": "x@y"}', encoding="utf-8")
+
+    assert find_loose_bundles(vault) == []
+
+    # a bundle dropped at the wrong depth: loose
+    loose = vault / "toy-from-alice"
+    loose.mkdir()
+    (loose / "manifest.json").write_text(
+        '{"bundle_id": "acme--toy@aaaaaaaaaaaa"}', encoding="utf-8"
+    )
+    assert find_loose_bundles(vault) == [loose]

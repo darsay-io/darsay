@@ -69,6 +69,11 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Fixed
 
+- `darsay list` now points at bundles on disk that are not in the
+  `<name>/<revision>` layout it reads — a bundle dragged onto a drive by
+  hand at the wrong depth, which used to be invisible. It is an advisory
+  footnote naming each path and the `cp` that places it; the canonical walk
+  is unchanged, so nothing acts on a loose bundle automatically.
 - `darsay list <other-vault>` overlays another vault — a mounted drive —
   against this one, read-only: each bundle on the drive shows as `new`
   (not here), `have` (here, same bundle hash), `differ` (here, bytes

@@ -1112,7 +1112,25 @@ def _list_vault_overlay(args, vault, other, records) -> int:
     print(f"{'STATUS':<8}{'BUNDLE':<{width + 2}}SIZE")
     for row in rows:
         print(f"{row['status']:<8}{row['bundle_id']:<{width + 2}}{row['size'] or '?'}")
+    _print_loose_note(other)
     return 0
+
+
+def _print_loose_note(vault) -> None:
+    """After a listing, name any bundle on disk that is not in the layout."""
+    from .vault import find_loose_bundles
+
+    loose = find_loose_bundles(Path(vault))
+    if not loose:
+        return
+    n = len(loose)
+    print(
+        f"\nnote: {n} bundle{'s' if n != 1 else ''} on disk "
+        f"{'is' if n == 1 else 'are'} not in the name/revision layout list reads:"
+    )
+    for d in loose:
+        print(f"  {d}")
+    print(f"  place {'it' if n == 1 else 'them'} with: darsay cp <path> {vault}")
 
 
 def _list_vault(args, vault, records) -> int:
@@ -1150,6 +1168,7 @@ def _list_vault(args, vault, records) -> int:
         return 0
     if not all_rows:
         print(f"No bundles in {vault}/")
+        _print_loose_note(vault)
         return 0
     if not rows:
         print("nothing in progress in the vault")
@@ -1157,6 +1176,7 @@ def _list_vault(args, vault, records) -> int:
     rows = sort_rows(rows, sort or "name")
     stats = overlay_stats(rows)
     print_catalog_table(rows, header_line=vault_header_line(vault, stats))
+    _print_loose_note(vault)
     return 0
 
 
@@ -2394,7 +2414,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.set_defaults(func=cmd_smoke)
 
-    p = add_cmd("list", help="list bundles, or overlay a catalog or another vault on this one")
+    p = add_cmd(
+        "list", help="list bundles, or overlay a catalog or another vault on this one"
+    )
     p.add_argument(
         "catalog",
         nargs="?",
