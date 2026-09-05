@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.15] - 2026-09-05
+
+
 ### Added
 
 - An interactive collection room for fresh multi-variant GGUF archives:
