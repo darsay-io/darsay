@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.16] - 2026-09-05
+
+
 ### Added
 
 - **Whole-drive verbs — `verify`, `mv`, and `cp` take more than one bundle.**
