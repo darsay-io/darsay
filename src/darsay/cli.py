@@ -21,6 +21,7 @@ immutable payload, recorded facts, still loadable as-is.
     darsay estimate <board-url>       refresh a darsay.io board in place (fetch, classify, push)
     darsay archive --next <board-url> claim the board's next row; boundaries update its gauge
     darsay list <board-url>           overlay a board against this vault (read-only)
+    darsay list <other-vault>         overlay a drive against this vault: new / have / differ
     darsay rm      <bundle> […]       delete bundles (confirmation unless --yes)
     darsay du                         disk usage of bundles and .runtime
     darsay config                     effective settings and the files that set them
@@ -1009,11 +1010,109 @@ def cmd_list(args) -> int:
     records = bundle_records(vault)
     catalog_spec = getattr(args, "catalog", None)
     if catalog_spec:
+        # A plain directory that is not a catalog is another vault — a drive:
+        # show what it holds against this one. A catalog dir (holds
+        # catalog.json) and a .json file stay catalog overlays.
+        other = Path(catalog_spec).expanduser()
+        if other.is_dir() and not (other / "catalog.json").is_file():
+            return _list_vault_overlay(args, vault, other, records)
         board_hit = _board_target(catalog_spec)
         if board_hit is not None:
             catalog_spec = str(board_hit[1])
         return _list_catalog(args, vault, records, catalog_spec)
     return _list_vault(args, vault, records)
+
+
+def _bundle_hash_value(path) -> str | None:
+    """The recorded bundle hash, read straight from manifest.json (any schema)."""
+    try:
+        m = json.loads((Path(path) / "manifest.json").read_text(encoding="utf-8"))
+        return m["inventory"]["bundle_hash"]["value"]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+        return None
+
+
+def _list_vault_overlay(args, vault, other, records) -> int:
+    """Show what another vault (a drive) holds, against this one.
+
+    Read-only. Each bundle on the drive is ``new`` (not here), ``have``
+    (here, same bundle hash), ``differ`` (here, but the bytes differ), or
+    ``partial`` (an in-progress archive on the drive). The order is what an
+    operator copies first: new, then differ, then partial, then have.
+    """
+    from .vault import bundle_records, vault_absence
+
+    absent = vault_absence(other)
+    if absent:
+        print(f"error: {absent}: {other}", file=sys.stderr)
+        return 1
+    here = {r["bundle_id"]: r for r in records if not r.get("partial")}
+    rows = []
+    for r in bundle_records(other):
+        bid = r["bundle_id"]
+        if r.get("partial"):
+            status = "partial"
+        elif bid not in here:
+            status = "new"
+        else:
+            there_hash = _bundle_hash_value(r["path"])
+            here_hash = _bundle_hash_value(here[bid]["path"])
+            status = (
+                "differ"
+                if there_hash and here_hash and there_hash != here_hash
+                else "have"
+            )
+        rows.append(
+            {
+                "bundle_id": bid,
+                "status": status,
+                "path": r["path"],
+                "size": r.get("size"),
+                "payload_bytes": r.get("payload_bytes"),
+            }
+        )
+    if args.json:
+        print(
+            json.dumps(
+                {"vault": str(vault), "drive": str(other), "bundles": rows},
+                indent=2,
+                ensure_ascii=False,
+            )
+        )
+        return 0
+    order = {"new": 0, "differ": 1, "partial": 2, "have": 3}
+    rows.sort(key=lambda row: (order.get(row["status"], 9), row["bundle_id"]))
+    if args.ids:
+        # The actionable set: what the drive has that this vault does not (or
+        # holds differently). A plain inventory of the drive is `list --ids`
+        # run against it directly.
+        for row in rows:
+            if row["status"] != "have":
+                print(row["bundle_id"])
+        return 0
+    if not rows:
+        print(f"No bundles on the drive at {other}/")
+        return 0
+    counts = {}
+    for row in rows:
+        counts[row["status"]] = counts.get(row["status"], 0) + 1
+    parts = [
+        f"{counts[s]} {label}"
+        for s, label in (
+            ("new", "new"),
+            ("differ", "differ"),
+            ("partial", "partial"),
+            ("have", "already here"),
+        )
+        if counts.get(s)
+    ]
+    print(f"\nDrive {other}  vs vault {vault}")
+    print(f"  {' · '.join(parts)}  (of {len(rows)} on the drive)\n")
+    width = max((len(row["bundle_id"]) for row in rows), default=6)
+    print(f"{'STATUS':<8}{'BUNDLE':<{width + 2}}SIZE")
+    for row in rows:
+        print(f"{row['status']:<8}{row['bundle_id']:<{width + 2}}{row['size'] or '?'}")
+    return 0
 
 
 def _list_vault(args, vault, records) -> int:
@@ -2295,7 +2394,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.set_defaults(func=cmd_smoke)
 
-    p = add_cmd("list", help="list bundles, or overlay a catalog on this vault")
+    p = add_cmd("list", help="list bundles, or overlay a catalog or another vault on this one")
     p.add_argument(
         "catalog",
         nargs="?",

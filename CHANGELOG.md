@@ -69,6 +69,11 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Fixed
 
+- `darsay list <other-vault>` overlays another vault — a mounted drive —
+  against this one, read-only: each bundle on the drive shows as `new`
+  (not here), `have` (here, same bundle hash), `differ` (here, bytes
+  differ), or `partial`. `--ids` prints the actionable set (everything not
+  already identical here), for piping into `mv`/`cp`.
 - `verify`, `mv`, and `cp` take more than one bundle, and `--all` acts on
   every registered bundle in the vault — the way a whole drive is actually
   moved or attested. `verify --all` re-hashes each and exits non-zero

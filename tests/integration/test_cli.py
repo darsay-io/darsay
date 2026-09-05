@@ -1059,3 +1059,39 @@ def test_cli_archive_dry_run_records_only_the_pin_and_force_keeps_the_manifest(
         "  " + _real(*v, "archive", "test:acme/toy", "--force")
     )
     assert _tree(bundle) == before
+
+
+def test_list_overlays_another_vault_as_a_drive(tmp_path, test_provider, capsys):
+    here = tmp_path / "vault"
+    drive = tmp_path / "drive"
+    here.mkdir()
+    drive.mkdir()
+    test_provider.add_repo("acme/toy", model_files())
+    test_provider.add_repo("acme/other", model_files())
+    # here has toy; drive has toy (identical) + other (new)
+    archive_quiet("test:acme/toy", vault=here)
+    archive_quiet("test:acme/toy", vault=drive)
+    archive_quiet("test:acme/other", vault=drive)
+
+    assert main(["--vault", str(here), "list", str(drive)]) == 0
+    out = capsys.readouterr().out
+    assert f"Drive {drive}  vs vault {here}" in out
+    assert "1 new · 1 already here  (of 2 on the drive)" in out
+    # new sorts before have
+    assert out.index("test--acme--other") < out.index("test--acme--toy")
+    assert "new     test--acme--other@" in out
+    assert "have    test--acme--toy@" in out
+
+    # --ids prints only the actionable (not-already-here) set
+    assert main(["--vault", str(here), "list", str(drive), "--ids"]) == 0
+    ids = capsys.readouterr().out
+    assert "test--acme--other@" in ids
+    assert "test--acme--toy@" not in ids
+
+    # --json carries the structured overlay
+    assert main(["--vault", str(here), "list", str(drive), "--json"]) == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["drive"] == str(drive)
+    statuses = {b["bundle_id"].split("@")[0]: b["status"] for b in data["bundles"]}
+    assert statuses["test--acme--other"] == "new"
+    assert statuses["test--acme--toy"] == "have"
