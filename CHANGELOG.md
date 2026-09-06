@@ -9,6 +9,9 @@ Tool version (`darsay.__version__`) is independent of
 
 ## [Unreleased]
 
+## [0.14.17] - 2026-09-06
+
+
 ### Added
 
 - **Each GGUF variant says whether its header names an importance
