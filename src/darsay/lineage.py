@@ -79,6 +79,9 @@ _TIER_WORDS = frozenset(
 )
 _FORMATS: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("gguf", re.compile(r"^gguf$", re.IGNORECASE)),
+    # mradermacher's ``-i1-`` and a plain ``imatrix`` name the method the
+    # quants were made with; they are not part of the member.
+    ("imatrix", re.compile(r"^(i1|imatrix)$", re.IGNORECASE)),
     ("fp8", re.compile(r"^fp8$", re.IGNORECASE)),
     ("nvfp4", re.compile(r"^nvfp4$", re.IGNORECASE)),
     ("mxfp4", re.compile(r"^mxfp4$", re.IGNORECASE)),

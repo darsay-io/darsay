@@ -38,5 +38,7 @@
   {"name": "Qwen3-8B-Base-GGUF", "family": "Qwen", "generation": "3", "member": "8B", "variants": ["base"], "formats": ["gguf"], "size_total": 8000000000.0, "size_active": null},
   {"name": "roberta-large", "family": "roberta", "generation": null, "member": "large", "variants": [], "formats": [], "size_total": null, "size_active": null},
   {"name": "bge-base-en-v1.5", "family": "bge", "generation": null, "member": "base-en-v1.5", "variants": [], "formats": [], "size_total": null, "size_active": null},
+  {"name": "Qwen3-32B-i1-GGUF", "family": "Qwen", "generation": "3", "member": "32B", "variants": [], "formats": ["imatrix", "gguf"], "size_total": 32000000000.0, "size_active": null},
+  {"name": "Llama-3.1-8B-Instruct-imatrix-GGUF", "family": "Llama", "generation": "3.1", "member": "8B", "variants": ["instruct"], "formats": ["imatrix", "gguf"], "size_total": 8000000000.0, "size_active": null},
   {"name": "", "family": null, "generation": null, "member": null, "variants": [], "formats": [], "size_total": null, "size_active": null}
 ]
