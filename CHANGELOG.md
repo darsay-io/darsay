@@ -11,6 +11,29 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Added
 
+- **Each GGUF variant says whether its header names an importance
+  matrix.** `gguf_variants[].imatrix` (catalog schema 3.2.0) is `true`
+  when any of the variant's headers carries `quantize.imatrix.*` — the
+  same test rule R7 makes — `false` when every header was read and none
+  does, and `null` when classification did not read them. It is read from
+  the bytes, never from an `i1`, `UD-` or `IQ` token in a name; `estimate
+  --variants` prints `· imatrix` beside a marked variant, and darsay.io's
+  *Calibrated* lens reads it ahead of the name.
+- **The name grammar reads `-i1-` and `imatrix` as a format.** mradermacher's
+  `Qwen3-32B-i1-GGUF` is the 32B member with formats `imatrix` and `gguf`,
+  not a member called `32B-i1`, so it files under the same member as the
+  release and a board can find its 16-bit sibling.
+
+### Fixed
+
+- **A repository of several weight sets has no bytes per parameter.**
+  `estimate` divided the sum of every non-GGUF weight file by one parameter
+  count, so a repository that ships a `transformer/` beside a `vae/` and a
+  `text_encoder/`, or a `.pth` beside its safetensors, reported ten or more
+  bytes per parameter on a BF16 release. One non-GGUF weight set is now
+  the files of one directory in one format; anything else is the
+  `redundant` hint's arithmetic and records no width.
+
 - **A claimed board row shows the panel.** `archive --next <board>` and
   `archive SOURCE --board <board>` used to report a claim at the
   boundaries only — start, a clean pause, registration — so a row on

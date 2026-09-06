@@ -25,7 +25,7 @@ from .lineage import display_generation, group_by_family, lineage_of_source
 from .readme_gen import _curation_body, human_size
 from .sources import parse_source
 
-CATALOG_SCHEMA_VERSION = "3.1.0"
+CATALOG_SCHEMA_VERSION = "3.2.0"
 CATALOG_SCHEMA_MAJOR = 3
 CATALOG_KIND = "darsay.catalog"
 STALE_AFTER_DAYS = 7

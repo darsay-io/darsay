@@ -39,7 +39,7 @@ from .readme_gen import human_params, human_size
 from .schema import check_completeness, payload_root_for
 from .sources import SourceError, SourceRef, get_provider, parse_source
 from .transfer import disk_verdict
-from .weight_variants import gguf_variants, model_weight_bytes
+from .weight_variants import gguf_variants, mark_imatrix, model_weight_bytes
 
 WEIGHT_SUFFIXES = (".safetensors", ".bin", ".gguf", ".pt", ".pth")
 DATA_SUFFIXES = (".parquet", ".jsonl", ".json", ".csv", ".arrow", ".txt", ".tsv")
@@ -320,6 +320,9 @@ def estimate(
     # pin, ``"pinned"`` when a pin already froze the selection, ``"full"``
     # when --full or --include bypassed it, None for datasets.
     classification: dict | str | None = "full" if repo_type == "model" else None
+    # The full classification, when one ran or was saved with a pin: its
+    # per-path header evidence says which GGUF variants carry an imatrix.
+    full_classification: dict | None = None
     if include:
         from .subset import select_subset
 
@@ -370,6 +373,7 @@ def estimate(
             subset = saved_subset
             if saved_subset.get("classification"):
                 classification = _classification_summary(saved_subset["classification"])
+                full_classification = saved_subset["classification"]
         elif not has_pin:
             from .classify import negatives_policy
             from .subset import select_subset
@@ -378,6 +382,7 @@ def estimate(
                 provider, ref, snapshot, progress, on_read=on_read
             )
             classification = _classification_summary(result)
+            full_classification = result
             if policy_include:
                 files, subset = select_subset(files, policy_include)
                 subset["policy"] = policy_record["policy"]
@@ -498,7 +503,9 @@ def estimate(
         "repository_bytes": sum(f["size"] for f in repository_files)
         if all(f["size"] is not None for f in repository_files)
         else None,
-        "gguf_variants": gguf_variants(repository_files)
+        "gguf_variants": mark_imatrix(
+            gguf_variants(repository_files), repository_files, full_classification
+        )
         if repo_type == "model"
         else [],
         "parameters": snapshot.parameters,
@@ -1023,8 +1030,9 @@ def print_estimate(est: dict, progress=print) -> None:
                     else "unknown size"
                 )
                 state = "" if choice["complete"] else " — INCOMPLETE shard set"
+                matrix = " · imatrix" if choice.get("imatrix") else ""
                 p(
-                    f"                {label}: {size} in {_n_files(choice['file_count'])}{state}"
+                    f"                {label}{matrix}: {size} in {_n_files(choice['file_count'])}{state}"
                 )
             p(
                 "                Choose one with --include; projectors and other companion files are separate."

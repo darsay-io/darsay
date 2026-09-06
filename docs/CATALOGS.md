@@ -6,7 +6,7 @@
   <a href="../README.md">README</a>
 </p>
 
-# catalog.json — schema reference (v3.1.0)
+# catalog.json — schema reference (v3.2.0)
 
 > **In one sentence.** A catalog is a curated list of works. The vault is
 > that list, realized. Possession is a view, not a rewrite of this file.
@@ -54,7 +54,7 @@ writable.
 
 | Field | Meaning |
 |---|---|
-| `catalog_schema_version` | `"3.1.0"`. Major = breaking; 3.1.0 added the digest's `attention`. |
+| `catalog_schema_version` | `"3.2.0"`. Major = breaking; 3.1.0 added the digest's `attention`; 3.2.0 added `imatrix` to each `gguf_variants` entry. |
 | `kind` | Always `"darsay.catalog"`. |
 | `id` | Slug. Matches the directory name when stored at `catalogs/<id>/`. Lowercase letter, then letters, digits, `.`, `_`, `-` (max 64). |
 | `title` | Human title. Defaults to `id`. |
@@ -101,7 +101,7 @@ Stale after 7 days (`*` on SIZE in `list`).
 | `size_basis` | `"repository"` for the upstream inventory, `"selection"` for an explicit or pinned selection, `"archive"` for a classified retention decision. An archive can retain negative, unknown, support, and print files; this field is not a preservation verdict. |
 | `repository_bytes` | Exact byte total across all upstream files, or `null` if any size is unknown. Remains the whole repository even when `payload_bytes` describes a selection. |
 | `classification` | `null` when unavailable; otherwise `{verdicts, skipped_bytes, unclassified_count}`. `verdicts` maps each present `negative`, `print`, or `unknown` verdict to `{sets, files, bytes}`. `unclassified_count` counts unresolved **sets**, not files. Support bytes are included in the payload separately. Prints matching a remote base remain retained; only sets whose every file has a hash-identical retained same-bundle twin are automatically skipped. |
-| `gguf_variants` | Whole upstream inventory of GGUF model variants: `[{name, precision, file_count, size_bytes, complete, include}]`. Each entry groups all shards of one variant; `complete` requires every declared shard exactly once. `size_bytes` is the sum of its files, or `null` if a size is unknown. `include` contains exact selection globs. Projectors such as `mmproj` are companions, not model variants. An empty list means no GGUF model variants were found. |
+| `gguf_variants` | Whole upstream inventory of GGUF model variants: `[{name, precision, file_count, size_bytes, complete, include, imatrix}]`. Each entry groups all shards of one variant; `complete` requires every declared shard exactly once. `size_bytes` is the sum of its files, or `null` if a size is unknown. `include` contains exact selection globs. `imatrix` is what the variant's GGUF headers established when classification read them: `true` when any header carries `quantize.imatrix.*` (rule R7), `false` when every header was read and none does, `null` when a header was not read — never a reading of the file name. Projectors such as `mmproj` are companions, not model variants. An empty list means no GGUF model variants were found. |
 | `precision` | The release precision label — `BF16`, `FP8`, `MXFP4`, `AWQ INT4`, `Q4_K_M` — from `config.json`'s `quantization_config`, the dominant dtype, or (GGUF-only repos) the file name ([Quantization §2](QUANTIZATION.md#2-precision-and-size-scope)); `null` when nothing establishes it. Precision does not establish original-release status. |
 | `bytes_per_param` | Measured model weight bytes over `parameters`. About 2 is a 16-bit release, about 1 an 8-bit release, about 0.5 a 4-bit one. `null` when either side is unknown, and for GGUF packs, incomplete shard selections, or projector-only selections. |
 | `architecture` | `config.json` `model_type` (`qwen3_5_moe_text`), falling back to the Hub's GGUF architecture metadata; `null` when neither is available. |

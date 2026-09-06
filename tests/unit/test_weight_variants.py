@@ -4,7 +4,84 @@ import json
 from pathlib import Path
 
 from darsay.subset import matches_include, select_subset
-from darsay.weight_variants import gguf_variants, model_weight_bytes
+from darsay.weight_variants import gguf_variants, mark_imatrix, model_weight_bytes
+
+
+def test_one_non_gguf_weight_set_is_one_directory_in_one_format():
+    shards = [
+        {"path": "model-00001-of-00002.safetensors", "size": 10},
+        {"path": "model-00002-of-00002.safetensors", "size": 20},
+    ]
+    assert model_weight_bytes(shards) == 30
+    assert model_weight_bytes([{"path": "weights/model.safetensors", "size": 40}]) == 40
+    # Several directories are several sets: a diffusion repository's
+    # transformer/, vae/ and text_encoder/ summed over one parameter count
+    # is the redundant hint's arithmetic, not a width.
+    assert (
+        model_weight_bytes(
+            [
+                {"path": "transformer/model.safetensors", "size": 66},
+                {"path": "vae/model.safetensors", "size": 10},
+            ]
+        )
+        is None
+    )
+    # A legacy copy beside safetensors is a second copy, not a wider one.
+    assert (
+        model_weight_bytes(shards + [{"path": "pytorch_model.bin", "size": 30}]) is None
+    )
+    assert (
+        model_weight_bytes(
+            [
+                {"path": "model.safetensors", "size": 40},
+                {"path": "original/consolidated.00.pth", "size": 40},
+            ]
+        )
+        is None
+    )
+
+
+def test_imatrix_is_read_from_headers_never_from_names():
+    files = [
+        {"path": "m-i1-Q4_K_M.gguf", "size": 10},
+        {"path": "m-Q8_0-00001-of-00002.gguf", "size": 10},
+        {"path": "m-Q8_0-00002-of-00002.gguf", "size": 10},
+        {"path": "m-IQ2_XXS.gguf", "size": 5},
+    ]
+    variants = gguf_variants(files)
+    assert all(v["imatrix"] is None for v in variants)
+    classification = {
+        "sets": [
+            {
+                "kind": "gguf",
+                "evidence": {
+                    "headers": {"m-i1-Q4_K_M.gguf": {"imatrix": False}},
+                    "complete": True,
+                },
+            },
+            {
+                "kind": "gguf",
+                "evidence": {
+                    "headers": {
+                        "m-Q8_0-00001-of-00002.gguf": {"imatrix": False},
+                        "m-Q8_0-00002-of-00002.gguf": {"imatrix": True},
+                    },
+                    "complete": True,
+                },
+            },
+            {"kind": "support", "evidence": {}},
+        ]
+    }
+    marked = {
+        v["name"]: v["imatrix"] for v in mark_imatrix(variants, files, classification)
+    }
+    # The name says i1; the header says no matrix. The header wins.
+    assert marked["m-i1-Q4_K_M"] is False
+    # Any shard's header naming a matrix marks the variant, as rule R7 does.
+    assert marked["m-Q8_0"] is True
+    # A variant whose header was not read stays unknown, IQ level or not.
+    assert marked["m-IQ2_XXS"] is None
+    assert all(v["imatrix"] is None for v in mark_imatrix(variants, files, None))
 
 
 def test_real_glm_pack_has_twelve_models_not_seventy_shards():

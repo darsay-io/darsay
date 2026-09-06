@@ -22,7 +22,7 @@
 |---|---|
 | Tool | **0.14.16** |
 | Manifest schema | **2.3.0** |
-| Catalog schema | **3.1.0** |
+| Catalog schema | **3.2.0** |
 | MVB format | **1.3** |
 | License | Apache 2.0 |
 
