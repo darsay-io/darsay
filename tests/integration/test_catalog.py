@@ -535,7 +535,7 @@ def test_estimate_catalog_writes_hints_and_list_shows_them(
     )
     capsys.readouterr()
     cat_path = vault / "catalogs" / "summer" / "catalog.json"
-    assert json.loads(cat_path.read_text())["catalog_schema_version"] == "3.1.0"
+    assert json.loads(cat_path.read_text())["catalog_schema_version"] == "3.2.0"
 
     assert main([*v, "list", "summer"]) == 0
     out = capsys.readouterr().out
