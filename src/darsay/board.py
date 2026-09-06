@@ -7,7 +7,9 @@ refreshed one back — the round trip that lets the CLI, the only party
 that can classify, keep a board's prices honest. Claims are board-side
 coordination (like the board's holders and status fields, they never
 enter catalog.json): ``archive --next <board>`` claims a row before
-fetching and reports progress at boundaries.
+fetching, reports the transfer panel to it while bytes move
+(``ProgressReporter``), and reports the boundaries — a clean pause,
+registration — as they come.
 
 The board URL is the capability — treat it like a secret. Boards are
 not source providers: they hold want-lists, never bytes, so nothing
@@ -20,6 +22,8 @@ import json
 import os
 import re
 import socket
+import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from urllib import error as _urlerror
@@ -231,15 +235,22 @@ def claim(
     total_bytes: int | None = None,
     force: bool = False,
     refetch: bool = False,
+    facts: dict | None = None,
 ) -> tuple[bool, dict]:
     """Claim a row / report progress. ``(False, claim)`` when someone else holds it.
 
     ``refetch`` marks a deliberate claim on a row the board already checks
     off as have (``archive SOURCE --board``); without it the board refuses
     such claims, which is what keeps an out-of-date ``--next`` from
-    re-downloading what the group already holds.
+    re-downloading what the group already holds. ``facts`` are the
+    panel's figures for this report (``report_from_snapshot``); they ride
+    beside the named fields and the board renders them.
     """
     payload: dict = {"client": client, "state": state}
+    if facts:
+        payload.update(facts)
+        payload["client"] = client
+        payload["state"] = state
     if percent is not None:
         payload["percent"] = int(percent)
     if banked_bytes is not None:
@@ -269,6 +280,186 @@ def claim(
     except ValueError:
         row = {}
     return True, row if isinstance(row, dict) else {}
+
+
+# ── Progress reports ─────────────────────────────────────────────────────
+# A claimed row shows the panel. While the transfer runs, the meter is read
+# on a clock and its figures — percent, bytes, rate, ETA, files, the
+# sparkline, the file in flight — are posted as the claim's report, so the
+# board's rail moves on every screen that has the page open, not only in
+# the terminal doing the fetching. A report goes out when a whole percent
+# has passed or the panel's word changed (downloading, stalled, offline …);
+# otherwise the row hears from us at least every REPORT_HEARTBEAT_S, so a
+# board that has not heard for longer knows the client is gone.
+
+DEFAULT_REPORT_EVERY = 60.0
+REPORT_HEARTBEAT_S = 300.0
+# The panel keeps this many throughput samples; the board draws the same.
+REPORT_SPARK_SAMPLES = 24
+
+
+def panel_phase(snap: dict) -> str:
+    """The panel's status word for a snapshot, as one key the board knows.
+
+    Mirrors ``progress.status_text``: an offline link, a retry, a digest
+    pass over landed bytes, a stall, nothing yet, or bytes moving.
+    """
+    if snap.get("link"):
+        return "offline"
+    if snap.get("retry"):
+        return "retrying"
+    if snap.get("verifying"):
+        return "verifying"
+    if snap.get("stalled"):
+        return "stalled"
+    if snap.get("eta_seconds") is None and not (snap.get("rate") or 0):
+        return "starting"
+    return "downloading"
+
+
+def report_from_snapshot(snap: dict) -> dict:
+    """The claim report for one panel snapshot: the figures the terminal shows."""
+    from . import __version__
+
+    total = int(snap.get("total_bytes") or 0)
+    done = int(snap.get("done_bytes") or 0)
+    report: dict = {
+        "phase": panel_phase(snap),
+        "banked_bytes": done,
+        "total_bytes": total,
+        "files_done": int(snap.get("files_done") or 0),
+        "files_total": int(snap.get("files_total") or 0),
+        "elapsed_seconds": int(snap.get("elapsed") or 0),
+        "session_bytes": int(snap.get("session_bytes") or 0),
+        "agent": f"darsay {__version__}",
+    }
+    if total:
+        report["percent"] = min(100, int(done * 100 / total))
+    rate = snap.get("rate")
+    if rate is not None:
+        report["rate_bps"] = int(rate)
+    eta = snap.get("eta_seconds")
+    if eta is not None:
+        report["eta_seconds"] = int(eta)
+    history = [int(r) for r in (snap.get("rate_history") or [])]
+    if history:
+        report["rates"] = history[-REPORT_SPARK_SAMPLES:]
+    current = snap.get("current") or []
+    if current:
+        lead = max(current, key=lambda item: int(item.get("total") or 0))
+        report["current"] = {
+            "path": str(lead.get("path") or ""),
+            "done": int(lead.get("n") or 0),
+            "total": int(lead["total"]) if lead.get("total") else None,
+        }
+    return report
+
+
+class ProgressReporter:
+    """Post the panel to a claimed row while a transfer runs.
+
+    ``watch(meter, emit)`` is the ``on_meter`` hook ``archive`` offers: it
+    starts a daemon thread that reads the meter — at once, then every
+    ``interval`` seconds — and returns the callable that stops it. A
+    report goes out when the percent moved a whole point or the panel's
+    word changed, and in any case every ``heartbeat`` seconds, so a slow
+    link is heard from too. Nothing here can fail the archive: a board
+    that cannot be reached is noted once, above the panel, and tried
+    again at the next tick; a board that says the row is someone else's
+    now ends the reports, since there is nothing left to report to.
+    """
+
+    def __init__(
+        self,
+        board: Board,
+        entry_id: int,
+        client: str,
+        *,
+        interval: float = DEFAULT_REPORT_EVERY,
+        heartbeat: float = REPORT_HEARTBEAT_S,
+        post=None,
+        clock=time.monotonic,
+    ):
+        self.board = board
+        self.entry_id = entry_id
+        self.client = client
+        self.interval = max(0.0, float(interval or 0))
+        self.heartbeat = max(self.interval, float(heartbeat))
+        self._post = post or claim
+        self._clock = clock
+        self.sent = 0
+        self._last_sent_at: float | None = None
+        self._last_key: tuple | None = None
+        self._warned = False
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    def watch(self, meter, emit=None):
+        """Start reporting ``meter``; the return value stops it."""
+        if self.interval <= 0:
+            return lambda: None
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._loop, args=(meter, emit), name="darsay-board", daemon=True
+        )
+        self._thread.start()
+        return self.stop
+
+    def stop(self) -> None:
+        """Stop reporting, waiting for a report in flight so none lands after
+        the boundary the caller is about to send."""
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=HTTP_TIMEOUT + 5)
+            self._thread = None
+
+    def _loop(self, meter, emit) -> None:
+        self.tick(meter, emit)
+        while not self._stop.wait(self.interval):
+            self.tick(meter, emit)
+
+    def due(self, report: dict, now: float) -> bool:
+        """Whether this report says something new, or the heartbeat is owed."""
+        if self._last_sent_at is None:
+            return True
+        if (report.get("phase"), report.get("percent")) != self._last_key:
+            return True
+        return now - self._last_sent_at >= self.heartbeat
+
+    def tick(self, meter, emit=None) -> bool:
+        """Read the meter once; report if due. True when a report went out."""
+        if self._stop.is_set():
+            return False
+        report = report_from_snapshot(meter.snapshot())
+        now = self._clock()
+        if not self.due(report, now):
+            return False
+        try:
+            ok, _ = self._post(
+                self.board, self.entry_id, self.client, state="archiving", facts=report
+            )
+        except (SystemExit, Exception) as exc:  # noqa: BLE001 — never fail the archive
+            if not self._warned and emit is not None:
+                emit(
+                    f"warning: the board at {self.board.page_url} could not be "
+                    f"updated ({exc}); the archive continues and the next report "
+                    "will try again."
+                )
+            self._warned = True
+            return False
+        if not ok:
+            if emit is not None:
+                emit(
+                    f"note: the board at {self.board.page_url} says another client "
+                    "holds this row now; progress reports stop, the archive continues."
+                )
+            self._stop.set()
+            return False
+        self.sent += 1
+        self._last_sent_at = now
+        self._last_key = (report.get("phase"), report.get("percent"))
+        self._warned = False
+        return True
 
 
 def release(board: Board, entry_id: int, client: str) -> bool:

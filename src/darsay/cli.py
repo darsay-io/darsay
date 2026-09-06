@@ -314,6 +314,30 @@ def _board_target(spec):
     return board, fetch_catalog(board, dest)
 
 
+def _board_reporter(args, vault):
+    """The ``on_meter`` hook for a claimed board row, or None without one.
+
+    While the transfer runs it posts the panel — percent, bytes, rate,
+    ETA, files, the sparkline, the file in flight — every
+    ``board.report_every`` (a minute by default; ``0`` keeps to the
+    boundaries), so the board shows the download to everyone who has
+    the page open.
+    """
+    ctx = getattr(args, "_board_progress", None)
+    if not ctx:
+        return None
+    from .board import ProgressReporter
+    from .config import setting
+
+    reporter = ProgressReporter(
+        ctx["board"],
+        ctx["entry_id"],
+        ctx["client"],
+        interval=setting("board", "report_every", vault),
+    )
+    return reporter.watch
+
+
 def _push_board_progress(args, *, state, bundle_dir=None, percent=None) -> None:
     """Report an archive boundary to a claimed board row. Best-effort:
     a board that cannot be reached never fails the archive itself."""
@@ -323,6 +347,7 @@ def _push_board_progress(args, *, state, bundle_dir=None, percent=None) -> None:
     from .board import claim
 
     banked = total = None
+    facts: dict = {"agent": f"darsay {__version__}"}
     if bundle_dir is not None:
         try:
             from .schema import payload_root_for
@@ -340,6 +365,11 @@ def _push_board_progress(args, *, state, bundle_dir=None, percent=None) -> None:
             )
             if total:
                 percent = int(banked * 100 / total)
+            files = plan.get("files") or {}
+            facts["files_done"] = int(files.get("verified") or 0) + int(
+                files.get("handed_off") or 0
+            )
+            facts["files_total"] = int(files.get("total") or 0)
         except Exception:
             pass
     try:
@@ -351,6 +381,7 @@ def _push_board_progress(args, *, state, bundle_dir=None, percent=None) -> None:
             percent=percent,
             banked_bytes=banked,
             total_bytes=total,
+            facts=facts,
         )
         if ok:
             print(
@@ -680,6 +711,7 @@ def cmd_archive(args) -> int:
         from .collection_tui import choose_collection
 
         choose = choose_collection
+    on_meter = _board_reporter(args, vault)
     try:
         bundle = archive(
             source,
@@ -701,6 +733,7 @@ def cmd_archive(args) -> int:
             choose=choose,
             resume_scope=not getattr(args, "board", None)
             and getattr(args, "next", None) is None,
+            on_meter=on_meter,
         )
     except PartialTransfer as stop:
         _push_board_progress(args, state="paused", bundle_dir=stop.bundle_dir)

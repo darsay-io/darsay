@@ -52,6 +52,11 @@ DEFAULT_MAX_RATE = 0
 # cleanly. An hour outlasts a walk between Wi-Fi networks or a router
 # reboot; a longer outage pauses with exit 10 and resumes on rerun.
 DEFAULT_MAX_OFFLINE = 3600.0
+# Seconds between a running archive's progress reports to a claimed board
+# row: a minute moves the board's rail at a walking pace; a whole percent
+# or a change of the panel's word is what makes a report, so a slow link
+# reports less often and every link at least every five minutes.
+DEFAULT_BOARD_REPORT_EVERY = 60.0
 
 _BYTE_SIZE_RE = re.compile(r"\s*(\d+(?:\.\d+)?)\s*([KMGT]?)\s*(?:I?B)?\s*")
 _RATE_SUFFIX_RE = re.compile(r"\s*/\s*s(?:ec)?\s*$", re.IGNORECASE)
@@ -207,6 +212,16 @@ SETTINGS: tuple[Setting, ...] = (
         help="how this machine signs board claims; empty means the hostname",
         example='"jeremy-mbp"',
         env="DARSAY_BOARD_CLIENT",
+    ),
+    Setting(
+        table="board",
+        key="report_every",
+        default=DEFAULT_BOARD_REPORT_EVERY,
+        parse=parse_duration,
+        render=_render_duration,
+        help="how often a running archive reports its panel to the claimed board row; 0 reports only at the boundaries",
+        example='"1m"',
+        env="DARSAY_BOARD_REPORT_EVERY",
     ),
     Setting(
         table="host",

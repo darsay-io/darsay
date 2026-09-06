@@ -11,6 +11,24 @@ Tool version (`darsay.__version__`) is independent of
 
 ### Added
 
+- **A claimed board row shows the panel.** `archive --next <board>` and
+  `archive SOURCE --board <board>` used to report a claim at the
+  boundaries only — start, a clean pause, registration — so a row on
+  darsay.io could read *fetching · reported 6 hours ago* over a sweeping
+  bar all evening. While the transfer runs the CLI now reports the
+  panel itself: percent, bytes banked of the total, the smoothed rate and
+  its sparkline history, the time left, files done, the file in flight,
+  and the panel's own word for the moment (`downloading`, `verifying`,
+  `stalled`, `offline`, `retrying`, `starting`), plus which build is
+  reporting. A report goes out when a whole percent has passed or that
+  word changed, and every five minutes regardless, so the board can tell
+  a slow link from a gone client; the board draws the same rail and the
+  same line as the terminal, for everyone who has the page open.
+  `board.report_every` (`DARSAY_BOARD_REPORT_EVERY`) sets the cadence —
+  `"1m"` by default, `"0"` keeps to the boundaries — and a board that
+  cannot be reached is noted once above the panel and never fails the
+  archive. The report rides on the same `POST …/claim`; the boundary
+  reports now also carry the files done and total.
 - **The KV cache is priced beside the weights.** A running model holds
   two things: its weights, and the key and value of every token in the
   context. The second was invisible to darsay. `estimate` now reads the

@@ -228,13 +228,22 @@ checked it off — is never picked, even though board status stays out of
 `catalog.json` and your vault alone would still want it; name the
 source with `--board` to re-fetch one deliberately. A row
 another client holds a live claim on is skipped — that is how two
-people split one board without colliding. Archive boundaries (start,
-clean pause, registration) report progress, which the board renders as
-a gauge; reporting done flips the row to `have` and fills an empty
-holders field with the client id. Claims, like the board's status and
-holders columns, are board-side coordination: they never appear in
-`catalog.json`, and a stale claim (24 h without a report) simply
-expires.
+people split one board without colliding. While the transfer runs, the
+row shows the panel: about once a minute the CLI reports what the
+terminal shows — percent, bytes banked of the total, the rate and its
+sparkline, the time left, files done, the file in flight, and the
+panel's own word for the moment (downloading, verifying, stalled,
+offline, retrying) — and the board draws the same rail for everyone
+who has the page open. A report goes out when a whole percent has
+passed or that word changed, and in any case every five minutes, so a
+row that has not heard for longer knows the client is gone.
+`board.report_every` in config sets the cadence (`"1m"` by default;
+`"0"` keeps to the boundaries — start, a clean pause, registration —
+which report regardless). Reporting done flips the row to `have` and
+fills an empty holders field with the client id. Claims, like the
+board's status and holders columns, are board-side coordination: they
+never appear in `catalog.json`, and a stale claim (24 h without a
+report) simply expires.
 
 ## CLI
 

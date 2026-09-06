@@ -550,6 +550,21 @@ def _live_transfer(display):
 
 
 @contextmanager
+def _observed(meter, emit, on_meter):
+    """Let a second reader watch the meter for the panel's lifetime.
+
+    Innermost of the transfer's contexts, so the watcher is released
+    before the panel closes and before any boundary is reported.
+    """
+    release = on_meter(meter, emit) if on_meter is not None else None
+    try:
+        yield
+    finally:
+        if callable(release):
+            release()
+
+
+@contextmanager
 def transfer_lock(bundle_dir: Path, progress=print):
     """Hold the per-bundle lock, reclaiming dead or copied owners."""
     bundle_dir.mkdir(parents=True, exist_ok=True)
@@ -2186,6 +2201,7 @@ def transfer_all(
     shard: tuple[int, int] | None = None,
     max_rate: int | None = None,
     max_offline: float | None = None,
+    on_meter=None,
 ) -> dict:
     """Fetch and immediately verify every remaining file at the pinned commit.
 
@@ -2193,7 +2209,9 @@ def transfer_all(
     workers, large files as concurrent streams beside one hash thread.
     ``max_rate`` caps network bytes per second across every stream;
     ``max_offline`` is how long a lost network is waited out before the
-    session pauses cleanly.
+    session pauses cleanly. ``on_meter(meter, emit)`` is told about the
+    live meter as the panel opens and returns the callable run as it
+    closes — a second reader of the same figures the panel paints.
     """
     from .config import DEFAULT_MAX_OFFLINE
     from .progress import TransferDisplay, meter_from_plan
@@ -2216,6 +2234,7 @@ def transfer_all(
             payload_dir, max_rate=max_rate, on_retry=meter.note_retry
         ),
         _live_transfer(display) as emit,
+        _observed(meter, emit, on_meter),
     ):
         for lane, assigned in groups:
             remaining = [

@@ -145,7 +145,32 @@ def test_archive_next_claims_reports_and_finishes(
     assert states[0] == "archiving"
     assert states[-1] == "done"
     assert server.claims[-1]["percent"] == 100
+    assert server.claims[-1]["agent"].startswith("darsay ")
+    # Between the claim and the boundary the panel itself was reported:
+    # the transfer's first read goes out as soon as the meter opens.
+    reports = [c for c in server.claims if c.get("phase")]
+    assert reports, "no panel report reached the board"
+    first = reports[0]
+    assert first["state"] == "archiving"
+    assert first["files_total"] == len(model_files())
+    assert first["total_bytes"] == sum(len(b) for b in model_files().values())
+    assert first["phase"] in {"starting", "downloading", "verifying"}
+    assert first["agent"].startswith("darsay ")
     assert list(vault.glob("*/*/manifest.json"))
+
+
+def test_archive_next_report_every_zero_keeps_to_the_boundaries(
+    vault, test_provider, board_server, monkeypatch
+):
+    test_provider.add_repo("acme/toy", model_files())
+    server = board_server([{"id": 4, "source": "test:acme/toy", "desire": 6}])
+    monkeypatch.setenv("DARSAY_BOARD_REPORT_EVERY", "0")
+    assert (
+        main(["--vault", str(vault), "archive", "--next", BOARD_URL, "--jobs", "1"])
+        == 0
+    )
+    assert not any(c.get("phase") for c in server.claims)
+    assert [c["state"] for c in server.claims] == ["archiving", "done"]
 
 
 def test_archive_next_skips_rows_claimed_by_others(
@@ -398,7 +423,11 @@ def test_archive_board_flag_refetches_a_have_row_deliberately(
     assert "re-fetching deliberately" in err
     states = [c["state"] for c in server.claims if c["entry_id"] == 1]
     assert states[0] == "archiving" and states[-1] == "done"
-    assert all(c.get("refetch") for c in server.claims if c["state"] == "archiving")
+    # The claim itself is the deliberate act; the panel reports that follow
+    # are the holder's own and need no mark.
+    first = next(c for c in server.claims if c["entry_id"] == 1)
+    assert first.get("refetch") is True
+    assert not any(c.get("refetch") for c in server.claims if c.get("phase"))
 
 
 def test_archive_board_flag_dry_run_releases(vault, test_provider, board_server):

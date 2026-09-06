@@ -299,8 +299,15 @@ def archive(
     confirm=None,
     choose=None,
     resume_scope: bool = False,
+    on_meter=None,
 ) -> Path | None:
     """Archive a source through pin → reconcile → transfer → register.
+
+    ``on_meter(meter, emit)``, when given, is handed the live transfer
+    meter as the panel opens and returns a callable run as it closes —
+    how a claimed board row receives the panel's figures while bytes
+    move (``board.ProgressReporter.watch``). ``emit`` prints above the
+    panel.
 
     A fresh model pin with no explicit ``include`` is classified and
     pinned negatives by default — negatives, everything unclassifiable,
@@ -588,6 +595,7 @@ def archive(
                     shard=shard,
                     max_rate=cap,
                     max_offline=patience,
+                    on_meter=on_meter,
                 )
                 if not plan["complete"]:
                     raise RuntimeError(

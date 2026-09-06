@@ -904,6 +904,20 @@ progress the board renders as a gauge:
 darsay archive --next https://darsay.io/b/<board-id>
 ```
 
+While it runs, the board's row shows what your terminal shows — the
+percent, the bytes, the rate with its sparkline, the time left, the
+files, and the file in flight — reported about once a minute, so
+anyone with the page open watches the download from wherever they are.
+A whole percent, or a change of the panel's word (stalled, offline,
+verifying), is what makes a report; a quiet link still reports every
+five minutes. To report less often, or only at the boundaries:
+
+```toml
+# <vault>/config.toml   (or ~/.config/darsay/config.toml)
+[board]
+report_every = "5m"    # "0" reports only start, pause, and done
+```
+
 Unfinished is the board's word for it: a row already checked off as
 have — by a client reporting done, or by someone on the board page —
 is never picked, even when your own vault does not hold it yet.
